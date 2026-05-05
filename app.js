@@ -905,14 +905,25 @@ function updatePreisHint() {
 }
 
 function genehmigungsweg(gesamt) {
-  let angebote, freigabe;
-  if      (gesamt <   250) { angebote = 'kein Angebot nötig';                         freigabe = 'Einkauf'; }
-  else if (gesamt <   750) { angebote = 'mind. 2 Angebote';                            freigabe = 'Einkauf'; }
-  else if (gesamt <  1500) { angebote = 'mind. 2 Angebote';                            freigabe = 'Einkauf + Verwaltung'; }
-  else if (gesamt < 10000) { angebote = 'mind. 3 Angebote';                            freigabe = 'Einkauf + Verwaltung'; }
-  else if (gesamt < 50000) { angebote = 'mind. 3 Angebote';                            freigabe = 'Einkauf + Verwaltung + GF'; }
-  else                     { angebote = 'Europ. Ausschreibung (mind. 5 Angebote)';     freigabe = 'Einkauf + Verwaltung + GF'; }
-  return `Volumen: ${fmtEuro(gesamt)} · ${angebote} · Freigabe: ${freigabe}`;
+  let stufe, freigabe, angebote;
+  if (gesamt < 1500) {
+    stufe    = 1;
+    freigabe = 'Anforderer Fachabt. + Einkäufer Werk';
+    angebote = gesamt < 250 ? 'kein Angebot nötig' : 'mind. 2 Angebote';
+  } else if (gesamt <= 10000) {
+    stufe    = 2;
+    freigabe = 'Einkäufer Werk + GF & Werkleiter';
+    angebote = 'mind. 2 Angebote';
+  } else if (gesamt <= 50000) {
+    stufe    = 3;
+    freigabe = 'GF & Werkleiter + Einkaufsleitung Holding';
+    angebote = 'mind. 3 Angebote';
+  } else {
+    stufe    = 4;
+    freigabe = 'Einkaufsleitung Holding + GF kfm. Leitung Holding';
+    angebote = 'Europ. Ausschreibung (mind. 5 Angebote)';
+  }
+  return `Stufe ${stufe} · ${fmtEuro(gesamt)} · ${angebote} · Freigabe: ${freigabe}`;
 }
 
 function buildReview() {
