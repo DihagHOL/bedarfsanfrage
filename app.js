@@ -693,9 +693,11 @@ function renderApprovalCard(item) {
 // ── EINKAUF ORDER MODAL ───────────────────────────────────────────────────────
 function openOrderModal(itemId) {
   const item = allItems.find(i => String(i.id) === String(itemId));
-  const orderNr  = getField(item,'Bestellnummer')      || getField(item, resolvedFields['Bestellnummer'])      || '';
-  const lieferd  = getField(item,'Lieferdatum')        || getField(item, resolvedFields['Lieferdatum'])        || '';
-  const tatPreis = getField(item,'TatsaechlicherPreis')|| getField(item, resolvedFields['TatsaechlicherPreis'])|| '';
+  const orderNr    = getField(item,'Bestellnummer')       || getField(item, resolvedFields['Bestellnummer'])       || '';
+  const lieferd    = getField(item,'Lieferdatum')         || getField(item, resolvedFields['Lieferdatum'])         || '';
+  const tatPreis   = getField(item,'TatsaechlicherPreis') || getField(item, resolvedFields['TatsaechlicherPreis']) || '';
+  const termin     = getField(item,'Termin')              || getField(item, resolvedFields['Termin'])              || '';
+  const geschPreis = getField(item,'GeschaetzterPreis')   || getField(item, resolvedFields['GeschaetzterPreis'])   || '';
 
   $id('modal-title').textContent = 'Einkauf-Daten eintragen';
   $id('modal-body').innerHTML = `
@@ -704,11 +706,17 @@ function openOrderModal(itemId) {
       <input type="text" id="m-ordernr" value="${esc(orderNr)}" placeholder="z. B. PO-2025-1234"/>
     </div>
     <div class="form-group" style="margin-bottom:12px">
-      <label>Lieferdatum</label>
+      <label style="display:flex;align-items:center;justify-content:space-between">
+        Lieferdatum
+        ${termin ? `<button type="button" class="btn-prefill" onclick="document.getElementById('m-delivery').value='${termin.slice(0,10)}'">← Aus Anfrage (${fmtDate(termin)})</button>` : ''}
+      </label>
       <input type="date" id="m-delivery" value="${lieferd ? lieferd.slice(0,10) : ''}"/>
     </div>
     <div class="form-group">
-      <label>Tatsächlicher Preis netto (€)</label>
+      <label style="display:flex;align-items:center;justify-content:space-between">
+        Tatsächlicher Preis netto (€)
+        ${geschPreis ? `<button type="button" class="btn-prefill" onclick="document.getElementById('m-price').value='${geschPreis}'">← Aus Anfrage (${fmtEuro(geschPreis)})</button>` : ''}
+      </label>
       <input type="number" id="m-price" value="${tatPreis}" min="0" step="0.01" placeholder="0,00"/>
     </div>`;
   $id('modal-footer').innerHTML = `
@@ -1265,18 +1273,83 @@ function closePanel() {
     $id('split-' + v)?.classList.remove('has-panel');
   });
   panelItemId = null;
+  _vhLoaded = {};
   document.querySelectorAll('.item-card').forEach(c => c.classList.remove('selected'));
 }
 
 function bindPanelEvents(itemId) {
   $id('panel-close')?.addEventListener('click', closePanel);
-  $id('panel-edit')?.addEventListener('click', () => {
-    const item = allItems.find(i => String(i.id) === String(itemId));
-    if (!item) return;
-    $id(`panel-${currentView}-content`).innerHTML = renderPanel(item, true);
-    bindPanelEditEvents(itemId);
-  });
   $id('panel-order')?.addEventListener('click', () => openOrderModal(itemId));
+  $id('panel-history')?.addEventListener('click', () => {
+    const sec = $id('panel-history-section');
+    if (!sec) return;
+    const isOpen = sec.style.display !== 'none';
+    sec.style.display = isOpen ? 'none' : '';
+    $id('panel-history').textContent = isOpen ? '📋 Verlauf' : '📋 Verlauf ▲';
+    if (!isOpen) loadVersionHistory(itemId);
+  });
+}
+
+let _vhLoaded = {};
+async function loadVersionHistory(itemId) {
+  const el = $id('panel-history-body');
+  if (!el) return;
+  if (_vhLoaded[itemId]) return;
+  _vhLoaded[itemId] = true;
+
+  try {
+    const data = await gGet(`/sites/${siteId}/lists/${listId}/items/${itemId}/versions?$expand=fields&$top=50`);
+    const vers = (data.value || []).sort((a,b) => new Date(b.lastModifiedDateTime) - new Date(a.lastModifiedDateTime));
+    if (!vers.length) { el.innerHTML = '<div class="vh-empty">Keine Versionen gefunden.</div>'; return; }
+
+    const statusKey = resolvedFields['Status'] || 'Status';
+    const watchKeys = ['GeschaetzterPreis','TatsaechlicherPreis','Lieferdatum','Bestellnummer','Status']
+      .map(k => resolvedFields[k] || k);
+
+    const rows = vers.map((v, idx) => {
+      const prev   = vers[idx + 1];
+      const status = v.fields?.[statusKey] || '';
+      const by     = v.lastModifiedBy?.user?.displayName || v.lastModifiedBy?.user?.email || 'System';
+      const dt     = fmtDateTime(v.lastModifiedDateTime);
+      const isFirst = idx === vers.length - 1;
+
+      const changes = [];
+      if (isFirst) {
+        changes.push('Anfrage erstellt');
+      } else {
+        for (const k of watchKeys) {
+          const cur = String(v.fields?.[k] ?? '');
+          const prv = String(prev?.fields?.[k] ?? '');
+          if (cur !== prv) {
+            const label = Object.entries(resolvedFields).find(([,v])=>v===k)?.[0] || k;
+            if (k === statusKey) changes.push(`Status: <em>${esc(prv||'Eingereicht')}</em> → <em>${esc(cur||'Eingereicht')}</em>`);
+            else changes.push(`${esc(label)} geändert`);
+          }
+        }
+        if (!changes.length) changes.push('Weitere Felder aktualisiert');
+      }
+
+      const st   = STATUS_STYLES[(status||'').toLowerCase().trim()] || { bg:'#f3f4f6', color:'#6b7280' };
+      const dot  = status?.toLowerCase().includes('freigegeben') ? 'var(--green,#15803d)'
+                 : status?.toLowerCase().includes('abgelehnt')   ? '#b91c1c'
+                 : status?.toLowerCase().includes('prüfung')     ? '#b45309'
+                 : '#6b7280';
+
+      return `<div class="vh-item${isFirst?' vh-first':''}">
+        <div class="vh-line"></div>
+        <div class="vh-dot-wrap"><div class="vh-dot" style="background:${dot}"></div></div>
+        <div class="vh-content">
+          <div class="vh-meta"><span class="vh-by">👤 ${esc(by)}</span><span class="vh-time">${dt}</span></div>
+          <div class="vh-changes">${changes.join(' · ')}</div>
+          ${status ? `<span class="status-badge" style="background:${st.bg};color:${st.color};margin-top:4px;display:inline-block">${esc(status)}</span>` : ''}
+        </div>
+      </div>`;
+    });
+
+    el.innerHTML = `<div class="vh-timeline">${rows.join('')}</div>`;
+  } catch(e) {
+    el.innerHTML = `<div class="vh-error">Verlauf konnte nicht geladen werden.</div>`;
+  }
 }
 
 function bindPanelEditEvents(itemId) {
@@ -1367,11 +1440,8 @@ function renderPanel(item, editMode = false) {
   const lieferd  = gv('Lieferdatum');
   const tatPreis = gv('TatsaechlicherPreis');
 
-  const buttons = editMode
-    ? `<button class="btn btn-primary btn-sm" id="panel-save">Speichern</button>
-       <button class="btn btn-ghost btn-sm" id="panel-cancel">Abbrechen</button>`
-    : `<button class="btn btn-outline btn-sm" id="panel-edit">✏ Bearbeiten</button>
-       <button class="btn btn-outline btn-sm" id="panel-order">📦 Einkauf</button>`;
+  const buttons = `<button class="btn btn-outline btn-sm" id="panel-order">📦 Einkauf</button>
+       <button class="btn btn-outline btn-sm" id="panel-history">📋 Verlauf</button>`;
 
   // Approval inner HTML (reuse logic from renderApprovalCard but without the wrapping card)
   const approvalInner = (() => {
@@ -1450,6 +1520,10 @@ function renderPanel(item, editMode = false) {
         ${lieferd  ? `<div class="pf-row"><span class="pf-label">Lieferdatum</span><span class="pf-val">${fmtDate(lieferd)}</span></div>` : ''}
         ${tatPreis ? `<div class="pf-row"><span class="pf-label">Tatsächl. Preis</span><span class="pf-val">${fmtEuro(tatPreis)}</span></div>` : ''}
         ${!orderNr && !lieferd && !tatPreis ? '<p class="no-order">Noch keine Bestelldaten.</p>' : ''}
+      </div>
+      <div class="pf-section vh-section" id="panel-history-section" style="display:none">
+        <div class="pf-sec-title">Versionsverlauf</div>
+        <div id="panel-history-body"><div class="vh-loading">Lädt…</div></div>
       </div>
     </div>`;
 }
