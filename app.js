@@ -483,37 +483,105 @@ function renderKanban(items) {
 }
 
 // ── LIST VIEWS ────────────────────────────────────────────────────────────────
+let mineStatusFilter = '';
+let mineSortOrder    = 'date-desc';
+
+function myItems() {
+  const myEmail = (account?.username || '').toLowerCase();
+  return allItems.filter(i =>
+    (i.createdBy?.user?.email || '').toLowerCase() === myEmail ||
+    (i.createdBy?.user?.displayName || '').toLowerCase() === (account?.name || '').toLowerCase()
+  );
+}
+
 function renderList(type) {
-  // Populate status filter options once
+  if (type === 'mine') { renderStatusChipsMine(); filterView('mine'); return; }
   const sel = $id(`filter-${type}-status`);
-  if (sel.options.length <= 1) {
+  if (sel && sel.options.length <= 1) {
     const statuses = [...new Set(allItems.map(i => getStatusVal(i)).filter(Boolean))];
     statuses.forEach(s => sel.add(new Option(s, s)));
   }
   filterView(type);
 }
 
+function renderStatusChipsMine() {
+  const el = $id('status-chips-mine');
+  if (!el) return;
+  const mine = myItems();
+  const counts = {};
+  for (const item of mine) {
+    const s = getStatusVal(item) || '';
+    counts[s] = (counts[s] || 0) + 1;
+  }
+  const filteredVol = (mineStatusFilter
+    ? mine.filter(i => (getStatusVal(i)||'') === mineStatusFilter)
+    : mine
+  ).reduce((sum, i) => sum + (parseFloat(getField(i, resolvedFields['GeschaetzterPreis'] || 'GeschaetzterPreis')) || 0), 0);
+
+  const allChip = `<button class="sc-chip${mineStatusFilter==='' ? ' active' : ''}" onclick="setMineFilter('')">
+    <span class="sc-label">Alle</span><span class="sc-count">${mine.length}</span></button>`;
+
+  const statusChips = Object.entries(counts).sort((a,b) => b[1]-a[1]).map(([s, n]) => {
+    const sl = (s||'').toLowerCase().trim();
+    let st = STATUS_STYLES[sl];
+    if (!st) for (const [k, style] of Object.entries(STATUS_STYLES)) { if (sl.includes(k)) { st = style; break; } }
+    st = st || { bg:'#f3f4f6', color:'#374151' };
+    let icon = sl.includes('abgelehnt') ? '✗' : sl.includes('freigegeben') || sl.includes('bestellt') ? '✓'
+             : sl.includes('prüfung') || sl.includes('bearbeitung') ? '⏳' : '📋';
+    const isActive = mineStatusFilter === s;
+    return `<button class="sc-chip${isActive ? ' active' : ''}" style="--sc-bg:${st.bg};--sc-color:${st.color}"
+      onclick="setMineFilter('${s.replace(/'/g,"\\'")}')">
+      <span class="sc-icon">${icon}</span>
+      <span class="sc-label">${esc(s||'Eingereicht')}</span>
+      <span class="sc-count" style="background:${st.bg};color:${st.color}">${n}</span>
+    </button>`;
+  }).join('');
+
+  const vol = `<span class="sc-volume">${fmtEuro(filteredVol)}<small>Volumen</small></span>`;
+  el.innerHTML = allChip + statusChips + vol;
+}
+
+function setMineFilter(status) {
+  mineStatusFilter = (mineStatusFilter === status) ? '' : status;
+  renderStatusChipsMine();
+  filterView('mine');
+}
+
+function setMineSort(val) {
+  mineSortOrder = val;
+  filterView('mine');
+}
+
 function filterView(type) {
   const search = ($id(`search-${type}`)?.value || '').toLowerCase();
-  const status = $id(`filter-${type}-status`)?.value || '';
-  const userName = (account?.name || account?.username || '').toLowerCase();
+  const priceKey = resolvedFields['GeschaetzterPreis'] || 'GeschaetzterPreis';
 
-  let items = [...allItems];
-  if (type === 'mine') {
-    items = items.filter(i => {
-      const author = (getField(i,'Author') || getField(i,'AuthorLookupId') || '').toString().toLowerCase();
-      const creator = (i.createdBy?.user?.displayName || i.createdBy?.user?.email || '').toLowerCase();
-      return author.includes(userName.split(' ')[0]) || creator.includes(userName.split(' ')[0]);
-    });
-  }
+  let items = type === 'mine' ? myItems() : [...allItems];
+
   if (search) items = items.filter(i =>
     (getField(i,'Title')||'').toLowerCase().includes(search) ||
     String(i.id||'').includes(search)
   );
-  if (status) items = items.filter(i => (getStatusVal(i)||'') === status);
+
+  if (type === 'mine' && mineStatusFilter)
+    items = items.filter(i => (getStatusVal(i)||'') === mineStatusFilter);
+  else if (type !== 'mine') {
+    const status = $id(`filter-${type}-status`)?.value || '';
+    if (status) items = items.filter(i => (getStatusVal(i)||'') === status);
+  }
+
+  if (type === 'mine') {
+    switch (mineSortOrder) {
+      case 'date-asc':   items.sort((a,b) => new Date(a.createdDateTime)-new Date(b.createdDateTime)); break;
+      case 'price-desc': items.sort((a,b) => (parseFloat(getField(b,priceKey))||0)-(parseFloat(getField(a,priceKey))||0)); break;
+      case 'price-asc':  items.sort((a,b) => (parseFloat(getField(a,priceKey))||0)-(parseFloat(getField(b,priceKey))||0)); break;
+      case 'status':     items.sort((a,b) => (getStatusVal(a)||'').localeCompare(getStatusVal(b)||'')); break;
+      default:           items.sort((a,b) => new Date(b.createdDateTime)-new Date(a.createdDateTime));
+    }
+  }
 
   const container = $id(`list-${type}`);
-  container.innerHTML = items.length
+  if (container) container.innerHTML = items.length
     ? items.map(i => itemCard(i)).join('')
     : emptyState(type === 'mine' ? 'Sie haben noch keine Anfragen erstellt.' : 'Keine Anfragen gefunden.');
 }
@@ -708,9 +776,9 @@ function openOrderModal(itemId) {
     <div class="form-group" style="margin-bottom:12px">
       <label style="display:flex;align-items:center;justify-content:space-between">
         Lieferdatum
-        ${termin ? `<button type="button" class="btn-prefill" onclick="document.getElementById('m-delivery').value='${termin.slice(0,10)}'">← Aus Anfrage (${fmtDate(termin)})</button>` : ''}
+        ${termin ? `<button type="button" class="btn-prefill" onclick="document.getElementById('m-delivery').value='${toLocalInputDate(termin)}'">← Aus Anfrage (${fmtDate(termin)})</button>` : ''}
       </label>
-      <input type="date" id="m-delivery" value="${lieferd ? lieferd.slice(0,10) : ''}"/>
+      <input type="date" id="m-delivery" value="${toLocalInputDate(lieferd)}"/>
     </div>
     <div class="form-group">
       <label style="display:flex;align-items:center;justify-content:space-between">
@@ -1302,38 +1370,46 @@ async function loadVersionHistory(itemId) {
     const vers = (data.value || []).sort((a,b) => new Date(b.lastModifiedDateTime) - new Date(a.lastModifiedDateTime));
     if (!vers.length) { el.innerHTML = '<div class="vh-empty">Keine Versionen gefunden.</div>'; return; }
 
+    const watchFields = [
+      { key:'Status',              label:'Status',        fmt: v => v || 'Eingereicht' },
+      { key:'GeschaetzterPreis',   label:'Gesch. Preis',  fmt: v => v != null && v !== '' ? fmtEuro(v) : '–' },
+      { key:'TatsaechlicherPreis', label:'Tats. Preis',   fmt: v => v != null && v !== '' ? fmtEuro(v) : '–' },
+      { key:'Lieferdatum',         label:'Lieferdatum',   fmt: v => v ? fmtDate(v) : '–' },
+      { key:'Bestellnummer',       label:'Bestellnr.',    fmt: v => v || '–' },
+      { key:'Prioritaet',          label:'Priorität',     fmt: v => v || '–' },
+      { key:'Termin',              label:'Benötigt bis',  fmt: v => v ? fmtDate(v) : '–' },
+    ].map(f => ({ ...f, col: resolvedFields[f.key] || f.key }));
+
     const statusKey = resolvedFields['Status'] || 'Status';
-    const watchKeys = ['GeschaetzterPreis','TatsaechlicherPreis','Lieferdatum','Bestellnummer','Status']
-      .map(k => resolvedFields[k] || k);
 
     const rows = vers.map((v, idx) => {
-      const prev   = vers[idx + 1];
-      const status = v.fields?.[statusKey] || '';
-      const by     = v.lastModifiedBy?.user?.displayName || v.lastModifiedBy?.user?.email || 'System';
-      const dt     = fmtDateTime(v.lastModifiedDateTime);
+      const prev    = vers[idx + 1];
+      const status  = v.fields?.[statusKey] || '';
+      const by      = v.lastModifiedBy?.user?.displayName || v.lastModifiedBy?.user?.email || 'System';
+      const dt      = fmtDateTime(v.lastModifiedDateTime);
       const isFirst = idx === vers.length - 1;
 
       const changes = [];
       if (isFirst) {
         changes.push('Anfrage erstellt');
       } else {
-        for (const k of watchKeys) {
-          const cur = String(v.fields?.[k] ?? '');
-          const prv = String(prev?.fields?.[k] ?? '');
-          if (cur !== prv) {
-            const label = Object.entries(resolvedFields).find(([,v])=>v===k)?.[0] || k;
-            if (k === statusKey) changes.push(`Status: <em>${esc(prv||'Eingereicht')}</em> → <em>${esc(cur||'Eingereicht')}</em>`);
-            else changes.push(`${esc(label)} geändert`);
+        for (const f of watchFields) {
+          const cur = v.fields?.[f.col];
+          const prv = prev?.fields?.[f.col];
+          if (String(cur ?? '') !== String(prv ?? '')) {
+            const fmtCur = esc(f.fmt(cur));
+            const fmtPrv = esc(f.fmt(prv));
+            changes.push(`${f.label}: <em>${fmtPrv}</em> → <em>${fmtCur}</em>`);
           }
         }
         if (!changes.length) changes.push('Weitere Felder aktualisiert');
       }
 
-      const st   = STATUS_STYLES[(status||'').toLowerCase().trim()] || { bg:'#f3f4f6', color:'#6b7280' };
-      const dot  = status?.toLowerCase().includes('freigegeben') ? 'var(--green,#15803d)'
-                 : status?.toLowerCase().includes('abgelehnt')   ? '#b91c1c'
-                 : status?.toLowerCase().includes('prüfung')     ? '#b45309'
-                 : '#6b7280';
+      const st  = STATUS_STYLES[(status||'').toLowerCase().trim()] || { bg:'#f3f4f6', color:'#6b7280' };
+      const dot = status?.toLowerCase().includes('freigegeben') ? '#15803d'
+                : status?.toLowerCase().includes('abgelehnt')   ? '#b91c1c'
+                : status?.toLowerCase().includes('prüfung')     ? '#b45309'
+                : '#6b7280';
 
       return `<div class="vh-item${isFirst?' vh-first':''}">
         <div class="vh-line"></div>
@@ -1610,6 +1686,11 @@ function fmtEuro(v) {
 function fmtDate(s) {
   if (!s) return '';
   return new Date(s).toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'});
+}
+function toLocalInputDate(s) {
+  if (!s) return '';
+  const d = new Date(s);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 function fmtDateTime(s) {
   if (!s) return '';
