@@ -88,20 +88,19 @@ async function initAuth() {
     cache: { cacheLocation:'localStorage', storeAuthStateInCookie:true }
   });
   await msalApp.initialize();
-  await msalApp.handleRedirectPromise();
+  const r = await msalApp.handleRedirectPromise();
+  if (r) { account = r.account; msalApp.setActiveAccount(r.account); return true; }
   const accounts = msalApp.getAllAccounts();
-  if (accounts.length) { account = accounts[0]; return true; }
+  if (accounts.length) { account = accounts[0]; msalApp.setActiveAccount(accounts[0]); return true; }
   return false;
 }
 
 async function doLogin() {
   $id('boot-btn').style.display = 'none';
-  $id('boot-sub').textContent = 'Anmeldung läuft…';
+  $id('boot-sub').textContent = 'Weiterleitung zur Anmeldung…';
   $id('boot-spinner').style.display = 'block';
   try {
-    const r = await msalApp.loginPopup({ scopes: SCOPES });
-    account = r.account;
-    bootDone();
+    await msalApp.loginRedirect({ scopes: SCOPES });
   } catch(e) {
     $id('boot-err').textContent = e.message;
     $id('boot-spinner').style.display = 'none';
@@ -140,8 +139,13 @@ function doLogout() {
 
 async function getToken() {
   if (!account) throw new Error('Nicht angemeldet');
-  try   { return (await msalApp.acquireTokenSilent({scopes:SCOPES, account})).accessToken; }
-  catch { return (await msalApp.acquireTokenPopup ({scopes:SCOPES, account})).accessToken; }
+  try { return (await msalApp.acquireTokenSilent({scopes:SCOPES, account})).accessToken; }
+  catch(e) {
+    if (e instanceof msal.InteractionRequiredAuthError) {
+      await msalApp.acquireTokenRedirect({scopes:SCOPES});
+    }
+    throw e;
+  }
 }
 
 // ── GRAPH API ────────────────────────────────────────────────────────────────
@@ -298,18 +302,6 @@ function navigate(view, id) {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-  // Popup-Kontext: MSAL leitet nach Login hierher zurück — nur Token verarbeiten, App nicht rendern
-  if (window.opener && window.opener !== window) {
-    const inst = new msal.PublicClientApplication({
-      auth: { clientId: CLIENT_ID, authority: `https://login.microsoftonline.com/${TENANT_ID}`,
-              redirectUri: location.href.split('?')[0].split('#')[0] },
-      cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: true }
-    });
-    await inst.initialize();
-    await inst.handleRedirectPromise();
-    return;
-  }
-
   // Nav clicks
   document.querySelectorAll('.nav-item[data-view]').forEach(a => {
     a.addEventListener('click', e => { e.preventDefault(); navigate(a.dataset.view); });
