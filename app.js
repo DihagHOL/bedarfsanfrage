@@ -329,42 +329,81 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // ── DASHBOARD ─────────────────────────────────────────────────────────────────
+let dashStatusFilter = '';
+
 function renderDashboard() {
-  const total    = allItems.length;
-  const open     = allItems.filter(i => isOpenStatus(getStatusVal(i))).length;
-  const approved = allItems.filter(i => {
-    const s = (getStatusVal(i)||'').toLowerCase();
-    return s.includes('freigegeben') || s.includes('bestellt') || s.includes('erledigt');
-  }).length;
-  const volume   = allItems.reduce((s,i) => s + (parseFloat(getField(i,'GeschaetzterPreis') ||
-    getField(i,resolvedFields['GeschaetzterPreis'])) || 0), 0);
+  renderStatusChips();
+  filterDashboard();
+}
 
-  $id('st-total').textContent    = total;
-  $id('st-open').textContent     = open;
-  $id('st-approved').textContent = approved;
-  $id('st-volume').textContent   = fmtEuro(volume);
+function renderStatusChips() {
+  const el = $id('status-chips');
+  if (!el) return;
 
-  // Populate status filter once
-  const sel = $id('filter-dashboard-status');
-  if (sel && sel.options.length <= 1) {
-    const statuses = [...new Set(allItems.map(i => getStatusVal(i)).filter(Boolean))];
-    statuses.forEach(s => sel.add(new Option(s, s)));
+  // Count per status value
+  const counts = {};
+  let total = 0;
+  let volume = 0;
+  for (const item of allItems) {
+    const s = getStatusVal(item) || '';
+    counts[s] = (counts[s] || 0) + 1;
+    total++;
+    volume += parseFloat(getField(item, resolvedFields['GeschaetzterPreis'] || 'GeschaetzterPreis')) || 0;
   }
+
+  // Build chips: "Alle" + one per status
+  const allChip = `<button class="sc-chip${dashStatusFilter==='' ? ' active' : ''}" onclick="setDashFilter('')">
+    <span class="sc-label">Alle</span>
+    <span class="sc-count">${total}</span>
+  </button>`;
+
+  const statusChips = Object.entries(counts).sort((a,b) => b[1]-a[1]).map(([s, n]) => {
+    const sl = s.toLowerCase().trim();
+    let st = STATUS_STYLES[sl];
+    if (!st) {
+      for (const [k, style] of Object.entries(STATUS_STYLES)) {
+        if (sl.includes(k)) { st = style; break; }
+      }
+    }
+    st = st || { bg:'#f3f4f6', color:'#374151' };
+    let icon = '';
+    if      (sl.includes('abgelehnt') || sl.includes('rejected'))                icon = '✗';
+    else if (sl.includes('freigegeben') || sl.includes('bestellt') || sl.includes('erledigt')) icon = '✓';
+    else if (sl.includes('prüfung') || sl.includes('bearbeitung'))                icon = '⏳';
+    else if (sl.includes('eingereicht') || sl.includes('angefragt'))              icon = '📋';
+    else if (!s)                                                                   icon = '📋';
+    const isActive = dashStatusFilter === s;
+    const labelText = s || 'Eingereicht';
+    return `<button class="sc-chip${isActive ? ' active' : ''}"
+      style="--sc-bg:${st.bg};--sc-color:${st.color}"
+      onclick="setDashFilter('${s.replace(/'/g,"\\'")}')">
+      ${icon ? `<span class="sc-icon">${icon}</span>` : ''}
+      <span class="sc-label">${esc(labelText)}</span>
+      <span class="sc-count" style="background:${st.bg};color:${st.color}">${n}</span>
+    </button>`;
+  }).join('');
+
+  const vol = `<span class="sc-volume">${fmtEuro(volume)}<small>Volumen</small></span>`;
+  el.innerHTML = allChip + statusChips + vol;
+}
+
+function setDashFilter(status) {
+  dashStatusFilter = (dashStatusFilter === status) ? '' : status;
+  renderStatusChips();
   filterDashboard();
 }
 
 function filterDashboard() {
   const search = ($id('search-dashboard')?.value || '').toLowerCase();
-  const status = $id('filter-dashboard-status')?.value || '';
   let items = [...allItems];
   if (search) items = items.filter(i =>
     (getField(i,'Title')||'').toLowerCase().includes(search) || String(i.id||'').includes(search)
   );
-  if (status) items = items.filter(i => (getStatusVal(i)||'') === status);
+  if (dashStatusFilter !== '') items = items.filter(i => (getStatusVal(i)||'') === dashStatusFilter);
   const container = $id('list-dashboard');
   if (container) container.innerHTML = items.length
     ? items.map(i => itemCard(i)).join('')
-    : emptyState('Noch keine Anfragen vorhanden.');
+    : emptyState('Keine Anfragen für diesen Status.');
 }
 
 function isOpenStatus(s) {
