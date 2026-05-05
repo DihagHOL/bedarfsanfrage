@@ -330,9 +330,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 // ── DASHBOARD ─────────────────────────────────────────────────────────────────
 let dashStatusFilter = '';
+let dashSortOrder   = 'date-desc';
 
 function renderDashboard() {
   renderStatusChips();
+  filterDashboard();
+}
+
+function setDashSort(val) {
+  dashSortOrder = val;
   filterDashboard();
 }
 
@@ -340,16 +346,21 @@ function renderStatusChips() {
   const el = $id('status-chips');
   if (!el) return;
 
-  // Count per status value
+  // Count per status from ALL items
   const counts = {};
   let total = 0;
-  let volume = 0;
   for (const item of allItems) {
     const s = getStatusVal(item) || '';
     counts[s] = (counts[s] || 0) + 1;
     total++;
-    volume += parseFloat(getField(item, resolvedFields['GeschaetzterPreis'] || 'GeschaetzterPreis')) || 0;
   }
+
+  // Volume from filtered items only
+  const filteredForVol = dashStatusFilter
+    ? allItems.filter(i => (getStatusVal(i) || '') === dashStatusFilter)
+    : allItems;
+  const volume = filteredForVol.reduce((sum, i) =>
+    sum + (parseFloat(getField(i, resolvedFields['GeschaetzterPreis'] || 'GeschaetzterPreis')) || 0), 0);
 
   // Build chips: "Alle" + one per status
   const allChip = `<button class="sc-chip${dashStatusFilter==='' ? ' active' : ''}" onclick="setDashFilter('')">
@@ -400,6 +411,21 @@ function filterDashboard() {
     (getField(i,'Title')||'').toLowerCase().includes(search) || String(i.id||'').includes(search)
   );
   if (dashStatusFilter !== '') items = items.filter(i => (getStatusVal(i)||'') === dashStatusFilter);
+
+  const priceKey = resolvedFields['GeschaetzterPreis'] || 'GeschaetzterPreis';
+  switch (dashSortOrder) {
+    case 'date-asc':
+      items.sort((a,b) => new Date(a.createdDateTime) - new Date(b.createdDateTime)); break;
+    case 'price-desc':
+      items.sort((a,b) => (parseFloat(getField(b,priceKey))||0) - (parseFloat(getField(a,priceKey))||0)); break;
+    case 'price-asc':
+      items.sort((a,b) => (parseFloat(getField(a,priceKey))||0) - (parseFloat(getField(b,priceKey))||0)); break;
+    case 'status':
+      items.sort((a,b) => (getStatusVal(a)||'').localeCompare(getStatusVal(b)||'')); break;
+    default: // date-desc
+      items.sort((a,b) => new Date(b.createdDateTime) - new Date(a.createdDateTime));
+  }
+
   const container = $id('list-dashboard');
   if (container) container.innerHTML = items.length
     ? items.map(i => itemCard(i)).join('')
@@ -1107,18 +1133,18 @@ function itemCard(item) {
   const created = item.createdDateTime ? fmtDate(item.createdDateTime) : '';
   const creator = item.createdBy?.user?.displayName || item.createdBy?.user?.email || '';
   const sel     = panelItemId === String(item.id) ? ' selected' : '';
-  const appr    = getApprovalSummary(item);
 
   return `
     <div class="item-card${sel}" data-id="${item.id}" onclick="openPanel('${item.id}')">
       <div class="ic-top">
-        <div class="ic-title">${prioDot(prio)}${title}</div>
+        <div class="ic-title">${prioDot(prio)}${cleanTitle(getField(item,'Title'))}</div>
         <div class="ic-topright">
-          ${preis ? `<span class="ic-price">${fmtEuro(preis)}</span>` : ''}
+          <span class="ic-price">${preis ? fmtEuro(preis) : '–'}</span>
           ${statusBadge(status)}
         </div>
       </div>
       <div class="ic-tags">
+        <span class="ic-tag ic-banf">#${item.id}</span>
         ${wg      ? `<span class="ic-tag ic-wg">${esc(wg)}</span>` : ''}
         ${beschl  ? `<span class="ic-tag">${beschlShort(beschl)}</span>` : ''}
         ${menge && me ? `<span class="ic-tag">⚖ ${esc(menge)} ${esc(me)}</span>` : ''}
@@ -1128,7 +1154,6 @@ function itemCard(item) {
       </div>
       <div class="ic-footer">
         <span class="ic-by">${creator ? `👤 ${esc(creator)}` : ''} ${created ? `· ${created}` : ''}</span>
-        ${appr}
       </div>
     </div>`;
 }
@@ -1451,9 +1476,17 @@ function getField(item, key) {
   return item.fields[key] ?? null;
 }
 
+function cleanTitle(t) {
+  if (!t) return '–';
+  return t
+    .replace(/^Einkauf\s*[-–]\s*BANF\s*#\d+\s*[-–]\s*/i, '')
+    .replace(/\s*[-–]\s*[\d.,]+\s*€\s*$/i, '')
+    .trim() || t;
+}
+
 function statusBadge(s) {
-  if (!s) return '';
-  const sl = s.toLowerCase().trim();
+  const label = s || 'Eingereicht';
+  const sl = label.toLowerCase().trim();
   let st = STATUS_STYLES[sl];
   if (!st) {
     for (const [key, style] of Object.entries(STATUS_STYLES)) {
@@ -1466,7 +1499,7 @@ function statusBadge(s) {
   else if (sl.includes('freigegeben') || sl.includes('bestellt') || sl.includes('erledigt')) icon = '✓ ';
   else if (sl.includes('prüfung') || sl.includes('bearbeitung'))               icon = '⏳ ';
   else if (sl.includes('eingereicht') || sl.includes('angefragt'))             icon = '📋 ';
-  return `<span class="status-badge" style="background:${st.bg};color:${st.color}">${icon}${esc(s)}</span>`;
+  return `<span class="status-badge" style="background:${st.bg};color:${st.color}">${icon}${esc(label)}</span>`;
 }
 
 function prioTag(p) {
@@ -1477,9 +1510,12 @@ function prioTag(p) {
 }
 
 function prioDot(p) {
-  if (!p || p.toLowerCase() === 'normal') return '';
-  const c = p.toLowerCase() === 'dringend' ? '#ef4444' : '#f59e0b';
-  return `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${c};margin-right:5px;vertical-align:middle"></span>`;
+  const pl = (p || '').toLowerCase();
+  let c;
+  if      (pl.includes('hoch') || pl.includes('dringend')) c = '#ef4444';
+  else if (pl.includes('mittel'))                          c = '#f59e0b';
+  else                                                     c = '#22c55e';
+  return `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${c};margin-right:5px;vertical-align:middle;flex-shrink:0"></span>`;
 }
 
 function fmtEuro(v) {

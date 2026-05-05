@@ -287,7 +287,8 @@ body {
   font-size: .72rem; padding: 2px 7px; border-radius: 999px;
   background: #f3f4f6; color: #374151; white-space: nowrap;
 }
-.ic-tag.ic-wg { background: #eff3ff; color: #3730a3; }
+.ic-tag.ic-wg   { background: #eff3ff; color: #3730a3; }
+.ic-tag.ic-banf { background: #f1f5f9; color: #64748b; font-weight: 600; }
 
 .ic-footer { display: flex; align-items: center; gap: 8px; font-size: .72rem; color: #9ca3af; }
 .ic-by { flex: 1; }
@@ -354,10 +355,12 @@ textarea.pf-input { resize: vertical; min-height: 52px; }
 }
 .search-box svg { width: 15px; height: 15px; color: #9ca3af; flex-shrink: 0; }
 .search-box input { border: none; outline: none; font-size: .875rem; background: transparent; width: 100%; }
-.view-toolbar select {
+.view-toolbar select, .sort-select {
   border: 1px solid #d1d5db; border-radius: 8px;
   padding: 7px 10px; font-size: .82rem; background: #fff; cursor: pointer;
+  color: #374151; outline: none;
 }
+.sort-select:focus { border-color: #1a56db; }
 
 /* ── Wizard ── */
 .wizard-wrap {
