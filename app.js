@@ -1366,37 +1366,43 @@ async function loadVersionHistory(itemId) {
   _vhLoaded[itemId] = true;
 
   try {
-    const data = await gGet(`/sites/${siteId}/lists/${listId}/items/${itemId}/versions?$expand=fields&$top=50`);
+    const data = await gGet(`/sites/${siteId}/lists/${listId}/items/${itemId}/versions?$expand=fields($select=*)&$top=50`);
     const vers = (data.value || []).sort((a,b) => new Date(b.lastModifiedDateTime) - new Date(a.lastModifiedDateTime));
     if (!vers.length) { el.innerHTML = '<div class="vh-empty">Keine Versionen gefunden.</div>'; return; }
 
-    // Helper: SP returns Choice fields as {Value:"..."}, Lookup as {LookupValue:"..."}
+    // Helper: SP Choice → {Value:...}, Lookup → {LookupValue:...}
     const spVal = v => {
       if (v === null || v === undefined) return '';
-      if (typeof v === 'object') return String(v.Value ?? v.LookupValue ?? JSON.stringify(v));
+      if (typeof v === 'object') return String(v.Value ?? v.LookupValue ?? '');
       return String(v);
     };
-    const fmtVH = (key, v) => {
+    const fmtVH = (k, v) => {
       const s = spVal(v);
       if (!s) return '–';
-      if (/preis/i.test(key))           return fmtEuro(parseFloat(s)) || s;
-      if (/datum|termin/i.test(key))    return fmtDate(s);
-      if (/menge/i.test(key) && !isNaN(s)) return s;
+      if (/preis/i.test(k))              return fmtEuro(parseFloat(s)) || s;
+      if (/datum|termin|ben.?tigt/i.test(k)) return fmtDate(s);
       return s;
     };
 
-    // Build watchFields from ALL form + einkauf fields + Status
-    const watchFields = [
-      { key:'Status', label:'Status' },
-      ...FORM_FIELDS,
-      ...EINKAUF_FIELDS,
-    ].map(f => ({ key: f.key, label: f.label, col: resolvedFields[f.key] || f.key }));
+    // Reverse map: any known SP column name → display label
+    const labelMap = { Status:'Status' };
+    for (const f of [...FORM_FIELDS, ...EINKAUF_FIELDS]) {
+      labelMap[f.key] = f.label;
+      const col = resolvedFields[f.key];
+      if (col) labelMap[col] = f.label;
+    }
+
+    // Fields to always skip
+    const skipKey = k =>
+      SYSTEM_FIELDS.has(k) || k.endsWith('LookupId') ||
+      k.startsWith('@') || k.startsWith('_') ||
+      /^(id|Edit|Attachments|ContentType|AppAuthor|AppEditor|LinkTitle|ComplianceAsset)$/i.test(k);
 
     const statusKey = resolvedFields['Status'] || 'Status';
 
     const rows = vers.map((v, idx) => {
       const prev    = vers[idx + 1];
-      const status  = v.fields?.[statusKey] || '';
+      const status  = spVal(v.fields?.[statusKey]);
       const by      = v.lastModifiedBy?.user?.displayName || v.lastModifiedBy?.user?.email || 'System';
       const dt      = fmtDateTime(v.lastModifiedDateTime);
       const isFirst = idx === vers.length - 1;
@@ -1405,16 +1411,19 @@ async function loadVersionHistory(itemId) {
       if (isFirst) {
         changes.push('Anfrage erstellt');
       } else {
-        for (const f of watchFields) {
-          const cur = v.fields?.[f.col];
-          const prv = prev?.fields?.[f.col];
-          if (spVal(cur) !== spVal(prv)) {
-            const fmtCur = esc(fmtVH(f.key, cur));
-            const fmtPrv = esc(fmtVH(f.key, prv));
-            changes.push(`${esc(f.label)}: <em>${fmtPrv}</em> → <em>${fmtCur}</em>`);
-          }
+        const allKeys = new Set([
+          ...Object.keys(v.fields || {}),
+          ...Object.keys(prev?.fields || {}),
+        ]);
+        for (const k of allKeys) {
+          if (skipKey(k)) continue;
+          const cur = v.fields?.[k];
+          const prv = prev?.fields?.[k];
+          if (spVal(cur) === spVal(prv)) continue;
+          const label = labelMap[k] || k;
+          changes.push(`${esc(label)}: <em>${esc(fmtVH(k, prv))}</em> → <em>${esc(fmtVH(k, cur))}</em>`);
         }
-        if (!changes.length) changes.push('Weitere Felder aktualisiert');
+        if (!changes.length) changes.push('Systemfelder aktualisiert');
       }
 
       const st  = STATUS_STYLES[(status||'').toLowerCase().trim()] || { bg:'#f3f4f6', color:'#6b7280' };
