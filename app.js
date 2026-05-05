@@ -1370,15 +1370,27 @@ async function loadVersionHistory(itemId) {
     const vers = (data.value || []).sort((a,b) => new Date(b.lastModifiedDateTime) - new Date(a.lastModifiedDateTime));
     if (!vers.length) { el.innerHTML = '<div class="vh-empty">Keine Versionen gefunden.</div>'; return; }
 
+    // Helper: SP returns Choice fields as {Value:"..."}, Lookup as {LookupValue:"..."}
+    const spVal = v => {
+      if (v === null || v === undefined) return '';
+      if (typeof v === 'object') return String(v.Value ?? v.LookupValue ?? JSON.stringify(v));
+      return String(v);
+    };
+    const fmtVH = (key, v) => {
+      const s = spVal(v);
+      if (!s) return '–';
+      if (/preis/i.test(key))           return fmtEuro(parseFloat(s)) || s;
+      if (/datum|termin/i.test(key))    return fmtDate(s);
+      if (/menge/i.test(key) && !isNaN(s)) return s;
+      return s;
+    };
+
+    // Build watchFields from ALL form + einkauf fields + Status
     const watchFields = [
-      { key:'Status',              label:'Status',        fmt: v => v || 'Eingereicht' },
-      { key:'GeschaetzterPreis',   label:'Gesch. Preis',  fmt: v => v != null && v !== '' ? fmtEuro(v) : '–' },
-      { key:'TatsaechlicherPreis', label:'Tats. Preis',   fmt: v => v != null && v !== '' ? fmtEuro(v) : '–' },
-      { key:'Lieferdatum',         label:'Lieferdatum',   fmt: v => v ? fmtDate(v) : '–' },
-      { key:'Bestellnummer',       label:'Bestellnr.',    fmt: v => v || '–' },
-      { key:'Prioritaet',          label:'Priorität',     fmt: v => v || '–' },
-      { key:'Termin',              label:'Benötigt bis',  fmt: v => v ? fmtDate(v) : '–' },
-    ].map(f => ({ ...f, col: resolvedFields[f.key] || f.key }));
+      { key:'Status', label:'Status' },
+      ...FORM_FIELDS,
+      ...EINKAUF_FIELDS,
+    ].map(f => ({ key: f.key, label: f.label, col: resolvedFields[f.key] || f.key }));
 
     const statusKey = resolvedFields['Status'] || 'Status';
 
@@ -1396,10 +1408,10 @@ async function loadVersionHistory(itemId) {
         for (const f of watchFields) {
           const cur = v.fields?.[f.col];
           const prv = prev?.fields?.[f.col];
-          if (String(cur ?? '') !== String(prv ?? '')) {
-            const fmtCur = esc(f.fmt(cur));
-            const fmtPrv = esc(f.fmt(prv));
-            changes.push(`${f.label}: <em>${fmtPrv}</em> → <em>${fmtCur}</em>`);
+          if (spVal(cur) !== spVal(prv)) {
+            const fmtCur = esc(fmtVH(f.key, cur));
+            const fmtPrv = esc(fmtVH(f.key, prv));
+            changes.push(`${esc(f.label)}: <em>${fmtPrv}</em> → <em>${fmtCur}</em>`);
           }
         }
         if (!changes.length) changes.push('Weitere Felder aktualisiert');
