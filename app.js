@@ -298,6 +298,18 @@ function navigate(view, id) {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+  // Popup-Kontext: MSAL leitet nach Login hierher zurück — nur Token verarbeiten, App nicht rendern
+  if (window.opener && window.opener !== window) {
+    const inst = new msal.PublicClientApplication({
+      auth: { clientId: CLIENT_ID, authority: `https://login.microsoftonline.com/${TENANT_ID}`,
+              redirectUri: location.href.split('?')[0].split('#')[0] },
+      cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: true }
+    });
+    await inst.initialize();
+    await inst.handleRedirectPromise();
+    return;
+  }
+
   // Nav clicks
   document.querySelectorAll('.nav-item[data-view]').forEach(a => {
     a.addEventListener('click', e => { e.preventDefault(); navigate(a.dataset.view); });
