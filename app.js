@@ -253,7 +253,7 @@ async function loadItems(showToast = true) {
     else if (currentView === 'mine')  renderList('mine');
     else if (currentView === 'all')   renderList('all');
     // Refresh open panel
-    if (panelItemId && ['mine','all'].includes(currentView)) {
+    if (panelItemId && ['mine','all','dashboard'].includes(currentView)) {
       const pi = allItems.find(i => String(i.id) === panelItemId);
       if (pi) { $id(`panel-${currentView}-content`).innerHTML = renderPanel(pi); bindPanelEvents(panelItemId); }
     }
@@ -344,8 +344,27 @@ function renderDashboard() {
   $id('st-approved').textContent = approved;
   $id('st-volume').textContent   = fmtEuro(volume);
 
-  // Kanban board grouped by status
-  $id('dash-kanban').innerHTML = renderKanban(allItems);
+  // Populate status filter once
+  const sel = $id('filter-dashboard-status');
+  if (sel && sel.options.length <= 1) {
+    const statuses = [...new Set(allItems.map(i => getStatusVal(i)).filter(Boolean))];
+    statuses.forEach(s => sel.add(new Option(s, s)));
+  }
+  filterDashboard();
+}
+
+function filterDashboard() {
+  const search = ($id('search-dashboard')?.value || '').toLowerCase();
+  const status = $id('filter-dashboard-status')?.value || '';
+  let items = [...allItems];
+  if (search) items = items.filter(i =>
+    (getField(i,'Title')||'').toLowerCase().includes(search) || String(i.id||'').includes(search)
+  );
+  if (status) items = items.filter(i => (getStatusVal(i)||'') === status);
+  const container = $id('list-dashboard');
+  if (container) container.innerHTML = items.length
+    ? items.map(i => itemCard(i)).join('')
+    : emptyState('Noch keine Anfragen vorhanden.');
 }
 
 function isOpenStatus(s) {
@@ -981,7 +1000,17 @@ async function submitRequest() {
 
     if (!fields['Title']) { toast('Titel fehlt.', 'error'); btn.disabled=false; btn.textContent='✓ Anfrage einreichen'; return; }
 
-    const skipped = await postRetry(`/sites/${siteId}/lists/${listId}/items`, fields);
+    let skipped;
+    try {
+      skipped = await postRetry(`/sites/${siteId}/lists/${listId}/items`, fields);
+    } catch(e404) {
+      if (!e404.message.includes('404')) throw e404;
+      // Site/list IDs may have changed — re-discover and retry once
+      toast('SharePoint-IDs werden aktualisiert…', 'info');
+      await discoverSP();
+      const fields2 = buildFields(d, FORM_FIELDS);
+      skipped = await postRetry(`/sites/${siteId}/lists/${listId}/items`, fields2);
+    }
 
     if (skipped.length) {
       // Map SP column names back to human-readable field labels
@@ -1140,7 +1169,7 @@ function compactRow(item) {
 
 // ── SPLIT PANEL ───────────────────────────────────────────────────────────────
 function openPanel(itemId) {
-  if (!['mine','all'].includes(currentView)) { navigate('detail', itemId); return; }
+  if (!['mine','all','dashboard'].includes(currentView)) { navigate('detail', itemId); return; }
   panelItemId = String(itemId);
   const item  = allItems.find(i => String(i.id) === panelItemId);
   if (!item) return;
@@ -1156,7 +1185,7 @@ function openPanel(itemId) {
 }
 
 function closePanel() {
-  ['mine','all'].forEach(v => {
+  ['mine','all','dashboard'].forEach(v => {
     $id('panel-' + v)?.classList.add('hidden');
     $id('split-' + v)?.classList.remove('has-panel');
   });
