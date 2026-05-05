@@ -570,6 +570,71 @@ textarea.pf-input { resize: vertical; min-height: 52px; }
 @keyframes toastIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
 
 
+/* ── Kanban Board ── */
+.kb-board {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 14px 16px 16px;
+  scrollbar-width: thin;
+}
+.kb-board::-webkit-scrollbar { height: 5px; }
+.kb-board::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+
+.kb-col {
+  flex: 1;
+  min-width: 145px;
+  max-width: 220px;
+  background: var(--kb-bg, #f9fafb);
+  border: 1.5px solid var(--kb-border, #e5e9ef);
+  border-radius: 11px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.kb-col-hdr {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 10px 7px;
+  background: var(--kb-bg, #f9fafb);
+  border-bottom: 1px solid var(--kb-border, #e5e9ef);
+  position: sticky;
+  top: 0;
+}
+.kb-col-icon  { font-size: .82rem; }
+.kb-col-label { font-size: .75rem; font-weight: 700; flex: 1; color: #374151; }
+.kb-col-count {
+  font-size: .7rem; font-weight: 700;
+  padding: 1px 7px; border-radius: 999px;
+  border: 1.5px solid;
+  line-height: 1.6;
+}
+.kb-col-body  { display: flex; flex-direction: column; gap: 0; padding: 6px 6px 8px; flex: 1; }
+
+.kb-mini {
+  background: #fff;
+  border: 1px solid #e5e9ef;
+  border-radius: 7px;
+  padding: 7px 9px;
+  margin-bottom: 5px;
+  cursor: pointer;
+  transition: box-shadow .15s, border-color .15s;
+}
+.kb-mini:hover { box-shadow: 0 2px 8px rgba(0,0,0,.09); border-color: #c7d0e0; }
+.kb-mini:last-child { margin-bottom: 0; }
+.kb-mini-title { font-size: .76rem; font-weight: 600; color: #1e2939; line-height: 1.3; margin-bottom: 3px; }
+.kb-mini-wg   { font-size: .68rem; color: #3730a3; background: #eff3ff; border-radius: 4px; padding: 1px 5px; display: inline-block; margin-bottom: 3px; }
+.kb-mini-foot { font-size: .67rem; color: #9ca3af; }
+.kb-empty     { font-size: .75rem; color: #c4c9d4; text-align: center; padding: 10px 0; }
+.kb-more      { font-size: .72rem; color: #6b7280; text-align: center; padding: 4px 0; cursor: default; }
+
+/* ── TID match hint ── */
+.tid-match   { margin-top: 5px; font-size: .8rem; border-radius: 6px; padding: 5px 10px; background: #f0f9ff; }
+.tid-ok      { color: #15803d; font-weight: 600; }
+.tid-wg      { color: #6b7280; margin-left: 8px; }
+.tid-miss    { color: #b45309; }
+
 /* ── Responsive ── */
 @media (max-width: 960px) {
   .sidebar { transform: translateX(-100%); }

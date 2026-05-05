@@ -91,13 +91,13 @@
         </div>
 
         <div class="dash-cols">
-          <!-- Letzte Anfragen -->
+          <!-- Bedarfsübersicht (Kanban) -->
           <div class="card">
             <div class="card-header">
-              <h2>Letzte Anfragen</h2>
+              <h2>Bedarfsübersicht</h2>
               <button class="btn btn-sm btn-primary" data-view="new">+ Neue Anfrage</button>
             </div>
-            <div id="dash-recent"></div>
+            <div id="dash-kanban"></div>
           </div>
 
           <!-- Genehmigungsprozess (Stepper + Schwellwerte) -->
@@ -156,6 +156,14 @@
             <p class="step-hint">Was wird benötigt und warum?</p>
             <div class="form-grid">
               <div class="form-group full">
+                <label>Artikelnummer / TID
+                  <span class="tooltip-icon" title="Artikelnummer aus dem SAP/RGU-Stamm (z. B. 4001-00010). Bezeichnung und Warengruppe werden automatisch eingetragen.">?</span>
+                </label>
+                <input type="text" id="f-Artikelnummer" placeholder="z. B. 4001-00010" oninput="lookupTID(this.value)" autocomplete="off"/>
+                <div class="tid-match" id="tid-match" style="display:none"></div>
+                <div class="field-hint" id="hint-Artikelnummer"></div>
+              </div>
+              <div class="form-group full">
                 <label>Bezeichnung / Titel <span class="req">*</span></label>
                 <input type="text" id="f-Title" placeholder="z. B. Bürostühle ergonomisch, Schrauben M8 × 50 …"/>
                 <div class="field-hint" id="hint-Title"></div>
@@ -169,15 +177,30 @@
                 <label>Warengruppe <span class="req">*</span></label>
                 <select id="f-Warengruppe">
                   <option value="">– bitte wählen –</option>
-                  <option>Bürobedarf &amp; Büroausstattung</option>
-                  <option>IT &amp; Elektronik</option>
-                  <option>Werkzeug &amp; Maschinen</option>
-                  <option>Rohstoffe &amp; Materialien</option>
-                  <option>Dienstleistungen</option>
-                  <option>Fahrzeuge &amp; Transport</option>
-                  <option>Gebäude &amp; Infrastruktur</option>
-                  <option>Schutzausrüstung (PSA)</option>
-                  <option>Sonstiges</option>
+                  <option>Schrott</option>
+                  <option>Legierungen</option>
+                  <option>Kaufteile</option>
+                  <option>Kaufteile Formerei (Kühlm. ..)</option>
+                  <option>Formstoffkomponenten</option>
+                  <option>Eingußsysteme</option>
+                  <option>exotherme Kappen (Speiser)</option>
+                  <option>Gießfilter</option>
+                  <option>Kerne (bez. Kerne f. Gießerei)</option>
+                  <option>metallurgische Zusatzstoffe</option>
+                  <option>Hilfsstoffe Gießerei</option>
+                  <option>Feuerfestmaterial Ofen/Pfannen</option>
+                  <option>Kohleprodukte (Grafitelektr., Aufk...)</option>
+                  <option>Ersatzteile</option>
+                  <option>Befestigungsteile</option>
+                  <option>Schleif- und Fräsmittel</option>
+                  <option>Strahlmittel</option>
+                  <option>Werkzeug</option>
+                  <option>Arbeitsschutzmittel</option>
+                  <option>Schweißbedarf</option>
+                  <option>Gemeinkostenmaterial</option>
+                  <option>Technische Gase</option>
+                  <option>Treibstoffe, Öle, Fette</option>
+                  <option>sonst. Hilfs- u. Betriebsstoffe</option>
                 </select>
                 <div class="field-hint" id="hint-Warengruppe"></div>
               </div>
@@ -211,9 +234,13 @@
                 <label>Mengeneinheit <span class="req">*</span></label>
                 <select id="f-Mengeneinheit">
                   <option value="">– bitte wählen –</option>
-                  <option>Stück</option><option>kg</option><option>Liter</option>
-                  <option>m</option><option>m²</option><option>Paket</option>
-                  <option>Karton</option><option>Palette</option><option>Stunden</option>
+                  <option>Lagereinheiten</option>
+                  <option>kg</option>
+                  <option>Stück</option>
+                  <option>Anzahl</option>
+                  <option>m</option>
+                  <option>Paar</option>
+                  <option>Liter</option>
                 </select>
                 <div class="field-hint" id="hint-Mengeneinheit"></div>
               </div>
@@ -270,13 +297,6 @@
                   </label>
                 </div>
                 <div class="field-hint" id="hint-Beschaffungslogik"></div>
-              </div>
-              <div class="form-group">
-                <label>Nummernangaben / Artikelnummer
-                  <span class="tooltip-icon" title="Materialnummer aus SAP/RQU für bestandsgeführte Artikel. Bei neuen Materialien: vorläufige Bezeichnung oder Lieferanten-Artikelnummer.">?</span>
-                </label>
-                <input type="text" id="f-Artikelnummer" placeholder="z. B. M-4711 oder SAP-Nr."/>
-                <div class="field-hint" id="hint-Artikelnummer"></div>
               </div>
               <div class="form-group">
                 <label>Lieferant 1</label>

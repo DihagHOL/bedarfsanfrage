@@ -24,8 +24,8 @@ const FORM_FIELDS = [
   { key:'Mindestlagermenge', label:'Mindestlagermenge',            step:2, alsoTry:['MinStock','MinLager'] },
   { key:'Termin',            label:'Benötigt bis',                 step:2, required:true, alsoTry:['Deadline','DueDate','Ben_x00f6_tigtBis'] },
   // Step 3: Beschaffung
+  { key:'Artikelnummer',     label:'Artikelnummer / TID',           step:1, alsoTry:['MaterialNumber','ItemNumber'] },
   { key:'Beschaffungslogik', label:'Beschaffungsart',              step:3, required:true, alsoTry:['Materialtyp','ProcurementType'] },
-  { key:'Artikelnummer',     label:'Artikelnummer / Nummernangaben',step:3,alsoTry:['MaterialNumber','ItemNumber'] },
   { key:'Lieferant',         label:'Lieferant 1',                  step:3, alsoTry:['Vendor','Supplier'] },
   { key:'Lieferant2',        label:'Lieferant 2 (Alternative)',    step:3, alsoTry:['Vendor2','Supplier2','Lieferant_2'] },
   { key:'Lieferant3',        label:'Lieferant 3 (Alternative)',    step:3, alsoTry:['Vendor3','Supplier3','Lieferant_3'] },
@@ -61,6 +61,11 @@ const SYSTEM_FIELDS = new Set([
   'ItemChildCount','FolderChildCount','_UIVersionString','ComplianceAssetId',
   'OData__ColorTag','AppAuthorLookupId','AppEditorLookupId'
 ]);
+
+// ── ARTIKEL-STAMMDATEN (TID → Bezeichnung / Warengruppe) ─────────────────────
+const TID_MAP = {
+};
+
 
 // ── STATE ───────────────────────────────────────────────────────────────────
 let msalApp, account;
@@ -339,17 +344,58 @@ function renderDashboard() {
   $id('st-approved').textContent = approved;
   $id('st-volume').textContent   = fmtEuro(volume);
 
-  // Last 10 items as compact dashboard rows
-  const recent = allItems.slice(0, 10);
-  $id('dash-recent').innerHTML = recent.length
-    ? recent.map(i => compactRow(i)).join('')
-    : emptyState('Noch keine Anfragen vorhanden');
+  // Kanban board grouped by status
+  $id('dash-kanban').innerHTML = renderKanban(allItems);
 }
 
 function isOpenStatus(s) {
-  if (!s) return true; // no status = freshly submitted, counts as open
+  if (!s) return true;
   const sl = s.toLowerCase();
   return sl.includes('eingereicht') || sl.includes('prüfung') || sl.includes('offen');
+}
+
+const KANBAN_COLS = [
+  { id:'eingereicht', label:'Eingereicht',  icon:'📋', match: s => !s || /eingereicht|angefragt|offen/.test(s.toLowerCase()),  bg:'#eff6ff', border:'#bfdbfe', dot:'#1d4ed8' },
+  { id:'pruefung',    label:'In Prüfung',   icon:'⏳', match: s => /prüfung|bearbeitung/.test((s||'').toLowerCase()),           bg:'#fffbeb', border:'#fde68a', dot:'#b45309' },
+  { id:'freigegeben', label:'Freigegeben',  icon:'✓',  match: s => /freigegeben/.test((s||'').toLowerCase()),                  bg:'#f0fdf4', border:'#bbf7d0', dot:'#15803d' },
+  { id:'bestellt',    label:'Bestellt',     icon:'📦', match: s => /bestellt|erledigt/.test((s||'').toLowerCase()),             bg:'#faf5ff', border:'#e9d5ff', dot:'#7e22ce' },
+  { id:'abgelehnt',   label:'Abgelehnt',   icon:'✗',  match: s => /abgelehnt|rejected/.test((s||'').toLowerCase()),            bg:'#fef2f2', border:'#fecaca', dot:'#b91c1c' },
+];
+
+function renderKanban(items) {
+  if (!items.length) return `<div style="padding:24px 18px;color:#9ca3af;font-size:.88rem">Noch keine Anfragen vorhanden.</div>`;
+  const cols = KANBAN_COLS.map(col => ({
+    ...col,
+    items: items.filter(i => col.match(getStatusVal(i)))
+  }));
+  return `<div class="kb-board">` +
+    cols.map(col => {
+      const cards = col.items.slice(0, 15).map(item => {
+        const title  = getField(item,'Title') || '–';
+        const preis  = parseFloat(getField(item, resolvedFields['GeschaetzterPreis'] || 'GeschaetzterPreis')) || null;
+        const wg     = getField(item, resolvedFields['Warengruppe'] || 'Warengruppe') || '';
+        const created = item.createdDateTime ? fmtDate(item.createdDateTime) : '';
+        return `<div class="kb-mini" onclick="navigate('detail','${item.id}')">
+          <div class="kb-mini-title">${esc(title)}</div>
+          ${wg ? `<div class="kb-mini-wg">${esc(wg)}</div>` : ''}
+          <div class="kb-mini-foot">#${item.id}${preis ? ` · ${fmtEuro(preis)}` : ''}${created ? ` · ${created}` : ''}</div>
+        </div>`;
+      }).join('');
+      const moreCount = col.items.length - 15;
+      return `
+        <div class="kb-col" style="--kb-border:${col.border};--kb-bg:${col.bg}">
+          <div class="kb-col-hdr">
+            <span class="kb-col-icon">${col.icon}</span>
+            <span class="kb-col-label">${col.label}</span>
+            <span class="kb-col-count" style="background:${col.bg};color:${col.dot};border-color:${col.border}">${col.items.length}</span>
+          </div>
+          <div class="kb-col-body">
+            ${cards || `<div class="kb-empty">–</div>`}
+            ${moreCount > 0 ? `<div class="kb-more">+${moreCount} weitere</div>` : ''}
+          </div>
+        </div>`;
+    }).join('') +
+  `</div>`;
 }
 
 // ── LIST VIEWS ────────────────────────────────────────────────────────────────
@@ -627,6 +673,42 @@ async function saveOrderData(itemId) {
 }
 
 // ── WIZARD ────────────────────────────────────────────────────────────────────
+function lookupTID(val) {
+  const tid = (val || '').trim().toUpperCase();
+  const matchEl = $id('tid-match');
+  // Normalize: user might type "4001-00010" or "400100010" — try exact then padded
+  const hit = TID_MAP[tid] || TID_MAP[tid.replace(/^(\d{4})(\d{5})$/, '$1-$2')] || null;
+  if (hit) {
+    // Auto-fill Bezeichnung (Title) and Warengruppe
+    const titleEl = $id('f-Title');
+    const wgEl    = $id('f-Warengruppe');
+    if (titleEl && !titleEl.dataset.manual) titleEl.value = hit.b;
+    if (wgEl) {
+      // Try to select matching option
+      let found = false;
+      for (const opt of wgEl.options) {
+        if (opt.value === hit.w) { wgEl.value = hit.w; found = true; break; }
+      }
+      if (!found) {
+        const newOpt = new Option(hit.w, hit.w);
+        wgEl.add(newOpt);
+        wgEl.value = hit.w;
+      }
+    }
+    if (matchEl) {
+      matchEl.innerHTML = `<span class="tid-ok">✓ ${esc(hit.b)}</span> <span class="tid-wg">${esc(hit.w)}</span>`;
+      matchEl.style.display = 'block';
+    }
+  } else if (tid.length >= 4) {
+    if (matchEl) {
+      matchEl.innerHTML = '<span class="tid-miss">Artikelnummer nicht im Stamm – bitte Bezeichnung und Warengruppe manuell eintragen.</span>';
+      matchEl.style.display = 'block';
+    }
+  } else {
+    if (matchEl) matchEl.style.display = 'none';
+  }
+}
+
 function initWizard() {
   wizardData = {};
   showStep(1);
@@ -687,6 +769,7 @@ function wNext(step) {
       Beschreibung: $id('f-Beschreibung').value.trim(),
       Warengruppe:  wg,
       Prioritaet:   $id('f-Prioritaet').value,
+      Artikelnummer: $id('f-Artikelnummer').value.trim(),
     };
   } else if (step === 2) {
     const menge  = $id('f-Menge').value;
@@ -704,7 +787,6 @@ function wNext(step) {
   } else if (step === 3) {
     wizardData.step3 = {
       Beschaffungslogik: document.querySelector('input[name=Beschaffungslogik]:checked')?.value || '',
-      Artikelnummer:     $id('f-Artikelnummer').value.trim(),
       Lieferant:         $id('f-Lieferant').value.trim(),
       Lieferant2:        $id('f-Lieferant2').value.trim(),
       Lieferant3:        $id('f-Lieferant3').value.trim(),
@@ -1144,9 +1226,9 @@ function renderPanel(item, editMode = false) {
     return colByKey[sp]?.choice?.choices || null;
   };
 
-  const WG_OPTS   = choices('Warengruppe')      || ['Bürobedarf & Büroausstattung','IT & Elektronik','Werkzeug & Maschinen','Rohstoffe & Materialien','Dienstleistungen','Fahrzeuge & Transport','Gebäude & Infrastruktur','Schutzausrüstung (PSA)','Sonstiges'];
+  const WG_OPTS   = choices('Warengruppe')      || ['Schrott','Legierungen','Kaufteile','Kaufteile Formerei (Kühlm. ..)','Formstoffkomponenten','Eingußsysteme','exotherme Kappen (Speiser)','Gießfilter','Kerne (bez. Kerne f. Gießerei)','metallurgische Zusatzstoffe','Hilfsstoffe Gießerei','Feuerfestmaterial Ofen/Pfannen','Kohleprodukte (Grafitelektr., Aufk...)','Ersatzteile','Befestigungsteile','Schleif- und Fräsmittel','Strahlmittel','Werkzeug','Arbeitsschutzmittel','Schweißbedarf','Gemeinkostenmaterial','Technische Gase','Treibstoffe, Öle, Fette','sonst. Hilfs- u. Betriebsstoffe'];
   const PRIO_OPTS = choices('Prioritaet')       || ['Normal','Hoch','Dringend'];
-  const ME_OPTS   = choices('Mengeneinheit')    || ['Stück','kg','Liter','m','m²','Paket','Karton','Palette','Stunden'];
+  const ME_OPTS   = choices('Mengeneinheit')    || ['Lagereinheiten','kg','Stück','Anzahl','m','Paar','Liter'];
   const BL_OPTS   = choices('Beschaffungslogik')|| ['Bestandsmaterial (bestandsgeführt)','Neues Material (nicht-bestandsgeführt)','Dienstleistung'];
 
   const fRow = (fd, type, opts) => {
