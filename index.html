@@ -303,6 +303,11 @@
                 <input type="text" id="f-Kostenstelle" placeholder="z. B. 4200"/>
                 <div class="field-hint" id="hint-Kostenstelle"></div>
               </div>
+              <div class="form-group" id="wizard-attachments" style="display:none">
+                <label>Angebote anhängen (PDF) <span id="attach-required-note" class="field-hint" style="display:inline;font-size:.78rem"></span></label>
+                <div id="wizard-attach-inputs"></div>
+                <button type="button" class="btn btn-sm btn-ghost" id="wizard-btn-add-attach" onclick="addWizardAttach()" style="margin-top:4px">+ Weiteres Angebot</button>
+              </div>
             </div>
             <div class="wizard-footer">
               <button class="btn btn-ghost" onclick="wBack(3)">← Zurück</button>

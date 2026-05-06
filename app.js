@@ -983,6 +983,15 @@ function initWizard() {
   const firstRadio = document.querySelector('input[name=Beschaffungslogik]');
   if (firstRadio) firstRadio.checked = true;
   document.querySelectorAll('#beschaffungslogik-extra-cards .check-card').forEach(c => c.classList.remove('selected'));
+  // Reset wizard attachments
+  const wWrap = $id('wizard-attach-inputs');
+  if (wWrap) wWrap.innerHTML = '<input type="file" class="wizard-attach-file" accept=".pdf,.PDF" style="margin-bottom:6px"/>';
+  const wSec = $id('wizard-attachments');
+  if (wSec) wSec.style.display = 'none';
+  const wNote = $id('attach-required-note');
+  if (wNote) wNote.textContent = '';
+  const wBtn = $id('wizard-btn-add-attach');
+  if (wBtn) wBtn.disabled = false;
   // Reset progressive Lieferant disclosure
   [2,3,4].forEach(n => {
     const grp = $id('lieferant-extra-' + n);
@@ -1054,7 +1063,11 @@ function wNext(step) {
   showStep(step + 1);
 }
 
-function toggleBLExtra(el) { el.classList.toggle('selected'); }
+function toggleBLExtra(el) {
+  const wasSelected = el.classList.contains('selected');
+  document.querySelectorAll('#beschaffungslogik-extra-cards .check-card').forEach(c => c.classList.remove('selected'));
+  if (!wasSelected) el.classList.add('selected');
+}
 
 function angeboteAnzahl(gesamt) {
   if (!gesamt || gesamt <= 500)  return 0;
@@ -1084,6 +1097,41 @@ function updatePreisHint() {
   } else {
     hint.style.display = 'none';
   }
+  // Sync wizard attachment slots
+  const req     = angeboteAnzahl(preis);
+  const wrap    = $id('wizard-attach-inputs');
+  const note    = $id('attach-required-note');
+  const addBtn  = $id('wizard-btn-add-attach');
+  const section = $id('wizard-attachments');
+  if (!wrap) return;
+  section.style.display = 'block';
+  if (req === 0) {
+    note.textContent = '(optional)';
+  } else {
+    note.textContent = `mind. ${req} erforderlich gemäß Regelwerk`;
+  }
+  // Ensure at least req slots exist (don't remove existing ones with files)
+  const current = wrap.querySelectorAll('input[type=file]').length;
+  for (let i = current; i < Math.max(1, req); i++) {
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = '.pdf,.PDF'; inp.className = 'wizard-attach-file';
+    inp.style.marginBottom = '6px';
+    wrap.appendChild(inp);
+  }
+  if (addBtn) addBtn.disabled = wrap.querySelectorAll('input[type=file]').length >= 5;
+}
+
+function addWizardAttach() {
+  const wrap   = $id('wizard-attach-inputs');
+  const addBtn = $id('wizard-btn-add-attach');
+  if (!wrap) return;
+  const count = wrap.querySelectorAll('input[type=file]').length;
+  if (count >= 5) { if (addBtn) addBtn.disabled = true; return; }
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = '.pdf,.PDF'; inp.className = 'wizard-attach-file';
+  inp.style.marginBottom = '6px';
+  wrap.appendChild(inp);
+  if (wrap.querySelectorAll('input[type=file]').length >= 5) addBtn.disabled = true;
 }
 
 function genehmigungsweg(gesamt) {
@@ -1221,8 +1269,8 @@ async function postRetry(path, fields) {
 
   for (let i = 0; i < dropQueue.length + 5; i++) {
     try {
-      await gPost(path, { fields });
-      return skipped;
+      const newItem = await gPost(path, { fields });
+      return { skipped, newItem };
     } catch(e) {
       // 400 with named field: SP says exactly which field is wrong
       const m400 = e.message.match(/Field '([^']+)' (?:is not recognized|does not exist)/i);
@@ -1253,6 +1301,7 @@ async function postRetry(path, fields) {
     }
   }
   throw new Error('Einreichen fehlgeschlagen – zu viele problematische Felder.');
+  return { skipped: [], newItem: null }; // unreachable, satisfies linters
 }
 
 async function submitRequest() {
@@ -1266,20 +1315,22 @@ async function submitRequest() {
 
     if (!fields['Title']) { toast('Titel fehlt.', 'error'); btn.disabled=false; btn.textContent='✓ Anfrage einreichen'; return; }
 
-    let skipped;
+    // Collect wizard attachment files before navigation
+    const wizardFiles = [...document.querySelectorAll('.wizard-attach-file')]
+      .map(i => i.files[0]).filter(Boolean);
+
+    let skipped, newItem;
     try {
-      skipped = await postRetry(`/sites/${siteId}/lists/${listId}/items`, fields);
+      ({ skipped, newItem } = await postRetry(`/sites/${siteId}/lists/${listId}/items`, fields));
     } catch(e404) {
       if (!e404.message.includes('404')) throw e404;
-      // Site/list IDs may have changed — re-discover and retry once
       toast('SharePoint-IDs werden aktualisiert…', 'info');
       await discoverSP();
       const fields2 = buildFields(d, FORM_FIELDS);
-      skipped = await postRetry(`/sites/${siteId}/lists/${listId}/items`, fields2);
+      ({ skipped, newItem } = await postRetry(`/sites/${siteId}/lists/${listId}/items`, fields2));
     }
 
     if (skipped.length) {
-      // Map SP column names back to human-readable field labels
       const labels = skipped.map(s => {
         const colName = s.replace(/\(\d+\)$/, '');
         const fd = FORM_FIELDS.find(f => resolvedFields[f.key] === colName || f.key === colName);
@@ -1289,6 +1340,27 @@ async function submitRequest() {
     } else {
       toast('Anfrage eingereicht! Power Automate startet den Genehmigungsprozess.', 'success');
     }
+
+    // Upload wizard attachments (non-blocking toast on error)
+    if (wizardFiles.length && newItem?.id) {
+      const itemId = newItem.id;
+      btn.textContent = 'Anhänge werden hochgeladen…';
+      const tok = await getToken();
+      const errors = [];
+      for (const file of wizardFiles) {
+        try {
+          const fname = encodeURIComponent(file.name);
+          const r = await fetch(
+            `${SP_BASE}/_api/web/lists/getByTitle('${SP_LIST}')/items(${itemId})/AttachmentFiles/add(FileName='${fname}')`,
+            { method: 'POST', headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json;odata=nometadata' }, body: await file.arrayBuffer() }
+          );
+          if (!r.ok) errors.push(file.name + ' (' + r.status + ')');
+        } catch(e) { errors.push(file.name); }
+      }
+      if (errors.length) toast('Anhänge konnten nicht hochgeladen werden: ' + errors.join(', '), 'error');
+      else toast(`${wizardFiles.length} Angebot(e) erfolgreich angehängt.`, 'success');
+    }
+
     await loadItems(false);
     navigate('mine');
   } catch(e) {
