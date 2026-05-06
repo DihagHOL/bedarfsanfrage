@@ -1697,6 +1697,21 @@ function bindPanelEvents(itemId) {
   $id('panel-close')?.addEventListener('click', closePanel);
   $id('panel-order')?.addEventListener('click', () => openOrderModal(itemId));
   $id('panel-besch')?.addEventListener('click', () => openBeschModal(itemId));
+  // Load attachments
+  const attachEl = $id('panel-attach-body');
+  if (attachEl) {
+    getSpToken()
+      .then(tok => fetch(`${SP_BASE}/_api/web/lists/getByTitle('${SP_LIST}')/items(${itemId})/AttachmentFiles`,
+        { headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json;odata=nometadata' } }))
+      .then(r => r.ok ? r.json() : { value: [] })
+      .then(data => {
+        const files = data.value || [];
+        attachEl.innerHTML = files.length
+          ? files.map(attachmentLink).join('')
+          : '<span class="no-order">Keine Anhänge.</span>';
+      })
+      .catch(() => { attachEl.innerHTML = '<span class="no-order">Anhänge konnten nicht geladen werden.</span>'; });
+  }
   $id('panel-history')?.addEventListener('click', () => {
     const sec = $id('panel-history-section');
     if (!sec) return;
@@ -1970,6 +1985,10 @@ function renderPanel(item, editMode = false) {
         ${lieferd  ? `<div class="pf-row"><span class="pf-label">Lieferdatum</span><span class="pf-val">${fmtDate(lieferd)}</span></div>` : ''}
         ${tatPreis ? `<div class="pf-row"><span class="pf-label">Tatsächl. Preis</span><span class="pf-val">${fmtEuro(tatPreis)}</span></div>` : ''}
         ${!orderNr && !lieferd && !tatPreis ? '<p class="no-order">Noch keine Bestelldaten.</p>' : ''}
+      </div>
+      <div class="pf-section" id="panel-attach-section">
+        <div class="pf-sec-title">Anhänge</div>
+        <div id="panel-attach-body"><div class="vh-loading">Lädt…</div></div>
       </div>
       <div class="pf-section vh-section" id="panel-history-section" style="display:none">
         <div class="pf-sec-title">Versionsverlauf</div>

@@ -572,8 +572,10 @@ details#attach-extra-wrap[open] .attach-more-toggle { color:#374151; }
 .btn-ghost   { background: #f3f4f6; color: #374151; }
 .btn-ghost:hover { background: #e5e7eb; }
 .btn-outline { background: #fff; color: #374151; border: 1px solid #d1d5db; }
-.btn-outline:hover { background: #f9fafb; }
+.btn-outline:hover:not(:disabled) { background: #f9fafb; }
 .btn-sm { padding: 5px 11px; font-size: .78rem; }
+.btn:disabled, button:disabled { opacity: .42; cursor: not-allowed; pointer-events: auto !important; }
+.btn-outline:disabled { color: #9ca3af; border-color: #e5e7eb; }
 
 /* ── Modal ── */
 .modal-overlay {
