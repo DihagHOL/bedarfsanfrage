@@ -425,8 +425,7 @@ textarea.pf-input { resize: vertical; min-height: 52px; }
   cursor: pointer; transition: border-color .12s, background .12s;
   display: flex; flex-direction: column; gap: 3px;
 }
-.radio-card input[type=radio]    { display: none; }
-.radio-card input[type=checkbox] { display: none; }
+.radio-card input[type=radio] { display: none; }
 .radio-card .rc-icon  { font-size: 1.3rem; margin-bottom: 3px; }
 .radio-card .rc-title { font-size: .83rem; font-weight: 600; color: #1e2939; }
 .radio-card .rc-desc  { font-size: .73rem; color: #6b7280; line-height: 1.4; }
@@ -434,6 +433,8 @@ textarea.pf-input { resize: vertical; min-height: 52px; }
 .bl-separator { display: flex; align-items: center; gap: 8px; margin: 8px 0 4px; }
 .bl-separator::before, .bl-separator::after { content: ''; flex: 1; height: 1px; background: #e5e7eb; }
 .bl-separator span { font-size: .72rem; color: #9ca3af; white-space: nowrap; }
+.check-card { cursor: pointer; user-select: none; }
+.check-card.selected { border-color: #1a56db; background: #eff3ff; }
 .attach-existing { margin-bottom: 8px; }
 .attach-item { font-size: .82rem; color: #374151; padding: 2px 0; }
 .attach-item a { color: #1a56db; text-decoration: none; }

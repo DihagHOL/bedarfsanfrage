@@ -256,18 +256,16 @@
                 </div>
                 <div class="bl-separator"><span>Zusätzlich kombinierbar</span></div>
                 <div class="radio-cards" id="beschaffungslogik-extra-cards">
-                  <label class="radio-card">
-                    <input type="checkbox" name="BeschaffungslogikExtra" value="Direktes Material"/>
+                  <div class="radio-card check-card" data-value="Direktes Material" onclick="toggleBLExtra(this)">
                     <div class="rc-icon">🏭</div>
                     <div class="rc-title">Direktes Material</div>
                     <div class="rc-desc">Produktionsrelevant; fließt direkt ins Endprodukt ein (z. B. Rohstoffe, Halbzeuge, Fertigteile).</div>
-                  </label>
-                  <label class="radio-card">
-                    <input type="checkbox" name="BeschaffungslogikExtra" value="Indirektes Material / Dienstleistung"/>
+                  </div>
+                  <div class="radio-card check-card" data-value="Indirektes Material / Dienstleistung" onclick="toggleBLExtra(this)">
                     <div class="rc-icon">🔧</div>
                     <div class="rc-title">Indirektes Material / Dienstleistung</div>
                     <div class="rc-desc">Nicht produktionsrelevant: Betriebsmittel, Verbrauchsmaterial, externe Dienstleistungen, Software.</div>
-                  </label>
+                  </div>
                 </div>
                 <div class="field-hint" id="hint-Beschaffungslogik"></div>
               </div>

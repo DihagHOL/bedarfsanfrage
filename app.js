@@ -805,6 +805,15 @@ async function openOrderModal(itemId) {
       ${existingFiles.map(f => `<div class="attach-item">📎 <a href="${esc(f.ServerRelativeUrl)}" target="_blank">${esc(f.FileName)}</a></div>`).join('')}
     </div>` : '';
 
+  const required  = angeboteAnzahl(parseFloat(geschPreis) || 0);
+  const initialN  = Math.max(1, required);
+  const attachNote = required === 0
+    ? 'Angebotsunterlagen (optional, max. 5)'
+    : `Angebote anhängen – Regelwerk: mind. ${required} erforderlich (max. 5)`;
+  const fileSlots = Array.from({length: initialN}, () =>
+    `<input type="file" class="attach-file-input" accept=".pdf,.PDF" style="margin-bottom:6px"/>`
+  ).join('');
+
   $id('modal-title').textContent = 'Einkauf-Daten eintragen';
   $id('modal-body').innerHTML = `
     <div class="form-group" style="margin-bottom:12px">
@@ -826,12 +835,11 @@ async function openOrderModal(itemId) {
       <input type="number" id="m-price" value="${tatPreis}" min="0" step="0.01" placeholder="0,00"/>
     </div>
     <div class="form-group">
-      <label>Angebote anhängen (PDF, max. 5)</label>
+      <label>${esc(attachNote)}</label>
       ${existingHtml}
-      <div id="attach-inputs">
-        <input type="file" class="attach-file-input" accept=".pdf,.PDF" style="margin-bottom:6px"/>
-      </div>
-      <button type="button" class="btn btn-sm btn-ghost" id="btn-add-attach" onclick="addAttachInput()" style="margin-top:4px">+ Weiteres Angebot</button>
+      <div id="attach-inputs">${fileSlots}</div>
+      <button type="button" class="btn btn-sm btn-ghost" id="btn-add-attach" onclick="addAttachInput()"
+        style="margin-top:4px"${initialN >= 5 ? ' disabled' : ''}>+ Weiteres Angebot</button>
     </div>`;
   $id('modal-footer').innerHTML = `
     <button class="btn btn-ghost" onclick="closeModal()">Abbrechen</button>
@@ -974,6 +982,7 @@ function initWizard() {
     .forEach(k => { const el = $id('f-'+k); if(el) el.value = ''; });
   const firstRadio = document.querySelector('input[name=Beschaffungslogik]');
   if (firstRadio) firstRadio.checked = true;
+  document.querySelectorAll('#beschaffungslogik-extra-cards .check-card').forEach(c => c.classList.remove('selected'));
   // Reset progressive Lieferant disclosure
   [2,3,4].forEach(n => {
     const grp = $id('lieferant-extra-' + n);
@@ -1031,7 +1040,7 @@ function wNext(step) {
     wizardData.step3 = {
       Beschaffungslogik: [
         document.querySelector('input[name=Beschaffungslogik]:checked')?.value || '',
-        ...[...document.querySelectorAll('input[name=BeschaffungslogikExtra]:checked')].map(c => c.value)
+        ...[...document.querySelectorAll('#beschaffungslogik-extra-cards .check-card.selected')].map(c => c.dataset.value)
       ].filter(Boolean).join(', '),
       Lieferant:         $id('f-Lieferant').value.trim(),
       Lieferant2:        $id('f-Lieferant2').value.trim(),
@@ -1043,6 +1052,17 @@ function wNext(step) {
     buildReview();
   }
   showStep(step + 1);
+}
+
+function toggleBLExtra(el) { el.classList.toggle('selected'); }
+
+function angeboteAnzahl(gesamt) {
+  if (!gesamt || gesamt <= 500)  return 0;
+  if (gesamt <= 2500)            return 2;
+  if (gesamt <= 5000)            return 3;
+  if (gesamt <= 10000)           return 3;
+  if (gesamt <= 50000)           return 4;
+  return 5;
 }
 
 function wBack(step) { showStep(step - 1); }
