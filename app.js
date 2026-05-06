@@ -267,6 +267,29 @@ async function discoverSP() {
     el.innerHTML = fd.required ? '' : '<option value="">– bitte wählen –</option>';
     for (const c of col.choice.choices) el.add(new Option(c, c));
   }
+
+  // ── Status-Spalte mit SP-Liste synchronisieren ────────────────────────────
+  // Findet die Status-Spalte (auch "Stauts" als Tippfehler-Variante), liest die
+  // Auswahlwerte und baut STATUS_STYLES sowie WORKFLOW_STAGES automatisch auf.
+  const statusCol = Object.values(colByKey).find(c =>
+    /^status$/i.test(c.name) || /^stauts$/i.test(c.name)
+  );
+  if (statusCol?.choice?.choices?.length) {
+    const choices = statusCol.choice.choices;
+    // Rebuild STATUS_STYLES
+    for (const v of choices) {
+      const key = v.toLowerCase().trim();
+      if (!STATUS_STYLES[key]) STATUS_STYLES[key] = statusColorFor(v);
+    }
+    // Rebuild WORKFLOW_STAGES: preserve order from SP list, skip "Abgelehnt"/"Erledigt" (end states)
+    const endStates = /abgelehnt|erledigt|abgebrochen/i;
+    const stages = choices.filter(c => !endStates.test(c));
+    if (stages.length) {
+      WORKFLOW_STAGES.length = 0;
+      WORKFLOW_STAGES.push(...stages);
+    }
+    console.log('[discoverSP] Status-Werte synchronisiert:', choices);
+  }
 }
 
 function resolveColName(fd) {
@@ -759,7 +782,7 @@ const STAGE_MAP = [
   { label: 'Geschäftsführung',           re: /\bgf\b|geschäftsführ|geschaeftsfuehr/i },
 ];
 
-// Workflow-Reihenfolge für die Status-Zeitleiste
+// Workflow-Reihenfolge für die Status-Zeitleiste (wird in discoverSP() aus SP-Spalte befüllt)
 const WORKFLOW_STAGES = [
   'Eingereicht',
   'In Prüfung (Einkauf)',
@@ -769,6 +792,19 @@ const WORKFLOW_STAGES = [
   'Freigegeben',
   'Bestellt',
 ];
+
+// Farbe für einen Status anhand von Schlüsselwörtern bestimmen
+function statusColorFor(val) {
+  const v = (val || '').toLowerCase();
+  if (/eingereicht/.test(v))            return { bg:'#fce7f3', color:'#be185d' };
+  if (/werkleitung/.test(v))            return { bg:'#ffe4e6', color:'#be123c' };
+  if (/prüf|pruef|prüf/.test(v))        return { bg:'#ccfbf1', color:'#0f766e' };
+  if (/freigegeben/.test(v))            return { bg:'#f3e8ff', color:'#7e22ce' };
+  if (/abgelehnt/.test(v))              return { bg:'#f3f4f6', color:'#374151' };
+  if (/bestellt/.test(v))               return { bg:'#dbeafe', color:'#1d4ed8' };
+  if (/erledigt|abgeschlossen/.test(v)) return { bg:'#f3f4f6', color:'#374151' };
+  return { bg:'#f0f9ff', color:'#0369a1' };
+}
 
 function statusTimeline(statusVal) {
   const sv    = (statusVal || '').trim();
@@ -1151,10 +1187,11 @@ function initWizard() {
     }
   }
   // Reset fields
-  ['Title','Beschreibung','Warengruppe','Prioritaet','Menge','Mengeneinheit',
+  ['Title','Beschreibung','Warengruppe','Prioritaet','Mengeneinheit',
    'Mindestlagermenge','Termin','Artikelnummer','Lieferant','Lieferant2','Lieferant3','Lieferant4',
    'GeschaetzterPreis','Kostenstelle']
     .forEach(k => { const el = $id('f-'+k); if(el) el.value = ''; });
+  const mengeEl = $id('f-Menge'); if (mengeEl) mengeEl.value = '1'; // Standardwert
   const firstRadio = document.querySelector('input[name=Beschaffungslogik]');
   if (firstRadio) firstRadio.checked = true;
   document.querySelectorAll('#beschaffungslogik-extra-cards .check-card').forEach(c => c.classList.remove('selected'));
@@ -1222,6 +1259,8 @@ function wNext(step) {
       Termin:            termin,
     };
   } else if (step === 3) {
+    const lieferant = $id('f-Lieferant').value.trim();
+    if (!lieferant) { toast('Bitte mindestens Lieferant 1 angeben.', 'error'); return; }
     wizardData.step3 = {
       Beschaffungslogik: [
         document.querySelector('input[name=Beschaffungslogik]:checked')?.value || '',
@@ -1291,6 +1330,9 @@ function initWizardDrop() {
   const zone  = $id('wizard-drop-zone');
   const input = $id('wizard-file-input');
   if (!zone || !input) return;
+  // Guard: only attach listeners once (called on every wizard reset)
+  if (zone._dropReady) return;
+  zone._dropReady = true;
   zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('drag-over'); });
   zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
   zone.addEventListener('drop', e => {
@@ -2081,24 +2123,56 @@ function openAttachment(relUrl) {
   window.open(spFullUrl(relUrl), '_blank', 'noopener');
 }
 
-function openPdfViewer(relUrl, fileName) {
-  const fullUrl  = spFullUrl(relUrl);
-  const overlay  = $id('pdf-viewer-modal');
-  const iframe   = $id('pdf-viewer-iframe');
-  const titleEl  = $id('pdf-viewer-title');
-  const extBtn   = $id('pdf-viewer-ext');
+async function openPdfViewer(relUrl, fileName) {
+  const fullUrl = spFullUrl(relUrl);
+  const overlay = $id('pdf-viewer-modal');
+  const iframe  = $id('pdf-viewer-iframe');
+  const titleEl = $id('pdf-viewer-title');
+  const extBtn  = $id('pdf-viewer-ext');
   if (!overlay) { window.open(fullUrl, '_blank', 'noopener'); return; }
-  if (titleEl)  titleEl.textContent = fileName || 'Dokument';
-  if (extBtn)   extBtn.onclick = () => window.open(fullUrl, '_blank', 'noopener');
-  iframe.src = fullUrl;
+
+  // Show modal immediately with loading state
+  if (titleEl) titleEl.textContent = (fileName || 'Dokument') + ' – wird geladen…';
+  if (extBtn)  extBtn.onclick = () => window.open(fullUrl, '_blank', 'noopener');
+  iframe.src = 'about:blank';
   overlay.style.display = 'flex';
+
+  // Fetch file content with SP token → create blob URL to bypass X-Frame-Options
+  try {
+    const tok  = await getSpToken();
+    const resp = await fetch(fullUrl, { headers: { Authorization: 'Bearer ' + tok } });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const blob    = await resp.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    // Revoke previous blob URL if any
+    if (iframe._blobUrl) URL.revokeObjectURL(iframe._blobUrl);
+    iframe._blobUrl = blobUrl;
+    iframe.src      = blobUrl;
+    if (titleEl) titleEl.textContent = fileName || 'Dokument';
+  } catch(e) {
+    console.warn('[openPdfViewer]', e);
+    if (titleEl) titleEl.textContent = fileName || 'Dokument';
+    // Fallback: plain message with external open button
+    iframe.srcdoc = `<html><body style="font-family:sans-serif;display:flex;align-items:center;
+      justify-content:center;height:100%;margin:0;background:#f8fafc;color:#374151">
+      <div style="text-align:center;padding:32px">
+        <p style="font-size:1rem;margin-bottom:20px">PDF kann nicht direkt angezeigt werden<br>(SP blockiert Einbettung).</p>
+        <button onclick="parent.document.getElementById('pdf-viewer-ext').click()"
+          style="padding:10px 24px;background:#1a56db;color:#fff;border:none;border-radius:8px;
+          font-size:1rem;cursor:pointer">↗ In SharePoint öffnen</button>
+      </div></body></html>`;
+  }
 }
 
 function closePdfViewer() {
   const overlay = $id('pdf-viewer-modal');
   const iframe  = $id('pdf-viewer-iframe');
   if (overlay) overlay.style.display = 'none';
-  if (iframe)  iframe.src = 'about:blank';
+  if (iframe) {
+    if (iframe._blobUrl) { URL.revokeObjectURL(iframe._blobUrl); iframe._blobUrl = null; }
+    iframe.src    = 'about:blank';
+    iframe.srcdoc = '';
+  }
 }
 
 function attachmentLink(f) {

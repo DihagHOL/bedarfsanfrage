@@ -585,6 +585,7 @@ details#attach-extra-wrap[open] .attach-more-toggle { color:#374151; }
 .drop-zone-text { font-size: .85rem; line-height: 1.6; pointer-events: none; }
 .drop-zone-text small { font-size: .75rem; color: #94a3b8; }
 .drop-zone.has-files .drop-zone-text small { color: #818cf8; }
+#wizard-file-list { max-width: 100%; overflow: hidden; }
 .wizard-file-item {
   display: flex;
   align-items: center;
@@ -595,10 +596,12 @@ details#attach-extra-wrap[open] .attach-more-toggle { color:#374151; }
   border: 1px solid #bbf7d0;
   border-radius: 7px;
   font-size: .83rem;
+  min-width: 0;        /* prevent flex child from overflowing */
+  overflow: hidden;
 }
 .wf-icon { font-size: 1rem; flex-shrink: 0; }
 .wf-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #166534; font-weight: 500; }
-.wf-size { font-size: .73rem; color: #6b7280; flex-shrink: 0; }
+.wf-size { font-size: .73rem; color: #6b7280; flex-shrink: 0; white-space: nowrap; }
 .wf-remove {
   background: none; border: none; cursor: pointer;
   color: #9ca3af; font-size: .9rem; padding: 2px 4px; border-radius: 4px; flex-shrink: 0;
