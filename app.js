@@ -7,6 +7,7 @@ const SCOPES    = ['User.Read', 'Sites.ReadWrite.All'];
 const SP_SITE   = 'dihag.sharepoint.com:/sites/gruppe_shb';
 const SP_LIST   = 'Bedarfsanfrage';
 const API       = 'https://graph.microsoft.com/v1.0';
+const SP_BASE   = 'https://' + SP_SITE.split(':/')[0] + '/' + SP_SITE.split(':/')[1];
 
 // ── BPMN-KONFORME FORMFELD-DEFINITION ───────────────────────────────────────
 // key        = interner SP-Spaltenname (wird beim POST verwendet)
@@ -648,6 +649,23 @@ function renderDetail(id) {
   // Bind update button
   const btnOrder = document.getElementById('btn-add-order');
   if (btnOrder) btnOrder.onclick = () => openOrderModal(item.id);
+
+  // Load attachments async
+  const attachEl = document.getElementById('detail-attachments');
+  if (attachEl) {
+    getToken().then(tok =>
+      fetch(`${SP_BASE}/_api/web/lists/getByTitle('${SP_LIST}')/items(${id})/AttachmentFiles`, {
+        headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json;odata=nometadata' }
+      })
+    ).then(r => r.ok ? r.json() : { value: [] })
+     .then(data => {
+       const files = data.value || [];
+       attachEl.innerHTML = files.length
+         ? files.map(f => `<div class="attach-item">📎 <a href="${esc(f.ServerRelativeUrl)}" target="_blank">${esc(f.FileName)}</a></div>`).join('')
+         : '<span class="no-order">Keine Anhänge.</span>';
+     })
+     .catch(() => { attachEl.innerHTML = ''; });
+  }
 }
 
 function detailSection(title, rows) {
@@ -682,6 +700,7 @@ function detailSidebar(item, isEinkauf) {
         ${orderNr  ? detailRow('Bestellnummer', orderNr) : '<p class="no-order">Noch keine Bestellnummer eingetragen.</p>'}
         ${lieferd  ? detailRow('Lieferdatum', fmtDate(lieferd)) : ''}
         ${tatPreis ? detailRow('Tatsächlicher Preis', fmtEuro(tatPreis)) : ''}
+        <div id="detail-attachments" class="detail-attachments">Lade Anhänge …</div>
       </div>
     </div>`;
 }
@@ -763,13 +782,28 @@ function renderApprovalCard(item) {
 }
 
 // ── EINKAUF ORDER MODAL ───────────────────────────────────────────────────────
-function openOrderModal(itemId) {
+async function openOrderModal(itemId) {
   const item = allItems.find(i => String(i.id) === String(itemId));
   const orderNr    = getField(item,'Bestellnummer')       || getField(item, resolvedFields['Bestellnummer'])       || '';
   const lieferd    = getField(item,'Lieferdatum')         || getField(item, resolvedFields['Lieferdatum'])         || '';
   const tatPreis   = getField(item,'TatsaechlicherPreis') || getField(item, resolvedFields['TatsaechlicherPreis']) || '';
   const termin     = getField(item,'Termin')              || getField(item, resolvedFields['Termin'])              || '';
   const geschPreis = getField(item,'GeschaetzterPreis')   || getField(item, resolvedFields['GeschaetzterPreis'])   || '';
+
+  // Fetch existing attachments
+  let existingFiles = [];
+  try {
+    const tok = await getToken();
+    const r = await fetch(`${SP_BASE}/_api/web/lists/getByTitle('${SP_LIST}')/items(${itemId})/AttachmentFiles`, {
+      headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json;odata=nometadata' }
+    });
+    if (r.ok) existingFiles = (await r.json()).value || [];
+  } catch(e) { /* non-critical */ }
+
+  const existingHtml = existingFiles.length ? `
+    <div class="attach-existing">
+      ${existingFiles.map(f => `<div class="attach-item">📎 <a href="${esc(f.ServerRelativeUrl)}" target="_blank">${esc(f.FileName)}</a></div>`).join('')}
+    </div>` : '';
 
   $id('modal-title').textContent = 'Einkauf-Daten eintragen';
   $id('modal-body').innerHTML = `
@@ -784,12 +818,20 @@ function openOrderModal(itemId) {
       </label>
       <input type="date" id="m-delivery" value="${toLocalInputDate(lieferd)}"/>
     </div>
-    <div class="form-group">
+    <div class="form-group" style="margin-bottom:12px">
       <label style="display:flex;align-items:center;justify-content:space-between">
         Tatsächlicher Preis netto (€)
         ${geschPreis ? `<button type="button" class="btn-prefill" onclick="document.getElementById('m-price').value='${geschPreis}'">← Aus Anfrage (${fmtEuro(geschPreis)})</button>` : ''}
       </label>
       <input type="number" id="m-price" value="${tatPreis}" min="0" step="0.01" placeholder="0,00"/>
+    </div>
+    <div class="form-group">
+      <label>Angebote anhängen (PDF, max. 5)</label>
+      ${existingHtml}
+      <div id="attach-inputs">
+        <input type="file" class="attach-file-input" accept=".pdf,.PDF" style="margin-bottom:6px"/>
+      </div>
+      <button type="button" class="btn btn-sm btn-ghost" id="btn-add-attach" onclick="addAttachInput()" style="margin-top:4px">+ Weiteres Angebot</button>
     </div>`;
   $id('modal-footer').innerHTML = `
     <button class="btn btn-ghost" onclick="closeModal()">Abbrechen</button>
@@ -797,10 +839,26 @@ function openOrderModal(itemId) {
   $id('modal-overlay').classList.remove('hidden');
 }
 
+function addAttachInput() {
+  const wrap = $id('attach-inputs');
+  if (!wrap) return;
+  const count = wrap.querySelectorAll('input[type=file]').length;
+  if (count >= 5) { $id('btn-add-attach').disabled = true; return; }
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = '.pdf,.PDF'; inp.className = 'attach-file-input';
+  inp.style.marginBottom = '6px';
+  wrap.appendChild(inp);
+  if (count + 1 >= 5) $id('btn-add-attach').disabled = true;
+}
+
 async function saveOrderData(itemId) {
   const orderNr  = $id('m-ordernr').value.trim();
   const delivery = $id('m-delivery').value;
   const price    = $id('m-price').value;
+
+  // Collect selected files
+  const fileInputs = [...document.querySelectorAll('.attach-file-input')];
+  const files = fileInputs.map(i => i.files[0]).filter(Boolean);
 
   // Build patch using resolved names; fall back to raw key if column was never resolved
   const patch = {};
@@ -813,27 +871,48 @@ async function saveOrderData(itemId) {
   if (delivery) add('Lieferdatum', toSpDate(delivery, resolvedFields['Lieferdatum'] || 'Lieferdatum'));
   if (price) add('TatsaechlicherPreis', parseFloat(price));
 
-  if (!Object.keys(patch).length) { closeModal(); return; }
+  const hasFields = Object.keys(patch).length > 0;
+  if (!hasFields && !files.length) { closeModal(); return; }
 
-  // Retry PATCH removing unrecognized fields
-  const skipped = [];
-  for (let i = 0; i < 10; i++) {
-    try {
-      await gPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, patch);
-      if (skipped.length) toast(`Gespeichert (übersprungen: ${skipped.join(', ')})`, 'info');
-      else toast('Einkauf-Daten gespeichert ✓', 'success');
-      closeModal();
-      await loadItems(false);
-      renderDetail(itemId);
-      return;
-    } catch(e) {
-      const m = e.message.match(/Field '([^']+)' (?:is not recognized|does not exist)/i);
-      if (!m) { toast('Fehler: ' + e.message, 'error'); return; }
-      skipped.push(m[1]);
-      delete patch[m[1]];
+  // PATCH fields if any
+  if (hasFields) {
+    const skipped = [];
+    for (let i = 0; i < 10; i++) {
+      try {
+        await gPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, patch);
+        break;
+      } catch(e) {
+        const m = e.message.match(/Field '([^']+)' (?:is not recognized|does not exist)/i);
+        if (!m) { toast('Fehler: ' + e.message, 'error'); return; }
+        skipped.push(m[1]);
+        delete patch[m[1]];
+      }
     }
   }
-  toast('Fehler: Zu viele nicht erkannte Felder.', 'error');
+
+  // Upload attachments
+  if (files.length) {
+    const tok = await getToken();
+    const errors = [];
+    for (const file of files) {
+      try {
+        const fname = encodeURIComponent(file.name);
+        const r = await fetch(
+          `${SP_BASE}/_api/web/lists/getByTitle('${SP_LIST}')/items(${itemId})/AttachmentFiles/add(FileName='${fname}')`,
+          { method: 'POST', headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json;odata=nometadata' }, body: await file.arrayBuffer() }
+        );
+        if (!r.ok) errors.push(file.name + ' (' + r.status + ')');
+      } catch(e) { errors.push(file.name); }
+    }
+    if (errors.length) toast('Fehler beim Hochladen: ' + errors.join(', '), 'error');
+    else toast('Einkauf-Daten und Anhänge gespeichert ✓', 'success');
+  } else {
+    toast('Einkauf-Daten gespeichert ✓', 'success');
+  }
+
+  closeModal();
+  await loadItems(false);
+  renderDetail(itemId);
 }
 
 // ── WIZARD ────────────────────────────────────────────────────────────────────
@@ -950,7 +1029,10 @@ function wNext(step) {
     };
   } else if (step === 3) {
     wizardData.step3 = {
-      Beschaffungslogik: document.querySelector('input[name=Beschaffungslogik]:checked')?.value || '',
+      Beschaffungslogik: [
+        document.querySelector('input[name=Beschaffungslogik]:checked')?.value || '',
+        ...[...document.querySelectorAll('input[name=BeschaffungslogikExtra]:checked')].map(c => c.value)
+      ].filter(Boolean).join(', '),
       Lieferant:         $id('f-Lieferant').value.trim(),
       Lieferant2:        $id('f-Lieferant2').value.trim(),
       Lieferant3:        $id('f-Lieferant3').value.trim(),
@@ -986,22 +1068,30 @@ function updatePreisHint() {
 
 function genehmigungsweg(gesamt) {
   let stufe, freigabe, angebote;
-  if (gesamt < 1500) {
+  if (gesamt <= 500) {
     stufe    = 1;
     freigabe = 'Anforderer Fachabt. + Einkäufer Werk';
-    angebote = gesamt < 250 ? 'kein Angebot nötig' : 'mind. 2 Angebote';
-  } else if (gesamt <= 10000) {
+    angebote = 'kein Angebot nötig';
+  } else if (gesamt <= 2500) {
     stufe    = 2;
-    freigabe = 'Einkäufer Werk + GF & Werkleiter';
-    angebote = 'mind. 2 Angebote';
+    freigabe = 'Einkäufer Werk + Werkleiter';
+    angebote = 'mind. 2 Angebote (entfällt bei Lead-Buyer-Abschluss)';
+  } else if (gesamt <= 5000) {
+    stufe    = 2;
+    freigabe = 'Einkäufer Werk + Werkleiter';
+    angebote = 'mind. 2–3 Angebote (entfällt bei Lead-Buyer-Abschluss)';
+  } else if (gesamt <= 10000) {
+    stufe    = 3;
+    freigabe = 'Werkleiter + Einkaufsleitung Holding';
+    angebote = 'mind. 3 Angebote (entfällt bei Lead-Buyer-Abschluss)';
   } else if (gesamt <= 50000) {
     stufe    = 3;
-    freigabe = 'GF & Werkleiter + Einkaufsleitung Holding';
-    angebote = 'mind. 3 Angebote';
+    freigabe = 'Werkleiter + Einkaufsleitung Holding';
+    angebote = 'mind. 3–4 Angebote (entfällt bei Lead-Buyer-Abschluss)';
   } else {
     stufe    = 4;
     freigabe = 'Einkaufsleitung Holding + GF kfm. Leitung Holding';
-    angebote = 'Europ. Ausschreibung (mind. 5 Angebote)';
+    angebote = 'Europ. Ausschreibung (mind. 5 Angebote, entfällt bei Lead-Buyer-Abschluss)';
   }
   return `Stufe ${stufe} · ${fmtEuro(gesamt)} · ${angebote} · Freigabe: ${freigabe}`;
 }
