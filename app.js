@@ -285,7 +285,7 @@ async function retryOn404(fn, retries = 4, delayMs = 1200) {
   for (let i = 0; i <= retries; i++) {
     try { return await fn(); }
     catch(e) {
-      const is404 = e.message.includes('404') || e.message.includes('itemNotFound');
+      const is404 = (e.message.includes('404') || e.message.includes('itemNotFound')) && !e._noRetry;
       if (is404 && i < retries) {
         console.warn(`[retryOn404] Versuch ${i+1} – warte ${delayMs}ms…`, e.message);
         await new Promise(r => setTimeout(r, delayMs));
@@ -964,7 +964,10 @@ function renderApprovalCard(item) {
     </div>`;
   }).join('');
 
-  const noData = !stages.length && !ungrouped.length;
+  // Always show the status timeline when no stage-grouped approval columns have data.
+  // Comments/ungrouped fields (e.g. GenehmigungsKommentar) are shown BELOW the timeline,
+  // not instead of it – so the workflow progress stays visible even when a comment is present.
+  const mainContent = stages.length ? stagesHtml : statusTimeline(statusVal);
 
   return `
     <div class="detail-card">
@@ -972,10 +975,8 @@ function renderApprovalCard(item) {
       <div class="detail-card-body">
         <div class="ap-current-status">${statusWithApprover(item)}</div>
         <div class="approval-stages">
-          ${noData
-            ? statusTimeline(statusVal)
-            : stagesHtml + ungroupedHtml
-          }
+          ${mainContent}
+          ${ungroupedHtml}
         </div>
       </div>
     </div>`;
@@ -1687,13 +1688,25 @@ async function submitRequest() {
       const errors = [];
       for (const file of wizardFiles) {
         try {
+          // SP REST may not yet have propagated the new item (same lag as PATCH 404).
+          // Wrap in retryOn404 so we wait up to ~4.8s before giving up.
           const fname = encodeURIComponent(file.name);
-          const r = await fetch(
-            `${SP_BASE}/_api/web/lists/getByTitle('${SP_LIST}')/items(${itemId})/AttachmentFiles/add(FileName='${fname}')`,
-            { method:'POST', headers:{ Authorization:'Bearer '+tok, Accept:'application/json;odata=nometadata' }, body: await file.arrayBuffer() }
-          );
-          if (!r.ok) errors.push(`${file.name} (${r.status})`);
-        } catch(e) { console.warn('[submitRequest] Anhang:', e); errors.push(file.name); }
+          const uploadUrl = `${SP_BASE}/_api/web/lists/getByTitle('${SP_LIST}')/items(${itemId})/AttachmentFiles/add(FileName='${fname}')`;
+          await retryOn404(async () => {
+            const r = await fetch(uploadUrl, {
+              method: 'POST',
+              headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json;odata=nometadata' },
+              body: await file.arrayBuffer()
+            });
+            if (!r.ok) {
+              const txt = await r.text().catch(() => '');
+              const err = new Error(`${r.status}: ${txt}`);
+              // Only retry on 404; other errors are immediate failures
+              if (r.status !== 404) err._noRetry = true;
+              throw err;
+            }
+          }, 3, 1200);
+        } catch(e) { console.warn('[submitRequest] Anhang:', e); errors.push(`${file.name} (${e.message})`); }
       }
       if (errors.length) toast(`Anfrage erstellt. Anhänge fehlgeschlagen: ${errors.join(', ')}`, 'error');
       else toast(`Anfrage eingereicht! ${wizardFiles.length} Angebot(e) angehängt.`, 'success');
@@ -2230,10 +2243,16 @@ async function openPdfViewer(relUrl, fileName) {
   // and benefits from CORS headers that SP sets for /_api/ routes with OAuth tokens.
   try {
     const tok    = await getSpToken();
-    // relUrl may arrive pre-encoded (e.g. %23 for #) from attachmentLink() — decode first
-    // to avoid double-encoding (%23 → %2523) which causes SP to return 404.
-    const rawRelUrl = decodeURIComponent(relUrl);
-    const apiUrl = `${SP_BASE}/_api/web/GetFileByServerRelativeUrl(@u)/$value?@u='${encodeURIComponent(rawRelUrl)}'`;
+    // relUrl may arrive pre-encoded (e.g. %23 for #) from attachmentLink().
+    // Steps:
+    //   1. Decode to get the literal path (with # as a real character)
+    //   2. Re-encode # → %23 so SP's path resolver sees %23 (not #)
+    //      (SP URL-decodes path segments once: %23 → # for the file lookup)
+    //   3. encodeURIComponent then encodes % → %25, yielding %2523 in the URL
+    //   4. SP query-string decoder decodes %2523 → %23, SP path resolver %23 → #
+    const rawRelUrl  = decodeURIComponent(relUrl);
+    const spSafeUrl  = rawRelUrl.replace(/#/g, '%23');
+    const apiUrl = `${SP_BASE}/_api/web/GetFileByServerRelativeUrl(@u)/$value?@u='${encodeURIComponent(spSafeUrl)}'`;
     const resp   = await fetch(apiUrl, { headers: { Authorization: 'Bearer ' + tok } });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const blob    = await resp.blob();
