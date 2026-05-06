@@ -7,7 +7,7 @@ const SCOPES    = ['User.Read', 'Sites.ReadWrite.All'];
 const SP_SITE   = 'dihag.sharepoint.com:/sites/gruppe_shb';
 const SP_LIST   = 'Bedarfsanfrage';
 const API       = 'https://graph.microsoft.com/v1.0';
-const SP_BASE   = 'https://' + SP_SITE.split(':/')[0] + '/' + SP_SITE.split(':/')[1];
+const SP_BASE   = 'https://' + SP_SITE.split(':/')[0] + SP_SITE.split(':/')[1];
 
 // ── BPMN-KONFORME FORMFELD-DEFINITION ───────────────────────────────────────
 // key        = interner SP-Spaltenname (wird beim POST verwendet)
@@ -1481,15 +1481,29 @@ async function submitRequest() {
     const wizardFiles = [...document.querySelectorAll('.wizard-attach-file')]
       .map(i => i.files[0]).filter(Boolean);
 
-    let skipped, newItem;
-    try {
-      ({ skipped, newItem } = await postRetry(`/sites/${siteId}/lists/${listId}/items`, fields));
-    } catch(e404) {
-      if (!e404.message.includes('404')) throw e404;
-      toast('SharePoint-IDs werden aktualisiert…', 'info');
+    // Ensure SP IDs are valid before attempting POST
+    if (!siteId || !listId) {
+      toast('SharePoint-Verbindung wird hergestellt…', 'info');
       await discoverSP();
-      const fields2 = buildFields(d, FORM_FIELDS);
-      ({ skipped, newItem } = await postRetry(`/sites/${siteId}/lists/${listId}/items`, fields2));
+    }
+
+    let skipped, newItem;
+    let postAttempt = 0;
+    while (true) {
+      postAttempt++;
+      try {
+        const flds = buildFields(d, FORM_FIELDS);
+        ({ skipped, newItem } = await postRetry(`/sites/${siteId}/lists/${listId}/items`, flds));
+        break; // success
+      } catch(ePost) {
+        const is404 = ePost.message.includes('404') || ePost.message.includes('itemNotFound');
+        if (is404 && postAttempt < 3) {
+          toast(`SharePoint-IDs werden aktualisiert… (Versuch ${postAttempt})`, 'info');
+          await discoverSP();
+          continue;
+        }
+        throw ePost;
+      }
     }
 
     if (skipped.length) {
