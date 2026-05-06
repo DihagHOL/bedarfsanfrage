@@ -95,7 +95,7 @@ const ADMIN_EMAIL  = 'administrator@dihag.com';
 
 function getSettings(email) {
   const all = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
-  return Object.assign({ autoRefresh: false, pageSize: 100, dashboardVisible: true }, all[(email||'').toLowerCase()] || {});
+  return Object.assign({ autoRefresh: false, pageSize: 100, dashboardVisible: false }, all[(email||'').toLowerCase()] || {});
 }
 function saveUserSettings(email, patch) {
   const all = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
@@ -220,13 +220,17 @@ async function bootDone() {
     await loadItems(false);
     $id('boot').style.display = 'none';
     $id('app').style.display  = 'flex';
-    // Auto-refresh is admin-controlled. Clear any self-set "autoRefresh: true" from old
-    // localStorage if admin hasn't explicitly granted the feature (autoRefreshGranted).
+    // Auto-refresh and Dashboard are admin-controlled features.
+    // Clear any self-set / default values from old localStorage that weren't explicitly
+    // granted by admin (identified by the corresponding *Granted flag).
     if (account) {
       const em = account.username.toLowerCase();
       const s  = getSettings(em);
-      if (em !== ADMIN_EMAIL && s.autoRefresh && !s.autoRefreshGranted) {
-        saveUserSettings(em, { autoRefresh: false });
+      if (em !== ADMIN_EMAIL) {
+        const patch = {};
+        if (s.autoRefresh   && !s.autoRefreshGranted)  patch.autoRefresh   = false;
+        if (s.dashboardVisible && !s.dashboardGranted) patch.dashboardVisible = false;
+        if (Object.keys(patch).length) saveUserSettings(em, patch);
       }
     }
     startAutoRefresh();
@@ -448,12 +452,13 @@ const VIEW_TITLES = { dashboard:'Dashboard', new:'Neue Bedarfsanfrage',
   mine:'Meine Anfragen', all:'Alle Anfragen', detail:'Anfrage Details' };
 
 // Whether the current user may see the Dashboard view.
-// Admin always can; for others, dashboardVisible setting must be true (default true).
+// Admin always can; for others, admin must have explicitly granted access (dashboardGranted flag).
 function canSeeDashboard() {
   if (!account) return false;
   const email = account.username.toLowerCase();
   if (email === ADMIN_EMAIL) return true;
-  return getSettings(email).dashboardVisible !== false;
+  const s = getSettings(email);
+  return !!(s.dashboardVisible && s.dashboardGranted);
 }
 
 // Show/hide dashboard nav item and redirect away if needed. Called on login + settings save.
@@ -933,21 +938,79 @@ function statusColorFor(val) {
   return { bg:'#f0f9ff', color:'#0369a1' };
 }
 
-function statusTimeline(statusVal) {
+// Data-driven status timeline.
+// Uses a FIXED semantic display order (not WORKFLOW_STAGES from discoverSP, which can be
+// misordered by SP and cause completed stages to appear before earlier ones).
+// When item is provided, SP approval column values are read per stage for ✓/✗ dots.
+// 'strategischer Einkauf' is optional and only shown when SP data exists or it is current.
+function statusTimeline(statusVal, item) {
   const sv    = (statusVal || '').trim();
-  const svL   = sv.toLowerCase();
   const isRej = /abgelehnt/i.test(sv);
-  const idx   = WORKFLOW_STAGES.findIndex(s => s.toLowerCase() === svL);
-  return WORKFLOW_STAGES.map((stage, i) => {
+
+  // Fixed display order — smIdx maps to STAGE_MAP entry for column lookup (-1 = no approval col).
+  const DISPLAY = [
+    { label: 'Eingereicht',                         smIdx: -1              },
+    { label: 'In Prüfung (Einkauf)',                smIdx:  0              },
+    { label: 'In Prüfung (Werkleitung)',            smIdx:  1              },
+    { label: 'In Prüfung (strategischer Einkauf)', smIdx:  2, optional: true },
+    { label: 'In Prüfung (Controlling)',            smIdx:  3              },
+    { label: 'Freigegeben',                         smIdx: -1              },
+    { label: 'Bestellt',                            smIdx: -1              },
+  ];
+
+  // Collect all approval-related columns that have a value on this item.
+  const approvalCols = item
+    ? Object.entries(colByKey)
+        .filter(([k, c]) => APPROVAL_RE.test(c.displayName || k) && !SYSTEM_FIELDS.has(k))
+        .map(([k, c]) => ({ key: k, label: c.displayName || k, val: getField(item, k) }))
+        .filter(c => c.val != null && c.val !== '')
+    : [];
+
+  // Return the decision value (genehmigt/abgelehnt/…) for a STAGE_MAP[smIdx] stage.
+  // smIdx 0 = Einkauf: exclude any column also matching /strategisch/ to avoid cross-contamination.
+  function getDecision(smIdx) {
+    if (smIdx < 0 || smIdx >= STAGE_MAP.length) return null;
+    const sm = STAGE_MAP[smIdx];
+    const isEinkauf = smIdx === 0;
+    const cols = approvalCols.filter(c => {
+      if (!(sm.re.test(c.label) || sm.re.test(c.key))) return false;
+      if (isEinkauf && /strategisch/i.test(c.label + c.key)) return false;
+      return /genehmig|entscheid|freigab|ablehn/i.test(c.label);
+    });
+    return cols.length ? cols[0].val : null;
+  }
+
+  const svL        = sv.toLowerCase();
+  const currentIdx = DISPLAY.findIndex(d => d.label.toLowerCase() === svL);
+
+  return DISPLAY.map((d, i) => {
+    const decision  = getDecision(d.smIdx);
+    const isCurrent = d.label.toLowerCase() === svL;
+    const hasData   = decision != null;
+
+    // Hide optional stages when no SP data and not current.
+    if (d.optional && !hasData && !isCurrent) return null;
+
     let dot, cls;
-    if (isRej)     { dot = i === 0 ? '✓' : '–'; cls = i === 0 ? 'ap-ok' : 'ap-neutral'; }
-    else if (idx < 0) { dot = '○'; cls = 'ap-neutral'; }
-    else if (i < idx) { dot = '✓'; cls = 'ap-ok'; }
-    else if (i === idx) { dot = '●'; cls = 'ap-pending'; }
-    else              { dot = '○'; cls = 'ap-neutral'; }
-    const bold = i === idx ? ' style="font-weight:600"' : '';
-    return `<div class="approval-stage"><div class="ap-dot ${cls}">${dot}</div><div class="ap-body"><div class="ap-stage-label"${bold}>${esc(stage)}</div></div></div>`;
-  }).join('') + (isRej ? `<div class="ap-comment-box" style="margin-top:6px;color:#b91c1c">✗ ${esc(sv)}</div>` : '');
+    if (hasData) {
+      const dL = String(decision).toLowerCase();
+      if (/freigegeben|genehmigt|approved|ja\b/.test(dL)) { dot = '✓'; cls = 'ap-ok';      }
+      else if (/abgelehnt|rejected|nein\b/.test(dL))       { dot = '✗'; cls = 'ap-no';      }
+      else                                                  { dot = '○'; cls = 'ap-neutral'; }
+    } else if (isCurrent) {
+      dot = '●'; cls = 'ap-pending';
+    } else if (currentIdx >= 0 && i < currentIdx) {
+      dot = '✓'; cls = 'ap-ok';   // we've passed through this stage
+    } else if (isRej && i === 0) {
+      dot = '✓'; cls = 'ap-ok';   // eingereicht was reached before rejection
+    } else {
+      dot = '○'; cls = 'ap-neutral';
+    }
+
+    const bold = isCurrent ? ' style="font-weight:600"' : '';
+    return `<div class="approval-stage"><div class="ap-dot ${cls}">${dot}</div>`
+         + `<div class="ap-body"><div class="ap-stage-label"${bold}>${esc(d.label)}</div></div></div>`;
+  }).filter(Boolean).join('');
 }
 
 function approvalStyle(val) {
@@ -1006,7 +1069,7 @@ function renderApprovalCard(item) {
   // Always show the status timeline when no stage-grouped approval columns have data.
   // Comments/ungrouped fields (e.g. GenehmigungsKommentar) are shown BELOW the timeline,
   // not instead of it – so the workflow progress stays visible even when a comment is present.
-  const mainContent = stages.length ? stagesHtml : statusTimeline(statusVal);
+  const mainContent = stages.length ? stagesHtml : statusTimeline(statusVal, item);
 
   return `
     <div class="detail-card">
@@ -2148,7 +2211,7 @@ function renderPanel(item, editMode = false) {
       .filter(([k,c]) => APPROVAL_RE.test(c.displayName||k) && !SYSTEM_FIELDS.has(k))
       .map(([k,c]) => ({ key:k, label:c.displayName||k, val:getField(item,k) }))
       .filter(c => c.val !== null && c.val !== undefined && c.val !== '');
-    if (!found.length) return `<div class="approval-stages">${statusTimeline(statusVal)}</div>`;
+    if (!found.length) return `<div class="approval-stages">${statusTimeline(statusVal, item)}</div>`;
     const stages = STAGE_MAP.map(s => ({ label:s.label, cols:found.filter(c=>s.re.test(c.label)||s.re.test(c.key)) })).filter(s=>s.cols.length);
     const assigned = new Set(stages.flatMap(s=>s.cols.map(c=>c.key)));
     const extra = found.filter(c=>!assigned.has(c.key));
@@ -2169,7 +2232,7 @@ function renderPanel(item, editMode = false) {
     };
     // Same rule as renderApprovalCard: always show timeline when no stage columns
     // have data; comments/ungrouped shown BELOW, not instead of the timeline.
-    const mainHtml = stages.length ? stages.map(mkStage).join('') : statusTimeline(statusVal);
+    const mainHtml = stages.length ? stages.map(mkStage).join('') : statusTimeline(statusVal, item);
     return `<div class="approval-stages">${mainHtml}${extra.map(mkExtra).join('')}</div>`;
   })();
 
@@ -2348,8 +2411,8 @@ function openSettings() {
         <span class="tgl"></span>
       </label>
       <label class="tgl-wrap" title="Dashboard sichtbar">
-        <input type="checkbox" ${us.dashboardVisible !== false ? 'checked' : ''}
-          onchange="saveUserSettings('${esc(em)}',{dashboardVisible:this.checked});applyDashboardVisibility()">
+        <input type="checkbox" ${us.dashboardVisible && us.dashboardGranted ? 'checked' : ''}
+          onchange="saveUserSettings('${esc(em)}',{dashboardVisible:this.checked,dashboardGranted:this.checked});applyDashboardVisibility()">
         <span class="tgl"></span>
       </label>
       <input type="number" value="${us.pageSize||100}" min="10" max="500" step="10"
@@ -2424,11 +2487,9 @@ function closePdfViewer() {
 function attachmentLink(f) {
   const safeUrl = esc(f.ServerRelativeUrl.replace(/#/g,'%23').replace(/\?/g,'%3F').replace(/ /g,'%20'));
   const name    = esc(f.FileName);
-  const isPdf   = /\.pdf$/i.test(f.FileName);
   return `<div class="attach-item">
     📎 <span class="attach-name">${name}</span>
     <span class="attach-actions">
-      ${isPdf ? `<button class="btn-attach-dl" onclick="openPdfViewer('${safeUrl}','${name}')" title="PDF anzeigen">👁 Anzeigen</button>` : ''}
       <button class="btn-attach-dl" onclick="openAttachment('${safeUrl}')" title="In SharePoint öffnen">↗ Öffnen</button>
     </span>
   </div>`;
