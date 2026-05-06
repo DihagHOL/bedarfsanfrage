@@ -44,17 +44,23 @@ const EINKAUF_FIELDS = [
 ];
 
 // Status-Werte → Darstellung (kommt von Power Automate)
-// Reihenfolge wichtig: spezifischere zuerst (partielle Treffersuche)
+// Reihenfolge wichtig: spezifischere (exakte) Werte zuerst, Fallback-Partials am Ende
 const STATUS_STYLES = {
-  'angefragt':      { bg:'#f0f9ff', color:'#0369a1' },
-  'eingereicht':    { bg:'#eff6ff', color:'#1d4ed8' },
-  'in prüfung':     { bg:'#fffbeb', color:'#b45309' },
-  'freigegeben':    { bg:'#f0fdf4', color:'#15803d' },
-  'abgelehnt':      { bg:'#fef2f2', color:'#b91c1c' },
-  'bestellt':       { bg:'#faf5ff', color:'#7e22ce' },
-  'erledigt':       { bg:'#f3f4f6', color:'#374151' },
-  'in bearbeitung': { bg:'#fffbeb', color:'#b45309' },
-  'offen':          { bg:'#eff6ff', color:'#1d4ed8' },
+  // ── Exakte SP-Auswahlwerte ──
+  'eingereicht':                        { bg:'#fce7f3', color:'#be185d' },
+  'in prüfung (einkauf)':               { bg:'#ccfbf1', color:'#0f766e' },
+  'in prüfung (werkleitung)':           { bg:'#ffe4e6', color:'#be123c' },
+  'in prüfung (strategischer einkauf)': { bg:'#ccfbf1', color:'#0f766e' },
+  'in prüfung (controlling)':           { bg:'#ccfbf1', color:'#0f766e' },
+  'freigegeben':                        { bg:'#f3e8ff', color:'#7e22ce' },
+  'abgelehnt':                          { bg:'#f3f4f6', color:'#374151' },
+  'bestellt':                           { bg:'#dbeafe', color:'#1d4ed8' },
+  'erledigt':                           { bg:'#f3f4f6', color:'#374151' },
+  // ── Generische Fallbacks (Teilübereinstimmung) ──
+  'in prüfung':                         { bg:'#ccfbf1', color:'#0f766e' },
+  'angefragt':                          { bg:'#f0f9ff', color:'#0369a1' },
+  'in bearbeitung':                     { bg:'#fffbeb', color:'#b45309' },
+  'offen':                              { bg:'#eff6ff', color:'#1d4ed8' },
 };
 
 const SYSTEM_FIELDS = new Set([
@@ -674,8 +680,9 @@ function renderDetail(id) {
     ).then(r => r.ok ? r.json() : { value: [] })
      .then(data => {
        const files = data.value || [];
+       const spOrigin = 'https://' + SP_SITE.split(':/')[0];
        attachEl.innerHTML = files.length
-         ? files.map(f => `<div class="attach-item">📎 <a href="${esc(f.ServerRelativeUrl)}" target="_blank">${esc(f.FileName)}</a></div>`).join('')
+         ? files.map(f => `<div class="attach-item">📎 <a href="${esc(spOrigin + f.ServerRelativeUrl)}" target="_blank">${esc(f.FileName)}</a></div>`).join('')
          : '<span class="no-order">Keine Anhänge.</span>';
      })
      .catch(() => { attachEl.innerHTML = ''; });
@@ -722,10 +729,40 @@ function detailSidebar(item, isEinkauf) {
 // Keywords to detect approval-related SP columns by displayName or internal name
 const APPROVAL_RE   = /genehmig|freigab|entscheid|ablehn|kommentar.*genehm|genehm.*kommentar/i;
 const STAGE_MAP = [
-  { label: 'Einkauf',          re: /einkauf/i },
-  { label: 'Verwaltung',       re: /verwaltung/i },
-  { label: 'Geschäftsführung', re: /\bgf\b|geschäftsführ|geschaeftsfuehr/i },
+  { label: 'Einkauf',                    re: /einkauf/i },
+  { label: 'Werkleitung',                re: /werkleitung/i },
+  { label: 'Strategischer Einkauf',      re: /strategisch/i },
+  { label: 'Controlling',                re: /controlling/i },
+  { label: 'Geschäftsführung',           re: /\bgf\b|geschäftsführ|geschaeftsfuehr/i },
 ];
+
+// Workflow-Reihenfolge für die Status-Zeitleiste
+const WORKFLOW_STAGES = [
+  'Eingereicht',
+  'In Prüfung (Einkauf)',
+  'In Prüfung (Werkleitung)',
+  'In Prüfung (strategischer Einkauf)',
+  'In Prüfung (Controlling)',
+  'Freigegeben',
+  'Bestellt',
+];
+
+function statusTimeline(statusVal) {
+  const sv    = (statusVal || '').trim();
+  const svL   = sv.toLowerCase();
+  const isRej = /abgelehnt/i.test(sv);
+  const idx   = WORKFLOW_STAGES.findIndex(s => s.toLowerCase() === svL);
+  return WORKFLOW_STAGES.map((stage, i) => {
+    let dot, cls;
+    if (isRej)     { dot = i === 0 ? '✓' : '–'; cls = i === 0 ? 'ap-ok' : 'ap-neutral'; }
+    else if (idx < 0) { dot = '○'; cls = 'ap-neutral'; }
+    else if (i < idx) { dot = '✓'; cls = 'ap-ok'; }
+    else if (i === idx) { dot = '●'; cls = 'ap-pending'; }
+    else              { dot = '○'; cls = 'ap-neutral'; }
+    const bold = i === idx ? ' style="font-weight:600"' : '';
+    return `<div class="approval-stage"><div class="ap-dot ${cls}">${dot}</div><div class="ap-body"><div class="ap-stage-label"${bold}>${esc(stage)}</div></div></div>`;
+  }).join('') + (isRej ? `<div class="ap-comment-box" style="margin-top:6px;color:#b91c1c">✗ ${esc(sv)}</div>` : '');
+}
 
 function approvalStyle(val) {
   const v = (val || '').toLowerCase();
@@ -787,10 +824,12 @@ function renderApprovalCard(item) {
       <div class="detail-card-header">Status &amp; Genehmigung</div>
       <div class="detail-card-body">
         <div class="ap-current-status">${statusBadge(statusVal)}</div>
-        ${noData
-          ? `<p class="ap-empty">Noch keine Genehmigungsdaten — Power Automate aktualisiert diesen Bereich automatisch.</p>`
-          : `<div class="approval-stages">${stagesHtml}${ungroupedHtml}</div>`
-        }
+        <div class="approval-stages">
+          ${noData
+            ? statusTimeline(statusVal)
+            : stagesHtml + ungroupedHtml
+          }
+        </div>
       </div>
     </div>`;
 }
@@ -814,18 +853,20 @@ async function openOrderModal(itemId) {
     if (r.ok) existingFiles = (await r.json()).value || [];
   } catch(e) { /* non-critical */ }
 
+  const spOrigin    = 'https://' + SP_SITE.split(':/')[0];
   const existingHtml = existingFiles.length ? `
     <div class="attach-existing">
-      ${existingFiles.map(f => `<div class="attach-item">📎 <a href="${esc(f.ServerRelativeUrl)}" target="_blank">${esc(f.FileName)}</a></div>`).join('')}
+      ${existingFiles.map(f => `<div class="attach-item">📎 <a href="${esc(spOrigin + f.ServerRelativeUrl)}" target="_blank">${esc(f.FileName)}</a></div>`).join('')}
     </div>` : '';
 
-  const required  = angeboteAnzahl(parseFloat(geschPreis) || 0);
-  const initialN  = Math.max(1, required);
+  const required   = angeboteAnzahl(parseFloat(geschPreis) || 0);
   const attachNote = required === 0
-    ? 'Angebotsunterlagen (optional, max. 5)'
-    : `Angebote anhängen – Regelwerk: mind. ${required} erforderlich (max. 5)`;
-  const fileSlots = Array.from({length: initialN}, () =>
-    `<input type="file" class="attach-file-input" accept=".pdf,.PDF" style="margin-bottom:6px"/>`
+    ? 'Angebotsunterlagen (optional)'
+    : `Angebote – Regelwerk: mind. ${required} erforderlich`;
+  // Always show 1 slot; extra slots (up to required-1 or 4 more) go into a collapsed <details>
+  const extraN     = Math.max(0, required - 1);
+  const extraSlots = Array.from({length: extraN}, (_, i) =>
+    `<input type="file" class="attach-file-input" accept=".pdf,.PDF" style="margin-bottom:6px" data-slot="${i+2}"/>`
   ).join('');
 
   $id('modal-title').textContent = 'Einkauf-Daten eintragen';
@@ -851,9 +892,14 @@ async function openOrderModal(itemId) {
     <div class="form-group">
       <label>${esc(attachNote)}</label>
       ${existingHtml}
-      <div id="attach-inputs">${fileSlots}</div>
-      <button type="button" class="btn btn-sm btn-ghost" id="btn-add-attach" onclick="addAttachInput()"
-        style="margin-top:4px"${initialN >= 5 ? ' disabled' : ''}>+ Weiteres Angebot</button>
+      <div id="attach-inputs">
+        <input type="file" class="attach-file-input" accept=".pdf,.PDF" style="margin-bottom:6px" data-slot="1"/>
+      </div>
+      <details id="attach-extra-wrap" style="margin-top:4px">
+        <summary class="attach-more-toggle">+ Weitere Angebote${required > 1 ? ` (${extraN} gem. Regelwerk vorausgefüllt)` : ''}</summary>
+        <div id="attach-extra-inputs" style="margin-top:6px">${extraSlots}</div>
+        <button type="button" class="btn btn-sm btn-ghost" id="btn-add-attach" onclick="addAttachInput()" style="margin-top:4px">+ Weiteres hinzufügen</button>
+      </details>
     </div>`;
   $id('modal-footer').innerHTML = `
     <button class="btn btn-ghost" onclick="closeModal()">Abbrechen</button>
@@ -862,15 +908,16 @@ async function openOrderModal(itemId) {
 }
 
 function addAttachInput() {
-  const wrap = $id('attach-inputs');
-  if (!wrap) return;
-  const count = wrap.querySelectorAll('input[type=file]').length;
-  if (count >= 5) { $id('btn-add-attach').disabled = true; return; }
+  const extra  = $id('attach-extra-inputs') || $id('attach-inputs');
+  const addBtn = $id('btn-add-attach');
+  if (!extra) return;
+  const total = document.querySelectorAll('.attach-file-input').length;
+  if (total >= 5) { if (addBtn) addBtn.disabled = true; return; }
   const inp = document.createElement('input');
   inp.type = 'file'; inp.accept = '.pdf,.PDF'; inp.className = 'attach-file-input';
   inp.style.marginBottom = '6px';
-  wrap.appendChild(inp);
-  if (count + 1 >= 5) $id('btn-add-attach').disabled = true;
+  extra.appendChild(inp);
+  if (document.querySelectorAll('.attach-file-input').length >= 5 && addBtn) addBtn.disabled = true;
 }
 
 async function saveOrderData(itemId) {
@@ -1757,7 +1804,7 @@ function renderPanel(item, editMode = false) {
       .filter(([k,c]) => APPROVAL_RE.test(c.displayName||k) && !SYSTEM_FIELDS.has(k))
       .map(([k,c]) => ({ key:k, label:c.displayName||k, val:getField(item,k) }))
       .filter(c => c.val !== null && c.val !== undefined && c.val !== '');
-    if (!found.length) return '<p class="ap-empty">Noch keine Genehmigungsdaten.</p>';
+    if (!found.length) return `<div class="approval-stages">${statusTimeline(statusVal)}</div>`;
     const stages = STAGE_MAP.map(s => ({ label:s.label, cols:found.filter(c=>s.re.test(c.label)||s.re.test(c.key)) })).filter(s=>s.cols.length);
     const assigned = new Set(stages.flatMap(s=>s.cols.map(c=>c.key)));
     const extra = found.filter(c=>!assigned.has(c.key));

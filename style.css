@@ -528,8 +528,12 @@ textarea.pf-input { resize: vertical; min-height: 52px; }
 }
 .ap-ok      { background: #dcfce7; color: #15803d; }
 .ap-no      { background: #fee2e2; color: #b91c1c; }
-.ap-pending { background: #fef9c3; color: #b45309; }
+.ap-pending { background: #dbeafe; color: #1d4ed8; font-weight: 700; }
 .ap-neutral { background: #f3f4f6; color: #9ca3af; border: 1px solid #e5e7eb; }
+/* Einkauf modal – collapsible extra Angebote */
+.attach-more-toggle { font-size:.82rem; color:#1a56db; cursor:pointer; list-style:none; }
+.attach-more-toggle::-webkit-details-marker { display:none; }
+details#attach-extra-wrap[open] .attach-more-toggle { color:#374151; }
 
 .ap-body { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
 .ap-stage-label { font-size: .78rem; font-weight: 600; color: #374151; }
