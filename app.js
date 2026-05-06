@@ -178,11 +178,17 @@ async function gGet(path) {
 }
 async function gPost(path, body) {
   const tok = await getToken();
-  const r   = await fetch(API + path, {
+  const url = API + path;
+  console.log('[gPost] POST', url, JSON.stringify(body).slice(0, 300));
+  const r   = await fetch(url, {
     method:'POST', headers:{ Authorization:'Bearer '+tok, 'Content-Type':'application/json' },
     body: JSON.stringify(body)
   });
-  if (!r.ok) throw new Error(`Graph POST ${r.status}: ${await r.text().catch(()=>'')}`);
+  if (!r.ok) {
+    const txt = await r.text().catch(()=>'');
+    console.error('[gPost] error', r.status, txt);
+    throw new Error(`Graph POST ${r.status}: ${txt}`);
+  }
   return r.json();
 }
 async function gPatch(path, body) {
@@ -1489,16 +1495,24 @@ async function submitRequest() {
 
     let skipped, newItem;
     let postAttempt = 0;
+    // Try by listId first, then by list name (Graph sometimes 404s on stale GUIDs)
+    const postPaths = () => [
+      `/sites/${siteId}/lists/${listId}/items`,
+      `/sites/${siteId}/lists/${encodeURIComponent(SP_LIST)}/items`,
+    ];
     while (true) {
       postAttempt++;
+      const paths = postPaths();
+      const path  = paths[(postAttempt - 1) % paths.length];
+      console.log(`[submitRequest] attempt ${postAttempt} → ${path}, siteId=${siteId}, listId=${listId}`);
       try {
         const flds = buildFields(d, FORM_FIELDS);
-        ({ skipped, newItem } = await postRetry(`/sites/${siteId}/lists/${listId}/items`, flds));
+        ({ skipped, newItem } = await postRetry(path, flds));
         break; // success
       } catch(ePost) {
         const is404 = ePost.message.includes('404') || ePost.message.includes('itemNotFound');
-        if (is404 && postAttempt < 3) {
-          toast(`SharePoint-IDs werden aktualisiert… (Versuch ${postAttempt})`, 'info');
+        if (is404 && postAttempt < 4) {
+          toast(`SharePoint-Verbindung wird neu aufgebaut… (Versuch ${postAttempt})`, 'info');
           await discoverSP();
           continue;
         }
