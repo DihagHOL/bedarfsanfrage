@@ -31,8 +31,9 @@ const FORM_FIELDS = [
   { key:'Lieferant2',        label:'Lieferant 2 (Alternative)',    step:3, alsoTry:['Vendor2','Supplier2','Lieferant_2'] },
   { key:'Lieferant3',        label:'Lieferant 3 (Alternative)',    step:3, alsoTry:['Vendor3','Supplier3','Lieferant_3'] },
   { key:'Lieferant4',        label:'Lieferant 4 (Alternative)',    step:3, alsoTry:['Vendor4','Supplier4','Lieferant_4'] },
-  { key:'GeschaetzterPreis', label:'Geschätzter Preis netto (€)',  step:3, alsoTry:['EstimatedPrice','Preis','Price'] },
-  { key:'Kostenstelle',      label:'Kostenstelle',                 step:3, alsoTry:['CostCenter'] },
+  { key:'GeschaetzterPreis',    label:'Geschätzter Preis netto (€)',  step:3, alsoTry:['EstimatedPrice','Preis','Price'] },
+  { key:'Kostenstelle',         label:'Kostenstelle',                 step:3, alsoTry:['CostCenter'] },
+  { key:'LeadBuyerAbschluss',   label:'Lead-Buyer-Abschluss',         step:3, alsoTry:['LeadBuyer','LeadBuyerAbschlus'] },
 ];
 
 // Felder die Einkauf nach der Einreichung befüllt
@@ -144,6 +145,19 @@ async function getToken() {
   catch(e) {
     if (e instanceof msal.InteractionRequiredAuthError) {
       await msalApp.acquireTokenRedirect({scopes:SCOPES});
+    }
+    throw e;
+  }
+}
+
+// SharePoint REST API needs a token for the SP resource (different from Graph)
+const SP_SCOPES = [`https://${SP_SITE.split(':/')[0]}/Sites.ReadWrite.All`];
+async function getSpToken() {
+  if (!account) throw new Error('Nicht angemeldet');
+  try { return (await msalApp.acquireTokenSilent({ scopes: SP_SCOPES, account })).accessToken; }
+  catch(e) {
+    if (e instanceof msal.InteractionRequiredAuthError) {
+      await msalApp.acquireTokenRedirect({ scopes: SP_SCOPES });
     }
     throw e;
   }
@@ -653,7 +667,7 @@ function renderDetail(id) {
   // Load attachments async
   const attachEl = document.getElementById('detail-attachments');
   if (attachEl) {
-    getToken().then(tok =>
+    getSpToken().then(tok =>
       fetch(`${SP_BASE}/_api/web/lists/getByTitle('${SP_LIST}')/items(${id})/AttachmentFiles`, {
         headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json;odata=nometadata' }
       })
@@ -793,7 +807,7 @@ async function openOrderModal(itemId) {
   // Fetch existing attachments
   let existingFiles = [];
   try {
-    const tok = await getToken();
+    const tok = await getSpToken();
     const r = await fetch(`${SP_BASE}/_api/web/lists/getByTitle('${SP_LIST}')/items(${itemId})/AttachmentFiles`, {
       headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json;odata=nometadata' }
     });
@@ -818,7 +832,7 @@ async function openOrderModal(itemId) {
   $id('modal-body').innerHTML = `
     <div class="form-group" style="margin-bottom:12px">
       <label>Bestellnummer</label>
-      <input type="text" id="m-ordernr" value="${esc(orderNr)}" placeholder="z. B. PO-2025-1234"/>
+      <input type="text" id="m-ordernr" value="${esc(orderNr)}" placeholder="z. B. BE252093"/>
     </div>
     <div class="form-group" style="margin-bottom:12px">
       <label style="display:flex;align-items:center;justify-content:space-between">
@@ -900,7 +914,7 @@ async function saveOrderData(itemId) {
 
   // Upload attachments
   if (files.length) {
-    const tok = await getToken();
+    const tok = await getSpToken();
     const errors = [];
     for (const file of files) {
       try {
@@ -992,6 +1006,8 @@ function initWizard() {
   if (wNote) wNote.textContent = '';
   const wBtn = $id('wizard-btn-add-attach');
   if (wBtn) wBtn.disabled = false;
+  const lbaEl = $id('f-LeadBuyerAbschluss');
+  if (lbaEl) lbaEl.checked = false;
   // Reset progressive Lieferant disclosure
   [2,3,4].forEach(n => {
     const grp = $id('lieferant-extra-' + n);
@@ -1055,8 +1071,9 @@ function wNext(step) {
       Lieferant2:        $id('f-Lieferant2').value.trim(),
       Lieferant3:        $id('f-Lieferant3').value.trim(),
       Lieferant4:        $id('f-Lieferant4').value.trim(),
-      GeschaetzterPreis: $id('f-GeschaetzterPreis').value ? parseFloat($id('f-GeschaetzterPreis').value) : null,
-      Kostenstelle:      $id('f-Kostenstelle').value.trim(),
+      GeschaetzterPreis:  $id('f-GeschaetzterPreis').value ? parseFloat($id('f-GeschaetzterPreis').value) : null,
+      Kostenstelle:       $id('f-Kostenstelle').value.trim(),
+      LeadBuyerAbschluss: $id('f-LeadBuyerAbschluss')?.checked ?? false,
     };
     buildReview();
   }
@@ -1090,15 +1107,18 @@ function addLieferant(n) {
 
 function updatePreisHint() {
   const preis = parseFloat($id('f-GeschaetzterPreis').value) || 0;
+  const lba   = $id('f-LeadBuyerAbschluss')?.checked ?? false;
   const hint  = $id('preis-route-hint');
   if (preis > 0) {
-    hint.textContent = genehmigungsweg(preis);
+    let text = genehmigungsweg(preis);
+    if (lba) text = text.replace(/ \(entfällt bei Lead-Buyer-Abschluss\)/g, ' ✓ entfällt');
+    hint.textContent = text;
     hint.style.display = 'block';
   } else {
     hint.style.display = 'none';
   }
-  // Sync wizard attachment slots
-  const req     = angeboteAnzahl(preis);
+  // Sync wizard attachment slots (0 required if Lead-Buyer-Abschluss)
+  const req     = lba ? 0 : angeboteAnzahl(preis);
   const wrap    = $id('wizard-attach-inputs');
   const note    = $id('attach-required-note');
   const addBtn  = $id('wizard-btn-add-attach');
@@ -1219,6 +1239,7 @@ function reviewSection(title, rows) {
 // ── SUBMIT ───────────────────────────────────────────────────────────────────
 const NUMBER_FIELDS = new Set(['GeschaetzterPreis','Menge','Mindestlagermenge','TatsaechlicherPreis']);
 const DATE_FIELDS   = new Set(['Termin','Lieferdatum']);
+const BOOL_FIELDS   = new Set(['LeadBuyerAbschluss']);
 
 // SP Graph requires ISO 8601 for DateTime columns: "2026-05-10T00:00:00Z"
 // "Date Only" columns want just the date: "2026-05-10"
@@ -1236,6 +1257,10 @@ function buildFields(data, fieldDefs) {
   for (const fd of fieldDefs) {
     const spCol = resolvedFields[fd.key];
     const val   = data[fd.key];
+    if (BOOL_FIELDS.has(fd.key)) {
+      if (spCol) fields[spCol] = Boolean(val);
+      continue;
+    }
     if (!spCol || val === null || val === undefined || val === '') continue;
     if (DATE_FIELDS.has(fd.key)) {
       const d = toSpDate(val, spCol);
@@ -1345,7 +1370,7 @@ async function submitRequest() {
     if (wizardFiles.length && newItem?.id) {
       const itemId = newItem.id;
       btn.textContent = 'Anhänge werden hochgeladen…';
-      const tok = await getToken();
+      const tok = await getSpToken();
       const errors = [];
       for (const file of wizardFiles) {
         try {
