@@ -390,6 +390,21 @@
   </main>
 </div><!-- /app -->
 
+<!-- PDF Viewer Modal -->
+<div id="pdf-viewer-modal" class="pdf-viewer-modal" style="display:none" onclick="if(event.target===this)closePdfViewer()">
+  <div class="pdf-viewer-container">
+    <div class="pdf-viewer-header">
+      <span id="pdf-viewer-title" class="pdf-viewer-title">Dokument</span>
+      <div class="pdf-viewer-actions">
+        <button id="pdf-viewer-ext" class="btn btn-sm btn-outline">↗ In SharePoint öffnen</button>
+        <button class="btn btn-sm btn-ghost" onclick="closePdfViewer()">✕ Schließen</button>
+      </div>
+    </div>
+    <iframe id="pdf-viewer-iframe" src="about:blank" frameborder="0" allowfullscreen
+      style="flex:1;width:100%;border:none;background:#525659"></iframe>
+  </div>
+</div>
+
 <!-- Modal -->
 <div id="modal-overlay" class="modal-overlay hidden">
   <div class="modal">

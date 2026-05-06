@@ -1495,68 +1495,43 @@ async function submitRequest() {
 
   try {
     const d = { ...wizardData.step1, ...wizardData.step2, ...wizardData.step3 };
-    const fields = buildFields(d, FORM_FIELDS);
+    const allFields = buildFields(d, FORM_FIELDS);
 
-    if (!fields['Title']) { toast('Titel fehlt.', 'error'); btn.disabled=false; btn.textContent='✓ Anfrage einreichen'; return; }
+    if (!allFields['Title']) { toast('Titel fehlt.', 'error'); btn.disabled=false; btn.textContent='✓ Anfrage einreichen'; return; }
 
-    // Use the DnD file store (no DOM inputs needed)
     const wizardFiles = [...wizardFilesArr];
 
-    // Ensure SP IDs are valid before attempting POST
-    if (!siteId || !listId) {
-      toast('SharePoint-Verbindung wird hergestellt…', 'info');
-      await discoverSP();
-    }
+    if (!siteId || !listId) await discoverSP();
 
-    let skipped, newItem;
-    let postAttempt = 0;
-    // Try by listId first, then by list name (Graph sometimes 404s on stale GUIDs)
-    const postPaths = () => [
-      `/sites/${siteId}/lists/${listId}/items`,
-      `/sites/${siteId}/lists/${encodeURIComponent(SP_LIST)}/items`,
-    ];
-    while (true) {
-      postAttempt++;
-      const paths = postPaths();
-      const path  = paths[(postAttempt - 1) % paths.length];
-      console.log(`[submitRequest] attempt ${postAttempt} → ${path}, siteId=${siteId}, listId=${listId}`);
+    const listPath = `/sites/${siteId}/lists/${encodeURIComponent(SP_LIST)}`;
+
+    // ── Schritt 1: Element mit nur Title anlegen (minimal, kann nicht an Feldern scheitern) ──
+    btn.textContent = 'Anfrage wird angelegt…';
+    const newItem = await gPost(`${listPath}/items`, { fields: { Title: allFields['Title'] } });
+    const itemId  = newItem.id;
+    console.log('[submitRequest] item created, id=', itemId);
+
+    // ── Schritt 2: Restliche Felder per PATCH nachpflegen ──
+    const patchFields = { ...allFields };
+    delete patchFields['Title'];
+    if (Object.keys(patchFields).length) {
+      btn.textContent = 'Felder werden gespeichert…';
       try {
-        const flds = buildFields(d, FORM_FIELDS);
-        console.log(`[submitRequest] attempt ${postAttempt} fields:`, JSON.stringify(flds));
-        ({ skipped, newItem } = await postRetry(path, flds));
-        break; // success
-      } catch(ePost) {
-        const is404 = ePost.message.includes('404') || ePost.message.includes('itemNotFound');
-        if (is404 && postAttempt < 4) {
-          toast(`SharePoint-Verbindung wird neu aufgebaut… (Versuch ${postAttempt})`, 'info');
-          await discoverSP();
-          continue;
-        }
-        throw ePost;
+        await gPatch(`${listPath}/items/${itemId}/fields`, patchFields);
+      } catch(patchErr) {
+        console.warn('[submitRequest] PATCH:', patchErr.message);
+        // Nicht kritisch – Element existiert bereits
       }
     }
 
-    if (skipped.length) {
-      const labels = skipped.map(s => {
-        const colName = s.replace(/\(\d+\)$/, '');
-        const fd = FORM_FIELDS.find(f => resolvedFields[f.key] === colName || f.key === colName);
-        return fd ? fd.label : colName;
-      });
-      toast(`Eingereicht. Folgende Felder wurden von SharePoint abgelehnt und nicht gespeichert: ${labels.join(', ')}`, 'info');
-    } else {
-      toast('Anfrage eingereicht! Power Automate startet den Genehmigungsprozess.', 'success');
-    }
-
-    // Upload wizard attachments (errors shown as separate toast, never block the submit)
-    if (wizardFiles.length && newItem?.id) {
-      const itemId = newItem.id;
+    // ── Schritt 3: Anhänge hochladen ──
+    if (wizardFiles.length) {
       btn.textContent = 'Anhänge werden hochgeladen…';
       let tok;
-      try {
-        tok = await getSpToken();
-      } catch(spTokErr) {
-        console.warn('[submitRequest] SP-Token Fehler:', spTokErr);
-        toast(`Anhänge konnten nicht hochgeladen werden (Authentifizierungsfehler). Die Anfrage wurde gespeichert.`, 'error');
+      try { tok = await getSpToken(); }
+      catch(tokErr) {
+        console.warn('[submitRequest] SP-Token:', tokErr);
+        toast('Anfrage erstellt. Anhänge konnten nicht hochgeladen werden (Token-Fehler).', 'error');
         await loadItems(false);
         navigate('mine');
         return;
@@ -1567,13 +1542,15 @@ async function submitRequest() {
           const fname = encodeURIComponent(file.name);
           const r = await fetch(
             `${SP_BASE}/_api/web/lists/getByTitle('${SP_LIST}')/items(${itemId})/AttachmentFiles/add(FileName='${fname}')`,
-            { method: 'POST', headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json;odata=nometadata' }, body: await file.arrayBuffer() }
+            { method:'POST', headers:{ Authorization:'Bearer '+tok, Accept:'application/json;odata=nometadata' }, body: await file.arrayBuffer() }
           );
-          if (!r.ok) errors.push(file.name + ' (' + r.status + ')');
-        } catch(e) { console.warn('[submitRequest] Anhang-Upload Fehler:', e); errors.push(file.name); }
+          if (!r.ok) errors.push(`${file.name} (${r.status})`);
+        } catch(e) { console.warn('[submitRequest] Anhang:', e); errors.push(file.name); }
       }
-      if (errors.length) toast('Anhänge konnten nicht hochgeladen werden: ' + errors.join(', '), 'error');
-      else toast(`${wizardFiles.length} Angebot(e) erfolgreich angehängt.`, 'success');
+      if (errors.length) toast(`Anfrage erstellt. Anhänge fehlgeschlagen: ${errors.join(', ')}`, 'error');
+      else toast(`Anfrage eingereicht! ${wizardFiles.length} Angebot(e) angehängt.`, 'success');
+    } else {
+      toast('Anfrage eingereicht! Power Automate startet den Genehmigungsprozess.', 'success');
     }
 
     await loadItems(false);
@@ -2082,15 +2059,38 @@ function spFullUrl(relUrl) {
 }
 
 function openAttachment(relUrl) {
+  // Legacy: open directly in new tab
   window.open(spFullUrl(relUrl), '_blank', 'noopener');
+}
+
+function openPdfViewer(relUrl, fileName) {
+  const fullUrl  = spFullUrl(relUrl);
+  const overlay  = $id('pdf-viewer-modal');
+  const iframe   = $id('pdf-viewer-iframe');
+  const titleEl  = $id('pdf-viewer-title');
+  const extBtn   = $id('pdf-viewer-ext');
+  if (!overlay) { window.open(fullUrl, '_blank', 'noopener'); return; }
+  if (titleEl)  titleEl.textContent = fileName || 'Dokument';
+  if (extBtn)   extBtn.onclick = () => window.open(fullUrl, '_blank', 'noopener');
+  iframe.src = fullUrl;
+  overlay.style.display = 'flex';
+}
+
+function closePdfViewer() {
+  const overlay = $id('pdf-viewer-modal');
+  const iframe  = $id('pdf-viewer-iframe');
+  if (overlay) overlay.style.display = 'none';
+  if (iframe)  iframe.src = 'about:blank';
 }
 
 function attachmentLink(f) {
   const safeUrl = esc(f.ServerRelativeUrl.replace(/#/g,'%23').replace(/\?/g,'%3F').replace(/ /g,'%20'));
   const name    = esc(f.FileName);
+  const isPdf   = /\.pdf$/i.test(f.FileName);
   return `<div class="attach-item">
     📎 <span class="attach-name">${name}</span>
     <span class="attach-actions">
+      ${isPdf ? `<button class="btn-attach-dl" onclick="openPdfViewer('${safeUrl}','${name}')" title="PDF anzeigen">👁 Anzeigen</button>` : ''}
       <button class="btn-attach-dl" onclick="openAttachment('${safeUrl}')" title="In SharePoint öffnen">↗ Öffnen</button>
     </span>
   </div>`;

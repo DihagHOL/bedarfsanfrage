@@ -537,6 +537,28 @@ textarea.pf-input { resize: vertical; min-height: 52px; }
 .attach-more-toggle::-webkit-details-marker { display:none; }
 details#attach-extra-wrap[open] .attach-more-toggle { color:#374151; }
 
+/* ── PDF Viewer Modal ── */
+.pdf-viewer-modal {
+  position: fixed; inset: 0; z-index: 4000;
+  background: rgba(0,0,0,.65);
+  display: flex; align-items: center; justify-content: center;
+  padding: 12px;
+}
+.pdf-viewer-container {
+  background: #fff; border-radius: 12px;
+  width: 94vw; height: 90vh; max-width: 1200px;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 24px 64px rgba(0,0,0,.4);
+}
+.pdf-viewer-header {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 14px; border-bottom: 1px solid #e5e7eb;
+  background: #f8fafc; flex-shrink: 0;
+}
+.pdf-viewer-title { font-weight: 600; font-size: .9rem; color: #374151; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pdf-viewer-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
 /* ── Wizard Drag-and-Drop Zone ── */
 .drop-zone {
   border: 2px dashed #cbd5e1;
