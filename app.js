@@ -2011,44 +2011,36 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-// ── ATTACHMENT DOWNLOAD ───────────────────────────────────────────────────────
-async function downloadAttachment(relUrl, filename) {
-  try {
-    const tok = await getSpToken();
-    const url = 'https://' + SP_SITE.split(':/')[0] + relUrl;
-    const r   = await fetch(url, { headers: { Authorization: 'Bearer ' + tok } });
-    if (!r.ok) throw new Error(r.status);
-    const blob = await r.blob();
-    const a    = document.createElement('a');
-    a.href     = URL.createObjectURL(blob);
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-  } catch(e) { toast('Anhang konnte nicht geladen werden: ' + e.message, 'error'); }
+// ── ATTACHMENT LINKS ─────────────────────────────────────────────────────────
+// Cross-origin fetch to SharePoint is blocked by CORS.
+// The user already has an AAD browser session → direct navigation works fine.
+function spFullUrl(relUrl) {
+  // Encode special chars that break URL parsing (# → %23, ? → %3F, space → %20)
+  const encoded = relUrl.replace(/%/g, '%25')   // must be first to avoid double-encoding
+                        .replace(/#/g, '%23')
+                        .replace(/\?/g, '%3F')
+                        .replace(/ /g,  '%20');
+  // But if SP already percent-encoded some chars, we'd double-encode — safer: only fix bare #
+  // Use a simpler targeted approach:
+  const safe = relUrl.split('/').map(seg =>
+    seg.replace(/#/g, '%23').replace(/\?/g, '%3F').replace(/ /g, '%20')
+  ).join('/');
+  return 'https://' + SP_SITE.split(':/')[0] + safe;
+}
+
+function openAttachment(relUrl) {
+  window.open(spFullUrl(relUrl), '_blank', 'noopener');
 }
 
 function attachmentLink(f) {
-  const url  = esc(f.ServerRelativeUrl);
-  const name = esc(f.FileName);
+  const safeUrl = esc(f.ServerRelativeUrl.replace(/#/g,'%23').replace(/\?/g,'%3F').replace(/ /g,'%20'));
+  const name    = esc(f.FileName);
   return `<div class="attach-item">
     📎 <span class="attach-name">${name}</span>
     <span class="attach-actions">
-      <button class="btn-attach-dl" onclick="downloadAttachment('${url}','${name}')" title="Herunterladen">⬇ Laden</button>
-      <button class="btn-attach-dl" onclick="openAttachment('${url}')" title="Öffnen">↗ Öffnen</button>
+      <button class="btn-attach-dl" onclick="openAttachment('${safeUrl}')" title="In SharePoint öffnen">↗ Öffnen</button>
     </span>
   </div>`;
-}
-
-async function openAttachment(relUrl) {
-  try {
-    const tok  = await getSpToken();
-    const url  = 'https://' + SP_SITE.split(':/')[0] + relUrl;
-    const r    = await fetch(url, { headers: { Authorization: 'Bearer ' + tok } });
-    if (!r.ok) throw new Error(r.status);
-    const blob = await r.blob();
-    window.open(URL.createObjectURL(blob), '_blank');
-  } catch(e) { toast('Anhang konnte nicht geöffnet werden: ' + e.message, 'error'); }
 }
 
 // ── TOAST ─────────────────────────────────────────────────────────────────────
