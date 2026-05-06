@@ -95,7 +95,7 @@ const ADMIN_EMAIL  = 'administrator@dihag.com';
 
 function getSettings(email) {
   const all = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
-  return Object.assign({ autoRefresh: true, pageSize: 100 }, all[(email||'').toLowerCase()] || {});
+  return Object.assign({ autoRefresh: false, pageSize: 100 }, all[(email||'').toLowerCase()] || {});
 }
 function saveUserSettings(email, patch) {
   const all = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
@@ -109,13 +109,26 @@ function getAllUserSettings() {
 }
 
 // ── AUTO-REFRESH ─────────────────────────────────────────────────────────────
+// autoRefreshTimer: 1-second tick; arCountdown: seconds until next refresh
 let autoRefreshTimer = null;
+let arCountdown = 30;
+let arPaused = false;   // user can pause without admin losing the feature-enable
 
 function startAutoRefresh() {
   stopAutoRefresh();
   if (!account) return;
   if (!getSettings(account.username).autoRefresh) { updateARBtn(); return; }
-  autoRefreshTimer = setInterval(() => loadItems(false), 30000);
+  arCountdown = 30;
+  arPaused    = false;
+  autoRefreshTimer = setInterval(() => {
+    if (arPaused) return;
+    arCountdown--;
+    if (arCountdown <= 0) {
+      arCountdown = 30;
+      loadItems(false);
+    }
+    updateARBtn();
+  }, 1000);
   updateARBtn();
 }
 function stopAutoRefresh() {
@@ -125,17 +138,27 @@ function stopAutoRefresh() {
 function updateARBtn() {
   const btn = $id('btn-autorefresh');
   if (!btn) return;
-  const on = !!autoRefreshTimer;
-  btn.classList.toggle('ar-on', on);
-  btn.title = on ? 'Auto-Aktualisierung AN (30s) – klicken zum Deaktivieren' : 'Auto-Aktualisierung AUS – klicken zum Aktivieren';
-  btn.textContent = on ? '⏱ Auto AN' : '⏱ Auto AUS';
+  // Feature visibility: only show button when admin has enabled autoRefresh for this user
+  const featureOn = !!(account && getSettings(account.username).autoRefresh);
+  btn.style.display = featureOn ? '' : 'none';
+  if (!featureOn) return;
+  const running = !!autoRefreshTimer && !arPaused;
+  btn.classList.toggle('ar-on', running);
+  if (running) {
+    btn.title       = `Auto-Aktualisierung AN – nächste in ${arCountdown}s – klicken zum Pausieren`;
+    btn.textContent = `⏱ ${arCountdown}s`;
+  } else {
+    btn.title       = 'Auto-Aktualisierung pausiert – klicken zum Fortsetzen';
+    btn.textContent = '⏱ Pause';
+  }
 }
 function toggleAutoRefresh() {
+  // Toggle pause/resume only — does NOT change the admin-controlled autoRefresh setting
   if (!account) return;
-  const email = account.username;
-  const newVal = !getSettings(email).autoRefresh;
-  saveUserSettings(email, { autoRefresh: newVal });
-  newVal ? startAutoRefresh() : stopAutoRefresh();
+  if (!getSettings(account.username).autoRefresh) return;
+  if (!autoRefreshTimer) { startAutoRefresh(); return; }
+  arPaused = !arPaused;
+  updateARBtn();
 }
 
 // ── APPROVER DISPLAY ─────────────────────────────────────────────────────────
@@ -2207,8 +2230,10 @@ async function openPdfViewer(relUrl, fileName) {
   // and benefits from CORS headers that SP sets for /_api/ routes with OAuth tokens.
   try {
     const tok    = await getSpToken();
-    // relUrl is server-relative, e.g. /sites/gruppe_shb/Lists/.../file.pdf
-    const apiUrl = `${SP_BASE}/_api/web/GetFileByServerRelativeUrl(@u)/$value?@u='${encodeURIComponent(relUrl)}'`;
+    // relUrl may arrive pre-encoded (e.g. %23 for #) from attachmentLink() — decode first
+    // to avoid double-encoding (%23 → %2523) which causes SP to return 404.
+    const rawRelUrl = decodeURIComponent(relUrl);
+    const apiUrl = `${SP_BASE}/_api/web/GetFileByServerRelativeUrl(@u)/$value?@u='${encodeURIComponent(rawRelUrl)}'`;
     const resp   = await fetch(apiUrl, { headers: { Authorization: 'Bearer ' + tok } });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const blob    = await resp.blob();
