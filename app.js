@@ -84,6 +84,7 @@ let resolvedFields = {};  // FORM_FIELDS key → actual SP internal name (null i
 let currentView = 'dashboard';
 let prevView    = 'dashboard';
 let wizardData  = {};
+let wizardFilesArr = []; // Drag-and-drop file store for wizard attachments
 let panelItemId = null;
 // SP column may be misspelled "Stauts" in some tenants → always try both
 const getStatusVal = item => getField(item,'Status') || getField(item,'Stauts') || '';
@@ -1141,14 +1142,13 @@ function initWizard() {
   if (firstRadio) firstRadio.checked = true;
   document.querySelectorAll('#beschaffungslogik-extra-cards .check-card').forEach(c => c.classList.remove('selected'));
   // Reset wizard attachments
-  const wWrap = $id('wizard-attach-inputs');
-  if (wWrap) wWrap.innerHTML = '<input type="file" class="wizard-attach-file" accept=".pdf,.PDF" style="margin-bottom:6px"/>';
+  wizardFilesArr = [];
+  renderWizardFiles();
   const wSec = $id('wizard-attachments');
   if (wSec) wSec.style.display = 'none';
   const wNote = $id('attach-required-note');
   if (wNote) wNote.textContent = '';
-  const wBtn = $id('wizard-btn-add-attach');
-  if (wBtn) wBtn.disabled = false;
+  initWizardDrop();
   const lbaEl = $id('f-LeadBuyerAbschluss');
   if (lbaEl) lbaEl.checked = false;
   // Reset progressive Lieferant disclosure
@@ -1260,41 +1260,59 @@ function updatePreisHint() {
   } else {
     hint.style.display = 'none';
   }
-  // Sync wizard attachment slots (0 required if Lead-Buyer-Abschluss)
+  // Show/hide attachment section and update required-count note
   const req     = lba ? 0 : angeboteAnzahl(preis);
-  const wrap    = $id('wizard-attach-inputs');
-  const note    = $id('attach-required-note');
-  const addBtn  = $id('wizard-btn-add-attach');
   const section = $id('wizard-attachments');
-  if (!wrap) return;
+  const note    = $id('attach-required-note');
+  if (!section) return;
   section.style.display = 'block';
-  if (req === 0) {
-    note.textContent = '(optional)';
-  } else {
-    note.textContent = `mind. ${req} erforderlich gemäß Regelwerk`;
-  }
-  // Ensure at least req slots exist (don't remove existing ones with files)
-  const current = wrap.querySelectorAll('input[type=file]').length;
-  for (let i = current; i < Math.max(1, req); i++) {
-    const inp = document.createElement('input');
-    inp.type = 'file'; inp.accept = '.pdf,.PDF'; inp.className = 'wizard-attach-file';
-    inp.style.marginBottom = '6px';
-    wrap.appendChild(inp);
-  }
-  if (addBtn) addBtn.disabled = wrap.querySelectorAll('input[type=file]').length >= 5;
+  if (note) note.textContent = req === 0 ? '(optional)' : `mind. ${req} erforderlich gemäß Regelwerk`;
 }
 
-function addWizardAttach() {
-  const wrap   = $id('wizard-attach-inputs');
-  const addBtn = $id('wizard-btn-add-attach');
-  if (!wrap) return;
-  const count = wrap.querySelectorAll('input[type=file]').length;
-  if (count >= 5) { if (addBtn) addBtn.disabled = true; return; }
-  const inp = document.createElement('input');
-  inp.type = 'file'; inp.accept = '.pdf,.PDF'; inp.className = 'wizard-attach-file';
-  inp.style.marginBottom = '6px';
-  wrap.appendChild(inp);
-  if (wrap.querySelectorAll('input[type=file]').length >= 5) addBtn.disabled = true;
+// ── WIZARD DRAG-AND-DROP ATTACHMENTS ─────────────────────────────────────────
+function initWizardDrop() {
+  const zone  = $id('wizard-drop-zone');
+  const input = $id('wizard-file-input');
+  if (!zone || !input) return;
+  zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('drag-over'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    zone.classList.remove('drag-over');
+    addWizardFiles([...e.dataTransfer.files]);
+  });
+  zone.addEventListener('click', () => input.click());
+  input.addEventListener('change', () => { addWizardFiles([...input.files]); input.value = ''; });
+}
+
+function addWizardFiles(files) {
+  for (const f of files) {
+    if (wizardFilesArr.length >= 5) break;
+    if (!/\.pdf$/i.test(f.name)) { toast('Nur PDF-Dateien sind erlaubt.', 'error'); continue; }
+    if (wizardFilesArr.some(x => x.name === f.name && x.size === f.size)) continue; // skip duplicate
+    wizardFilesArr.push(f);
+  }
+  renderWizardFiles();
+}
+
+function removeWizardFile(idx) {
+  wizardFilesArr.splice(idx, 1);
+  renderWizardFiles();
+}
+
+function renderWizardFiles() {
+  const list = $id('wizard-file-list');
+  if (!list) return;
+  list.innerHTML = wizardFilesArr.map((f, i) =>
+    `<div class="wizard-file-item">
+      <span class="wf-icon">📎</span>
+      <span class="wf-name">${esc(f.name)}</span>
+      <span class="wf-size">${(f.size/1024).toFixed(0)} KB</span>
+      <button class="wf-remove" onclick="removeWizardFile(${i})" title="Entfernen">✕</button>
+    </div>`
+  ).join('');
+  const zone = $id('wizard-drop-zone');
+  if (zone) zone.classList.toggle('has-files', wizardFilesArr.length > 0);
 }
 
 function genehmigungsweg(gesamt) {
@@ -1409,12 +1427,10 @@ function buildFields(data, fieldDefs) {
       const d = toSpDate(val, spCol);
       if (d) fields[spCol] = d;
     } else if (NUMBER_FIELDS.has(fd.key)) {
-      const col = colByKey[spCol];
-      const n   = parseFloat(val);
-      if (!isNaN(n)) {
-        // Send as number only if SP column is actually numeric; otherwise string
-        fields[spCol] = col?.number ? n : String(n);
-      }
+      const n = parseFloat(val);
+      // Always send as JS number — Graph accepts numbers for all numeric/currency columns.
+      // Sending String(n) to a Currency column causes 404 "itemNotFound" in some Graph versions.
+      if (!isNaN(n)) fields[spCol] = n;
     } else {
       fields[spCol] = val;
     }
@@ -1483,9 +1499,8 @@ async function submitRequest() {
 
     if (!fields['Title']) { toast('Titel fehlt.', 'error'); btn.disabled=false; btn.textContent='✓ Anfrage einreichen'; return; }
 
-    // Collect wizard attachment files before navigation
-    const wizardFiles = [...document.querySelectorAll('.wizard-attach-file')]
-      .map(i => i.files[0]).filter(Boolean);
+    // Use the DnD file store (no DOM inputs needed)
+    const wizardFiles = [...wizardFilesArr];
 
     // Ensure SP IDs are valid before attempting POST
     if (!siteId || !listId) {
@@ -1507,6 +1522,7 @@ async function submitRequest() {
       console.log(`[submitRequest] attempt ${postAttempt} → ${path}, siteId=${siteId}, listId=${listId}`);
       try {
         const flds = buildFields(d, FORM_FIELDS);
+        console.log(`[submitRequest] attempt ${postAttempt} fields:`, JSON.stringify(flds));
         ({ skipped, newItem } = await postRetry(path, flds));
         break; // success
       } catch(ePost) {
@@ -1531,11 +1547,20 @@ async function submitRequest() {
       toast('Anfrage eingereicht! Power Automate startet den Genehmigungsprozess.', 'success');
     }
 
-    // Upload wizard attachments (non-blocking toast on error)
+    // Upload wizard attachments (errors shown as separate toast, never block the submit)
     if (wizardFiles.length && newItem?.id) {
       const itemId = newItem.id;
       btn.textContent = 'Anhänge werden hochgeladen…';
-      const tok = await getSpToken();
+      let tok;
+      try {
+        tok = await getSpToken();
+      } catch(spTokErr) {
+        console.warn('[submitRequest] SP-Token Fehler:', spTokErr);
+        toast(`Anhänge konnten nicht hochgeladen werden (Authentifizierungsfehler). Die Anfrage wurde gespeichert.`, 'error');
+        await loadItems(false);
+        navigate('mine');
+        return;
+      }
       const errors = [];
       for (const file of wizardFiles) {
         try {
@@ -1545,7 +1570,7 @@ async function submitRequest() {
             { method: 'POST', headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json;odata=nometadata' }, body: await file.arrayBuffer() }
           );
           if (!r.ok) errors.push(file.name + ' (' + r.status + ')');
-        } catch(e) { errors.push(file.name); }
+        } catch(e) { console.warn('[submitRequest] Anhang-Upload Fehler:', e); errors.push(file.name); }
       }
       if (errors.length) toast('Anhänge konnten nicht hochgeladen werden: ' + errors.join(', '), 'error');
       else toast(`${wizardFiles.length} Angebot(e) erfolgreich angehängt.`, 'success');

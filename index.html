@@ -307,8 +307,11 @@
               </div>
               <div class="form-group" id="wizard-attachments" style="display:none">
                 <label>Angebote anhängen (PDF) <span id="attach-required-note" class="field-hint" style="display:inline;font-size:.78rem"></span></label>
-                <div id="wizard-attach-inputs"></div>
-                <button type="button" class="btn btn-sm btn-ghost" id="wizard-btn-add-attach" onclick="addWizardAttach()" style="margin-top:4px">+ Weiteres Angebot</button>
+                <div id="wizard-drop-zone" class="drop-zone">
+                  <span class="drop-zone-text">📎 PDF-Dateien hier ablegen<br><small>oder klicken zum Auswählen (max. 5)</small></span>
+                </div>
+                <input type="file" id="wizard-file-input" accept=".pdf,.PDF" multiple style="display:none">
+                <div id="wizard-file-list"></div>
               </div>
             </div>
             <div class="wizard-footer">
