@@ -95,7 +95,7 @@ const ADMIN_EMAIL  = 'administrator@dihag.com';
 
 function getSettings(email) {
   const all = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
-  return Object.assign({ autoRefresh: false, pageSize: 100 }, all[(email||'').toLowerCase()] || {});
+  return Object.assign({ autoRefresh: false, pageSize: 100, dashboardVisible: true }, all[(email||'').toLowerCase()] || {});
 }
 function saveUserSettings(email, patch) {
   const all = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
@@ -230,6 +230,7 @@ async function bootDone() {
       }
     }
     startAutoRefresh();
+    applyDashboardVisibility();
     // Set user info in sidebar
     const name = account?.name || account?.username || '?';
     $id('hdr-av').textContent   = name.split(' ').map(p=>p[0]||'').join('').substring(0,2).toUpperCase();
@@ -446,7 +447,26 @@ async function loadItems(showToast = true) {
 const VIEW_TITLES = { dashboard:'Dashboard', new:'Neue Bedarfsanfrage',
   mine:'Meine Anfragen', all:'Alle Anfragen', detail:'Anfrage Details' };
 
+// Whether the current user may see the Dashboard view.
+// Admin always can; for others, dashboardVisible setting must be true (default true).
+function canSeeDashboard() {
+  if (!account) return false;
+  const email = account.username.toLowerCase();
+  if (email === ADMIN_EMAIL) return true;
+  return getSettings(email).dashboardVisible !== false;
+}
+
+// Show/hide dashboard nav item and redirect away if needed. Called on login + settings save.
+function applyDashboardVisibility() {
+  const ok = canSeeDashboard();
+  const navItem = document.querySelector('.nav-item[data-view="dashboard"]');
+  if (navItem) navItem.style.display = ok ? '' : 'none';
+  if (!ok && currentView === 'dashboard') navigate('mine');
+}
+
 function navigate(view, id) {
+  // Guard: redirect dashboard to 'mine' for users without access
+  if (view === 'dashboard' && !canSeeDashboard()) { view = 'mine'; }
   // Always close panels of all split views when navigating
   ['mine','all','dashboard'].forEach(v => {
     $id('panel-' + v)?.classList.add('hidden');
@@ -1670,7 +1690,9 @@ async function submitRequest() {
 
     if (!siteId || !listId) await discoverSP();
 
-    const listPath = `/sites/${siteId}/lists/${encodeURIComponent(SP_LIST)}`;
+    // Use the list GUID (listId) instead of the display name — more reliable, avoids
+    // name-resolution overhead and potential encoding issues in Graph API paths.
+    const listPath = `/sites/${siteId}/lists/${listId}`;
 
     // ── Schritt 1: Element mit nur Title anlegen (minimal, kann nicht an Feldern scheitern) ──
     btn.textContent = 'Anfrage wird angelegt…';
@@ -1679,16 +1701,17 @@ async function submitRequest() {
     console.log('[submitRequest] item created, id=', itemId);
 
     // ── Schritt 2: Restliche Felder per PATCH nachpflegen ──
-    // SP benötigt manchmal etwas Zeit bis das neue Element indexiert ist → retryOn404
+    // SP Online has a propagation delay: the new item may not be addressable via PATCH
+    // immediately after creation. Retry with generous delay (6 × 2 s = up to 12 s total).
     const patchFields = { ...allFields };
     delete patchFields['Title'];
     if (Object.keys(patchFields).length) {
       btn.textContent = 'Felder werden gespeichert…';
       try {
-        await retryOn404(() => gPatch(`${listPath}/items/${itemId}/fields`, patchFields));
+        await retryOn404(() => gPatch(`${listPath}/items/${itemId}/fields`, patchFields), 6, 2000);
       } catch(patchErr) {
         console.warn('[submitRequest] PATCH endgültig fehlgeschlagen:', patchErr.message);
-        // Nicht kritisch – Element existiert bereits, nur Felder fehlen
+        // Nicht kritisch – Element existiert bereits, Felder konnten nicht gesetzt werden
       }
     }
 
@@ -2144,7 +2167,10 @@ function renderPanel(item, editMode = false) {
       if (/kommentar|ablehn|grund/i.test(c.label)) return `<div class="ap-comment-box"><strong>${esc(c.label)}:</strong> ${esc(String(c.val))}</div>`;
       return `<div class="approval-stage"><div class="ap-dot ${st.cls}">${st.dot}</div><div class="ap-body"><div class="ap-stage-label">${esc(c.label)}</div><span class="ap-badge" style="background:${st.bg};color:${st.color}">${esc(String(c.val))}</span></div></div>`;
     };
-    return stages.map(mkStage).join('') + extra.map(mkExtra).join('');
+    // Same rule as renderApprovalCard: always show timeline when no stage columns
+    // have data; comments/ungrouped shown BELOW, not instead of the timeline.
+    const mainHtml = stages.length ? stages.map(mkStage).join('') : statusTimeline(statusVal);
+    return `<div class="approval-stages">${mainHtml}${extra.map(mkExtra).join('')}</div>`;
   })();
 
   return `
@@ -2311,14 +2337,19 @@ function openSettings() {
   const s       = getSettings(email);
   const isAdmin = email === ADMIN_EMAIL;
 
-  // Admin section row: toggling autoRefresh also sets autoRefreshGranted so the
-  // migration on login knows this value was explicitly set by admin (not an old default).
+  // Admin section row: per-user feature toggles.
+  // autoRefreshGranted distinguishes admin-granted from old self-set defaults.
   const userRow = (em, us) => `
     <div class="su-row">
       <span class="su-email" title="${esc(em)}">${esc(em)}</span>
       <label class="tgl-wrap" title="Auto-Refresh freischalten">
         <input type="checkbox" ${us.autoRefresh && us.autoRefreshGranted ? 'checked' : ''}
           onchange="saveUserSettings('${esc(em)}',{autoRefresh:this.checked,autoRefreshGranted:this.checked});updateARBtn()">
+        <span class="tgl"></span>
+      </label>
+      <label class="tgl-wrap" title="Dashboard sichtbar">
+        <input type="checkbox" ${us.dashboardVisible !== false ? 'checked' : ''}
+          onchange="saveUserSettings('${esc(em)}',{dashboardVisible:this.checked});applyDashboardVisibility()">
         <span class="tgl"></span>
       </label>
       <input type="number" value="${us.pageSize||100}" min="10" max="500" step="10"
@@ -2333,6 +2364,12 @@ function openSettings() {
     <div class="su-add">
       <input type="email" id="su-new-email" placeholder="user@dihag.com" class="su-input">
       <button class="btn btn-sm btn-primary" onclick="addUserSetting()">+ Hinzufügen</button>
+    </div>
+    <div class="su-header-row">
+      <span class="su-email" style="font-size:.7rem;color:#6b7280">E-Mail</span>
+      <span class="su-col-lbl" title="Auto-Refresh">⏱</span>
+      <span class="su-col-lbl" title="Dashboard sichtbar">📊</span>
+      <span class="su-col-lbl" title="Max. Elemente">Elem.</span>
     </div>
     <div id="su-list">${
       Object.entries(getAllUserSettings())
