@@ -7,7 +7,7 @@ const SCOPES    = ['User.Read', 'Sites.ReadWrite.All'];
 const SP_SITE   = 'dihag.sharepoint.com:/sites/gruppe_shb';
 const SP_LIST   = 'Bedarfsanfrage';
 const API       = 'https://graph.microsoft.com/v1.0';
-const SP_BASE   = 'https://' + SP_SITE.split(':/')[0] + SP_SITE.split(':/')[1];
+const SP_BASE   = 'https://' + SP_SITE.split(':/')[0] + '/' + SP_SITE.split(':/')[1]; // split(':/')[1] = 'sites/...' (no leading slash)
 
 // ── BPMN-KONFORME FORMFELD-DEFINITION ───────────────────────────────────────
 // key        = interner SP-Spaltenname (wird beim POST verwendet)
@@ -192,6 +192,23 @@ async function gPost(path, body) {
   }
   return r.json();
 }
+// Retry helper: SP sometimes reports 404 immediately after item creation (propagation delay).
+// Wait delayMs and retry up to `retries` times when itemNotFound.
+async function retryOn404(fn, retries = 4, delayMs = 1200) {
+  for (let i = 0; i <= retries; i++) {
+    try { return await fn(); }
+    catch(e) {
+      const is404 = e.message.includes('404') || e.message.includes('itemNotFound');
+      if (is404 && i < retries) {
+        console.warn(`[retryOn404] Versuch ${i+1} – warte ${delayMs}ms…`, e.message);
+        await new Promise(r => setTimeout(r, delayMs));
+        continue;
+      }
+      throw e;
+    }
+  }
+}
+
 async function gPatch(path, body) {
   const tok = await getToken();
   const r   = await fetch(API + path, {
@@ -1512,15 +1529,16 @@ async function submitRequest() {
     console.log('[submitRequest] item created, id=', itemId);
 
     // ── Schritt 2: Restliche Felder per PATCH nachpflegen ──
+    // SP benötigt manchmal etwas Zeit bis das neue Element indexiert ist → retryOn404
     const patchFields = { ...allFields };
     delete patchFields['Title'];
     if (Object.keys(patchFields).length) {
       btn.textContent = 'Felder werden gespeichert…';
       try {
-        await gPatch(`${listPath}/items/${itemId}/fields`, patchFields);
+        await retryOn404(() => gPatch(`${listPath}/items/${itemId}/fields`, patchFields));
       } catch(patchErr) {
-        console.warn('[submitRequest] PATCH:', patchErr.message);
-        // Nicht kritisch – Element existiert bereits
+        console.warn('[submitRequest] PATCH endgültig fehlgeschlagen:', patchErr.message);
+        // Nicht kritisch – Element existiert bereits, nur Felder fehlen
       }
     }
 
