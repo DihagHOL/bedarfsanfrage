@@ -680,9 +680,8 @@ function renderDetail(id) {
     ).then(r => r.ok ? r.json() : { value: [] })
      .then(data => {
        const files = data.value || [];
-       const spOrigin = 'https://' + SP_SITE.split(':/')[0];
        attachEl.innerHTML = files.length
-         ? files.map(f => `<div class="attach-item">📎 <a href="${esc(spOrigin + f.ServerRelativeUrl)}" target="_blank">${esc(f.FileName)}</a></div>`).join('')
+         ? files.map(attachmentLink).join('')
          : '<span class="no-order">Keine Anhänge.</span>';
      })
      .catch(() => { attachEl.innerHTML = ''; });
@@ -715,7 +714,7 @@ function detailSidebar(item, isEinkauf) {
 
     <div class="detail-card">
       <div class="detail-card-header">Bestellung (Einkauf)
-        ${isEinkauf ? `<button class="btn btn-sm btn-outline" id="btn-add-order">Bearbeiten</button>` : ''}
+        ${isEinkauf && /^freigegeben$/i.test((getStatusVal(item)||'').trim()) ? `<button class="btn btn-sm btn-outline" id="btn-add-order">Bearbeiten</button>` : ''}
       </div>
       <div class="detail-card-body">
         ${orderNr  ? detailRow('Bestellnummer', orderNr) : '<p class="no-order">Noch keine Bestellnummer eingetragen.</p>'}
@@ -741,8 +740,8 @@ const WORKFLOW_STAGES = [
   'Eingereicht',
   'In Prüfung (Einkauf)',
   'In Prüfung (Werkleitung)',
-  'In Prüfung (strategischer Einkauf)',
   'In Prüfung (Controlling)',
+  'In Prüfung (strategischer Einkauf)',
   'Freigegeben',
   'Bestellt',
 ];
@@ -837,6 +836,10 @@ function renderApprovalCard(item) {
 // ── EINKAUF ORDER MODAL ───────────────────────────────────────────────────────
 async function openOrderModal(itemId) {
   const item = allItems.find(i => String(i.id) === String(itemId));
+  if (!item || !/^freigegeben$/i.test((getStatusVal(item)||'').trim())) {
+    toast('Einkauf-Daten können nur bei Status „Freigegeben" eingetragen werden.', 'error');
+    return;
+  }
   const orderNr    = getField(item,'Bestellnummer')       || getField(item, resolvedFields['Bestellnummer'])       || '';
   const lieferd    = getField(item,'Lieferdatum')         || getField(item, resolvedFields['Lieferdatum'])         || '';
   const tatPreis   = getField(item,'TatsaechlicherPreis') || getField(item, resolvedFields['TatsaechlicherPreis']) || '';
@@ -853,10 +856,9 @@ async function openOrderModal(itemId) {
     if (r.ok) existingFiles = (await r.json()).value || [];
   } catch(e) { /* non-critical */ }
 
-  const spOrigin    = 'https://' + SP_SITE.split(':/')[0];
   const existingHtml = existingFiles.length ? `
     <div class="attach-existing">
-      ${existingFiles.map(f => `<div class="attach-item">📎 <a href="${esc(spOrigin + f.ServerRelativeUrl)}" target="_blank">${esc(f.FileName)}</a></div>`).join('')}
+      ${existingFiles.map(attachmentLink).join('')}
     </div>` : '';
 
   const required   = angeboteAnzahl(parseFloat(geschPreis) || 0);
@@ -982,6 +984,94 @@ async function saveOrderData(itemId) {
   closeModal();
   await loadItems(false);
   renderDetail(itemId);
+}
+
+// ── BESCHAFFUNGSDETAILS MODAL (Einkauf) ───────────────────────────────────────
+function openBeschModal(itemId) {
+  const item = allItems.find(i => String(i.id) === String(itemId));
+  if (!item) return;
+
+  const gv  = key => getField(item, resolvedFields[key] || key) ?? '';
+  const BL_OPTS = (colByKey[resolvedFields['Beschaffungslogik'] || 'Beschaffungslogik']?.choice?.choices)
+    || ['Bestandsmaterial (bestandsgeführt)','Nicht-bestandsgeführtes Material','Direktes Material','Indirektes Material / Dienstleistung'];
+
+  const selOpts = (opts, cur) => opts.map(o =>
+    `<option value="${esc(o)}"${cur === o ? ' selected' : ''}>${esc(o)}</option>`
+  ).join('');
+
+  $id('modal-title').textContent = 'Beschaffungsdetails bearbeiten';
+  $id('modal-body').innerHTML = `
+    <div class="form-group" style="margin-bottom:12px">
+      <label>Beschaffungsart</label>
+      <select id="b-beschaffungslogik" class="form-control" style="width:100%">
+        <option value="">–</option>${selOpts(BL_OPTS, gv('Beschaffungslogik'))}
+      </select>
+    </div>
+    <div class="form-group" style="margin-bottom:12px">
+      <label>Artikelnummer / TID</label>
+      <input type="text" id="b-artikelnummer" value="${esc(gv('Artikelnummer'))}" placeholder="z. B. 4001-00010"/>
+    </div>
+    <div class="form-group" style="margin-bottom:12px">
+      <label>Lieferant 1</label>
+      <input type="text" id="b-lieferant" value="${esc(gv('Lieferant'))}" placeholder="Firmenname oder Lieferanten-Nr."/>
+    </div>
+    <div class="form-group" style="margin-bottom:12px">
+      <label>Lieferant 2</label>
+      <input type="text" id="b-lieferant2" value="${esc(gv('Lieferant2'))}" placeholder="optional"/>
+    </div>
+    <div class="form-group" style="margin-bottom:12px">
+      <label>Geschätzter Preis netto (€)</label>
+      <input type="number" id="b-preis" value="${esc(String(gv('GeschaetzterPreis')))}" min="0" step="0.01" placeholder="0,00"/>
+    </div>
+    <div class="form-group">
+      <label>Kostenstelle</label>
+      <input type="text" id="b-kostenstelle" value="${esc(gv('Kostenstelle'))}" placeholder="z. B. 4200"/>
+    </div>`;
+  $id('modal-footer').innerHTML = `
+    <button class="btn btn-ghost" onclick="closeModal()">Abbrechen</button>
+    <button class="btn btn-primary" onclick="saveBeschData(${itemId})">Speichern</button>`;
+  $id('modal-overlay').classList.remove('hidden');
+}
+
+async function saveBeschData(itemId) {
+  const patch = {};
+  const set = (key, val) => {
+    if (val === null || val === undefined || val === '') return;
+    const col = resolvedFields[key] || key;
+    if (col) patch[col] = val;
+  };
+  set('Beschaffungslogik', $id('b-beschaffungslogik').value);
+  set('Artikelnummer',     $id('b-artikelnummer').value.trim());
+  set('Lieferant',         $id('b-lieferant').value.trim());
+  set('Lieferant2',        $id('b-lieferant2').value.trim());
+  const preis = parseFloat($id('b-preis').value);
+  if (!isNaN(preis) && preis > 0) {
+    const col = resolvedFields['GeschaetzterPreis'] || 'GeschaetzterPreis';
+    const colDef = colByKey[col];
+    patch[col] = colDef?.number ? preis : String(preis);
+  }
+  set('Kostenstelle', $id('b-kostenstelle').value.trim());
+  if (!Object.keys(patch).length) { closeModal(); return; }
+
+  const btn = $id('modal-footer')?.querySelector('.btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'Speichert…'; }
+  const skipped = [];
+  for (let i = 0; i < 10; i++) {
+    try {
+      await gPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, patch);
+      toast('Beschaffungsdetails gespeichert ✓', 'success');
+      closeModal();
+      await loadItems(false);
+      const pi = allItems.find(x => String(x.id) === String(itemId));
+      if (pi && panelItemId) { $id(`panel-${currentView}-content`).innerHTML = renderPanel(pi); bindPanelEvents(itemId); }
+      return;
+    } catch(e) {
+      const m = e.message.match(/Field '([^']+)' (?:is not recognized|does not exist)/i);
+      if (!m) { toast('Fehler: ' + e.message, 'error'); if (btn) { btn.disabled=false; btn.textContent='Speichern'; } return; }
+      skipped.push(m[1]); delete patch[m[1]];
+    }
+  }
+  toast('Fehler: Zu viele unbekannte Felder.', 'error');
 }
 
 // ── WIZARD ────────────────────────────────────────────────────────────────────
@@ -1606,6 +1696,7 @@ function closePanel() {
 function bindPanelEvents(itemId) {
   $id('panel-close')?.addEventListener('click', closePanel);
   $id('panel-order')?.addEventListener('click', () => openOrderModal(itemId));
+  $id('panel-besch')?.addEventListener('click', () => openBeschModal(itemId));
   $id('panel-history')?.addEventListener('click', () => {
     const sec = $id('panel-history-section');
     if (!sec) return;
@@ -1795,8 +1886,12 @@ function renderPanel(item, editMode = false) {
   const lieferd  = gv('Lieferdatum');
   const tatPreis = gv('TatsaechlicherPreis');
 
-  const buttons = `<button class="btn btn-outline btn-sm" id="panel-order">📦 Einkauf</button>
-       <button class="btn btn-outline btn-sm" id="panel-history">📋 Verlauf</button>`;
+  const isFreigegeben = /^freigegeben$/i.test((statusVal || '').trim());
+  const buttons = `${isFreigegeben
+      ? `<button class="btn btn-outline btn-sm" id="panel-order">📦 Einkauf-Daten</button>`
+      : `<button class="btn btn-outline btn-sm" id="panel-order" disabled title="Nur bei Status 'Freigegeben' möglich">📦 Einkauf-Daten</button>`}
+     <button class="btn btn-outline btn-sm" id="panel-besch">✏️ Beschaffung</button>
+     <button class="btn btn-outline btn-sm" id="panel-history">📋 Verlauf</button>`;
 
   // Approval inner HTML (reuse logic from renderApprovalCard but without the wrapping card)
   const approvalInner = (() => {
@@ -1896,6 +1991,46 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.target === $id('modal-overlay')) closeModal();
   });
 });
+
+// ── ATTACHMENT DOWNLOAD ───────────────────────────────────────────────────────
+async function downloadAttachment(relUrl, filename) {
+  try {
+    const tok = await getSpToken();
+    const url = 'https://' + SP_SITE.split(':/')[0] + relUrl;
+    const r   = await fetch(url, { headers: { Authorization: 'Bearer ' + tok } });
+    if (!r.ok) throw new Error(r.status);
+    const blob = await r.blob();
+    const a    = document.createElement('a');
+    a.href     = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  } catch(e) { toast('Anhang konnte nicht geladen werden: ' + e.message, 'error'); }
+}
+
+function attachmentLink(f) {
+  const url  = esc(f.ServerRelativeUrl);
+  const name = esc(f.FileName);
+  return `<div class="attach-item">
+    📎 <span class="attach-name">${name}</span>
+    <span class="attach-actions">
+      <button class="btn-attach-dl" onclick="downloadAttachment('${url}','${name}')" title="Herunterladen">⬇ Laden</button>
+      <button class="btn-attach-dl" onclick="openAttachment('${url}')" title="Öffnen">↗ Öffnen</button>
+    </span>
+  </div>`;
+}
+
+async function openAttachment(relUrl) {
+  try {
+    const tok  = await getSpToken();
+    const url  = 'https://' + SP_SITE.split(':/')[0] + relUrl;
+    const r    = await fetch(url, { headers: { Authorization: 'Bearer ' + tok } });
+    if (!r.ok) throw new Error(r.status);
+    const blob = await r.blob();
+    window.open(URL.createObjectURL(blob), '_blank');
+  } catch(e) { toast('Anhang konnte nicht geöffnet werden: ' + e.message, 'error'); }
+}
 
 // ── TOAST ─────────────────────────────────────────────────────────────────────
 function toast(msg, type='info') {

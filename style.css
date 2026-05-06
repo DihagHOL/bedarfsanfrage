@@ -436,9 +436,11 @@ textarea.pf-input { resize: vertical; min-height: 52px; }
 .check-card { cursor: pointer; user-select: none; }
 .check-card.selected { border-color: #1a56db; background: #eff3ff; }
 .attach-existing { margin-bottom: 8px; }
-.attach-item { font-size: .82rem; color: #374151; padding: 2px 0; }
-.attach-item a { color: #1a56db; text-decoration: none; }
-.attach-item a:hover { text-decoration: underline; }
+.attach-item { display:flex; align-items:center; gap:6px; font-size:.82rem; color:#374151; padding:3px 0; flex-wrap:wrap; }
+.attach-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.attach-actions { display:flex; gap:4px; flex-shrink:0; }
+.btn-attach-dl { background:none; border:1px solid #d1d5db; border-radius:5px; padding:1px 7px; font-size:.76rem; cursor:pointer; color:#1a56db; white-space:nowrap; }
+.btn-attach-dl:hover { background:#eff3ff; border-color:#1a56db; }
 .attach-file-input { display: block; width: 100%; font-size: .83rem; }
 .detail-attachments { margin-top: 8px; font-size: .82rem; }
 
