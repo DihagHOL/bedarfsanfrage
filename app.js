@@ -162,14 +162,23 @@ function toggleAutoRefresh() {
 }
 
 // ── APPROVER DISPLAY ─────────────────────────────────────────────────────────
-// Looks for columns containing the current approver/responsible person
-const APPROVER_COL_RE = /genehmiger|aktuelle[rs]?\s*(bearbeiter|zugewiesen|genehmiger)|current.?approver/i;
+// Looks for columns containing the current approver/responsible person.
+// Broad regex to catch German/English naming variants.
+const APPROVER_COL_RE = /genehmiger|\bbearbeiter\b|aktuelle[rs]?\s*(bearbeiter|zugewiesen|genehmiger)|current.?approver/i;
 function getApproverVal(item) {
   for (const [k, c] of Object.entries(colByKey)) {
     if (SYSTEM_FIELDS.has(k)) continue;
     if (APPROVER_COL_RE.test(c.displayName || k)) {
-      const v = getField(item, k);
-      if (v) return v;
+      const raw = getField(item, k);
+      if (!raw && raw !== 0) continue;
+      // Person/lookup fields may come as objects from Graph API
+      if (typeof raw === 'object') {
+        const name = raw.displayName || raw.LookupValue || raw.Title || raw.title || raw.text;
+        if (name && name !== '[object Object]') return name;
+        continue;
+      }
+      const s = String(raw).trim();
+      if (s && s !== '[object Object]') return s;
     }
   }
   return null;
@@ -211,6 +220,15 @@ async function bootDone() {
     await loadItems(false);
     $id('boot').style.display = 'none';
     $id('app').style.display  = 'flex';
+    // Auto-refresh is admin-controlled. Clear any self-set "autoRefresh: true" from old
+    // localStorage if admin hasn't explicitly granted the feature (autoRefreshGranted).
+    if (account) {
+      const em = account.username.toLowerCase();
+      const s  = getSettings(em);
+      if (em !== ADMIN_EMAIL && s.autoRefresh && !s.autoRefreshGranted) {
+        saveUserSettings(em, { autoRefresh: false });
+      }
+    }
     startAutoRefresh();
     // Set user info in sidebar
     const name = account?.name || account?.username || '?';
@@ -805,12 +823,13 @@ function renderDetail(id) {
   const btnOrder = document.getElementById('btn-add-order');
   if (btnOrder) btnOrder.onclick = () => openOrderModal(item.id);
 
-  // Load attachments async
+  // Load attachments async — cache-busting ensures freshly uploaded files appear immediately
   const attachEl = document.getElementById('detail-attachments');
   if (attachEl) {
     getSpToken().then(tok =>
-      fetch(`${SP_BASE}/_api/web/lists/getByTitle('${SP_LIST}')/items(${id})/AttachmentFiles`, {
-        headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json;odata=nometadata' }
+      fetch(`${SP_BASE}/_api/web/lists/getByTitle('${SP_LIST}')/items(${id})/AttachmentFiles?_=${Date.now()}`, {
+        headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json;odata=nometadata',
+          'Cache-Control': 'no-cache', Pragma: 'no-cache' }
       })
     ).then(r => r.ok ? r.json() : { value: [] })
      .then(data => {
@@ -1892,8 +1911,9 @@ function bindPanelEvents(itemId) {
   const attachEl = $id('panel-attach-body');
   if (attachEl) {
     getSpToken()
-      .then(tok => fetch(`${SP_BASE}/_api/web/lists/getByTitle('${SP_LIST}')/items(${itemId})/AttachmentFiles`,
-        { headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json;odata=nometadata' } }))
+      .then(tok => fetch(`${SP_BASE}/_api/web/lists/getByTitle('${SP_LIST}')/items(${itemId})/AttachmentFiles?_=${Date.now()}`,
+        { headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json;odata=nometadata',
+            'Cache-Control': 'no-cache', Pragma: 'no-cache' } }))
       .then(r => r.ok ? r.json() : { value: [] })
       .then(data => {
         const files = data.value || [];
@@ -2242,17 +2262,25 @@ async function openPdfViewer(relUrl, fileName) {
   // Using /_api/ URL instead of direct file URL: avoids X-Frame-Options on direct SP URLs
   // and benefits from CORS headers that SP sets for /_api/ routes with OAuth tokens.
   try {
-    const tok    = await getSpToken();
-    // relUrl may arrive pre-encoded (e.g. %23 for #) from attachmentLink().
-    // Steps:
-    //   1. Decode to get the literal path (with # as a real character)
-    //   2. Re-encode # → %23 so SP's path resolver sees %23 (not #)
-    //      (SP URL-decodes path segments once: %23 → # for the file lookup)
-    //   3. encodeURIComponent then encodes % → %25, yielding %2523 in the URL
-    //   4. SP query-string decoder decodes %2523 → %23, SP path resolver %23 → #
-    const rawRelUrl  = decodeURIComponent(relUrl);
-    const spSafeUrl  = rawRelUrl.replace(/#/g, '%23');
-    const apiUrl = `${SP_BASE}/_api/web/GetFileByServerRelativeUrl(@u)/$value?@u='${encodeURIComponent(spSafeUrl)}'`;
+    const tok = await getSpToken();
+    // Decode any %23 → # to get the raw server-relative URL
+    const rawRelUrl = decodeURIComponent(relUrl);
+
+    // GetFileByServerRelativeUrl cannot handle '#' in filenames (SP treats it as URL
+    // fragment regardless of encoding). Instead use the AttachmentFiles endpoint which
+    // addresses files by name via a query-string alias — '#' round-trips correctly there.
+    //   /Lists/Bedarfsanfrage/Attachments/{itemId}/{filename}
+    const attachMatch = rawRelUrl.match(/\/Attachments\/(\d+)\/(.+)$/);
+    let apiUrl;
+    if (attachMatch) {
+      const itemId  = attachMatch[1];
+      const rawName = attachMatch[2]; // may contain #, spaces, etc.
+      apiUrl = `${SP_BASE}/_api/web/lists/getByTitle('${SP_LIST}')/items(${itemId})/AttachmentFiles(@f)/$value?@f='${encodeURIComponent(rawName)}'`;
+    } else {
+      // Fallback for non-attachment URLs
+      const spSafe = rawRelUrl.replace(/#/g, '%23');
+      apiUrl = `${SP_BASE}/_api/web/GetFileByServerRelativeUrl(@u)/$value?@u='${encodeURIComponent(spSafe)}'`;
+    }
     const resp   = await fetch(apiUrl, { headers: { Authorization: 'Bearer ' + tok } });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const blob    = await resp.blob();
@@ -2283,12 +2311,14 @@ function openSettings() {
   const s       = getSettings(email);
   const isAdmin = email === ADMIN_EMAIL;
 
+  // Admin section row: toggling autoRefresh also sets autoRefreshGranted so the
+  // migration on login knows this value was explicitly set by admin (not an old default).
   const userRow = (em, us) => `
     <div class="su-row">
       <span class="su-email" title="${esc(em)}">${esc(em)}</span>
-      <label class="tgl-wrap" title="Auto-Refresh">
-        <input type="checkbox" ${us.autoRefresh !== false ? 'checked' : ''}
-          onchange="saveUserSettings('${esc(em)}',{autoRefresh:this.checked})">
+      <label class="tgl-wrap" title="Auto-Refresh freischalten">
+        <input type="checkbox" ${us.autoRefresh && us.autoRefreshGranted ? 'checked' : ''}
+          onchange="saveUserSettings('${esc(em)}',{autoRefresh:this.checked,autoRefreshGranted:this.checked});updateARBtn()">
         <span class="tgl"></span>
       </label>
       <input type="number" value="${us.pageSize||100}" min="10" max="500" step="10"
@@ -2311,16 +2341,22 @@ function openSettings() {
       '<p class="su-empty">Noch keine weiteren Benutzer konfiguriert.</p>'
     }</div>` : '';
 
-  $id('settings-body').innerHTML = `
-    <h4 class="settings-h4">Meine Einstellungen <small>(${esc(email)})</small></h4>
+  // Auto-Refresh row: only admin can manage this for themselves and others.
+  // Non-admin users see no toggle; admin also saves autoRefreshGranted to survive the
+  // login migration that clears old self-set autoRefresh values.
+  const arRow = isAdmin ? `
     <div class="settings-row">
       <span class="settings-label">Auto-Aktualisierung (alle 30s)</span>
       <label class="tgl-wrap">
-        <input type="checkbox" id="s-ar" ${s.autoRefresh ? 'checked' : ''}
-          onchange="saveUserSettings('${esc(email)}',{autoRefresh:this.checked});this.checked?startAutoRefresh():stopAutoRefresh()">
+        <input type="checkbox" id="s-ar" ${s.autoRefresh && s.autoRefreshGranted ? 'checked' : ''}
+          onchange="saveUserSettings('${esc(email)}',{autoRefresh:this.checked,autoRefreshGranted:this.checked});this.checked?startAutoRefresh():stopAutoRefresh()">
         <span class="tgl"></span>
       </label>
-    </div>
+    </div>` : '';
+
+  $id('settings-body').innerHTML = `
+    <h4 class="settings-h4">Meine Einstellungen <small>(${esc(email)})</small></h4>
+    ${arRow}
     <div class="settings-row">
       <span class="settings-label">Elemente laden (max.)</span>
       <input type="number" id="s-ps" value="${s.pageSize}" min="10" max="500" step="10" class="su-num"
