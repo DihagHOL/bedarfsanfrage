@@ -164,7 +164,7 @@ function toggleAutoRefresh() {
 // ── APPROVER DISPLAY ─────────────────────────────────────────────────────────
 // Looks for columns containing the current approver/responsible person.
 // Broad regex to catch German/English naming variants.
-const APPROVER_COL_RE = /genehmiger|\bbearbeiter\b|aktuelle[rs]?\s*(bearbeiter|zugewiesen|genehmiger)|current.?approver/i;
+const APPROVER_COL_RE = /\bgenehmiger\b|\bbearbeiter\b|aktuelle[rs]?\s*(bearbeiter|zugewiesen|genehmiger)|current.?approver/i;
 function getApproverVal(item) {
   for (const [k, c] of Object.entries(colByKey)) {
     if (SYSTEM_FIELDS.has(k)) continue;
@@ -1669,7 +1669,8 @@ function buildFields(data, fieldDefs) {
     const spCol = resolvedFields[fd.key];
     const val   = data[fd.key];
     if (BOOL_FIELDS.has(fd.key)) {
-      if (spCol) fields[spCol] = Boolean(val);
+      // Only send when explicitly set — avoids sending false to SP when user never touched the field.
+      if (spCol && val != null && val !== '') fields[spCol] = Boolean(val);
       continue;
     }
     if (!spCol || val === null || val === undefined || val === '') continue;
@@ -1738,6 +1739,57 @@ async function postRetry(path, fields) {
   return { skipped: [], newItem: null }; // unreachable, satisfies linters
 }
 
+// patchRetry: updates item fields with 404-wait (SP propagation) + 400/500 field-dropping.
+// On generic 400 "invalidRequest" SP won't say which field is wrong → drop fields one by
+// one (optional first, required last) until the PATCH succeeds. Returns array of dropped keys.
+async function patchRetry(path, fields, retries404 = 6, delay404 = 2000) {
+  const skipped = [];
+  // Build drop queue: optional fields first, then required (excluding Title equivalents)
+  const optKeys = Object.entries(resolvedFields)
+    .filter(([k]) => !FORM_FIELDS.find(f => f.key === k && f.required))
+    .map(([, v]) => v).filter(v => v && fields[v] !== undefined);
+  const reqKeys = Object.entries(resolvedFields)
+    .filter(([k]) => FORM_FIELDS.find(f => f.key === k && f.required && f.key !== 'Title'))
+    .map(([, v]) => v).filter(v => v && fields[v] !== undefined);
+  const dropQueue = [...optKeys, ...reqKeys];
+
+  let notFound404s = 0;
+  for (let attempt = 0; attempt < retries404 + dropQueue.length + 5; attempt++) {
+    try {
+      await gPatch(path, fields);
+      if (skipped.length) console.warn('[patchRetry] succeeded after dropping:', skipped);
+      return skipped;
+    } catch(e) {
+      const msg = e.message || '';
+      // 404 / itemNotFound: item not yet propagated → wait and retry
+      if ((msg.includes('404') || msg.includes('itemNotFound')) && !e._noRetry) {
+        if (notFound404s < retries404) { notFound404s++; await new Promise(r => setTimeout(r, delay404)); continue; }
+      }
+      // Named field error: SP says exactly which field
+      const mField = msg.match(/Field '([^']+)' (?:is not recognized|does not exist)/i);
+      if (mField) {
+        const bad = mField[1];
+        console.warn('[patchRetry] SP rejected field:', bad);
+        skipped.push(bad); delete fields[bad];
+        for (const [k, v] of Object.entries(resolvedFields)) { if (v === bad) resolvedFields[k] = null; }
+        continue;
+      }
+      // Generic 400 "invalidRequest" / 500: drop next candidate and retry
+      const isRetryable = msg.includes('invalidRequest') || msg.includes('400') ||
+        msg.includes('500') || msg.includes('generalException');
+      if (isRetryable) {
+        const dropKey = dropQueue.find(k => fields[k] !== undefined);
+        if (dropKey) {
+          console.warn('[patchRetry] 400/500 → dropping field:', dropKey, '=', JSON.stringify(fields[dropKey]));
+          skipped.push(dropKey); delete fields[dropKey]; continue;
+        }
+      }
+      throw e;
+    }
+  }
+  throw new Error('PATCH fehlgeschlagen – alle Kandidatenfelder versucht.');
+}
+
 async function submitRequest() {
   const btn = $id('btn-submit');
   btn.disabled = true;
@@ -1770,11 +1822,13 @@ async function submitRequest() {
     delete patchFields['Title'];
     if (Object.keys(patchFields).length) {
       btn.textContent = 'Felder werden gespeichert…';
+      console.log('[submitRequest] PATCH fields:', JSON.stringify(patchFields));
       try {
-        await retryOn404(() => gPatch(`${listPath}/items/${itemId}/fields`, patchFields), 6, 2000);
+        const skipped = await patchRetry(`${listPath}/items/${itemId}/fields`, patchFields);
+        if (skipped.length) console.warn('[submitRequest] übersprungene Felder (SP ablehnte):', skipped);
       } catch(patchErr) {
         console.warn('[submitRequest] PATCH endgültig fehlgeschlagen:', patchErr.message);
-        // Nicht kritisch – Element existiert bereits, Felder konnten nicht gesetzt werden
+        toast('Anfrage erstellt, aber einige Felder konnten nicht gespeichert werden.', 'error');
       }
     }
 
