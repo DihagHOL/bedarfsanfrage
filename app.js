@@ -89,6 +89,69 @@ let panelItemId = null;
 // SP column may be misspelled "Stauts" in some tenants → always try both
 const getStatusVal = item => getField(item,'Status') || getField(item,'Stauts') || '';
 
+// ── USER SETTINGS ────────────────────────────────────────────────────────────
+const SETTINGS_KEY = 'bedarfsanfrage_settings_v1';
+const ADMIN_EMAIL  = 'administrator@dihag.com';
+
+function getSettings(email) {
+  const all = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+  return Object.assign({ autoRefresh: true, pageSize: 100 }, all[(email||'').toLowerCase()] || {});
+}
+function saveUserSettings(email, patch) {
+  const all = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+  const key = (email||'').toLowerCase();
+  all[key] = Object.assign(getSettings(email), patch);
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(all));
+  return all[key];
+}
+function getAllUserSettings() {
+  return JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+}
+
+// ── AUTO-REFRESH ─────────────────────────────────────────────────────────────
+let autoRefreshTimer = null;
+
+function startAutoRefresh() {
+  stopAutoRefresh();
+  if (!account) return;
+  if (!getSettings(account.username).autoRefresh) { updateARBtn(); return; }
+  autoRefreshTimer = setInterval(() => loadItems(false), 30000);
+  updateARBtn();
+}
+function stopAutoRefresh() {
+  if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+  updateARBtn();
+}
+function updateARBtn() {
+  const btn = $id('btn-autorefresh');
+  if (!btn) return;
+  const on = !!autoRefreshTimer;
+  btn.classList.toggle('ar-on', on);
+  btn.title = on ? 'Auto-Aktualisierung AN (30s) – klicken zum Deaktivieren' : 'Auto-Aktualisierung AUS – klicken zum Aktivieren';
+  btn.textContent = on ? '⏱ Auto AN' : '⏱ Auto AUS';
+}
+function toggleAutoRefresh() {
+  if (!account) return;
+  const email = account.username;
+  const newVal = !getSettings(email).autoRefresh;
+  saveUserSettings(email, { autoRefresh: newVal });
+  newVal ? startAutoRefresh() : stopAutoRefresh();
+}
+
+// ── APPROVER DISPLAY ─────────────────────────────────────────────────────────
+// Looks for columns containing the current approver/responsible person
+const APPROVER_COL_RE = /genehmiger|aktuelle[rs]?\s*(bearbeiter|zugewiesen|genehmiger)|current.?approver/i;
+function getApproverVal(item) {
+  for (const [k, c] of Object.entries(colByKey)) {
+    if (SYSTEM_FIELDS.has(k)) continue;
+    if (APPROVER_COL_RE.test(c.displayName || k)) {
+      const v = getField(item, k);
+      if (v) return v;
+    }
+  }
+  return null;
+}
+
 // ── AUTH ────────────────────────────────────────────────────────────────────
 async function initAuth() {
   const redirectUri = location.href.split('?')[0].split('#')[0];
@@ -125,6 +188,7 @@ async function bootDone() {
     await loadItems(false);
     $id('boot').style.display = 'none';
     $id('app').style.display  = 'flex';
+    startAutoRefresh();
     // Set user info in sidebar
     const name = account?.name || account?.username || '?';
     $id('hdr-av').textContent   = name.split(' ').map(p=>p[0]||'').join('').substring(0,2).toUpperCase();
@@ -315,8 +379,9 @@ async function loadItems(showToast = true) {
   const btn = $id('btn-reload');
   if (btn) btn.disabled = true;
   try {
+    const pageSize = account ? getSettings(account.username).pageSize : 100;
     const data = await gGet(
-      `/sites/${siteId}/lists/${listId}/items?$expand=fields&$top=500&$orderby=createdDateTime desc`
+      `/sites/${siteId}/lists/${listId}/items?$expand=fields&$top=${pageSize}&$orderby=createdDateTime desc`
     );
     allItems = data.value || [];
     if (showToast) toast('Daten aktualisiert', 'success');
@@ -882,7 +947,7 @@ function renderApprovalCard(item) {
     <div class="detail-card">
       <div class="detail-card-header">Status &amp; Genehmigung</div>
       <div class="detail-card-body">
-        <div class="ap-current-status">${statusBadge(statusVal)}</div>
+        <div class="ap-current-status">${statusWithApprover(item)}</div>
         <div class="approval-stages">
           ${noData
             ? statusTimeline(statusVal)
@@ -2031,7 +2096,7 @@ function renderPanel(item, editMode = false) {
       <div class="panel-hdr-top">
         <div class="panel-meta">
           <span class="item-id">ID ${item.id}</span>
-          ${statusBadge(statusVal)}
+          ${statusWithApprover(item)}
           ${prioTag(gv('Prioritaet'))}
         </div>
         <button class="panel-close" id="panel-close" title="Schließen">✕</button>
@@ -2137,10 +2202,14 @@ async function openPdfViewer(relUrl, fileName) {
   iframe.src = 'about:blank';
   overlay.style.display = 'flex';
 
-  // Fetch file content with SP token → create blob URL to bypass X-Frame-Options
+  // Fetch file content via SP REST API $value endpoint.
+  // Using /_api/ URL instead of direct file URL: avoids X-Frame-Options on direct SP URLs
+  // and benefits from CORS headers that SP sets for /_api/ routes with OAuth tokens.
   try {
-    const tok  = await getSpToken();
-    const resp = await fetch(fullUrl, { headers: { Authorization: 'Bearer ' + tok } });
+    const tok    = await getSpToken();
+    // relUrl is server-relative, e.g. /sites/gruppe_shb/Lists/.../file.pdf
+    const apiUrl = `${SP_BASE}/_api/web/GetFileByServerRelativeUrl(@u)/$value?@u='${encodeURIComponent(relUrl)}'`;
+    const resp   = await fetch(apiUrl, { headers: { Authorization: 'Bearer ' + tok } });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const blob    = await resp.blob();
     const blobUrl = URL.createObjectURL(blob);
@@ -2162,6 +2231,66 @@ async function openPdfViewer(relUrl, fileName) {
           font-size:1rem;cursor:pointer">↗ In SharePoint öffnen</button>
       </div></body></html>`;
   }
+}
+
+// ── SETTINGS MODAL ───────────────────────────────────────────────────────────
+function openSettings() {
+  const email   = (account?.username || '').toLowerCase();
+  const s       = getSettings(email);
+  const isAdmin = email === ADMIN_EMAIL;
+
+  const userRow = (em, us) => `
+    <div class="su-row">
+      <span class="su-email" title="${esc(em)}">${esc(em)}</span>
+      <label class="tgl-wrap" title="Auto-Refresh">
+        <input type="checkbox" ${us.autoRefresh !== false ? 'checked' : ''}
+          onchange="saveUserSettings('${esc(em)}',{autoRefresh:this.checked})">
+        <span class="tgl"></span>
+      </label>
+      <input type="number" value="${us.pageSize||100}" min="10" max="500" step="10"
+        class="su-num" title="Elemente"
+        onchange="saveUserSettings('${esc(em)}',{pageSize:parseInt(this.value)||100})">
+      <span class="su-lbl">Elem.</span>
+    </div>`;
+
+  const adminSection = isAdmin ? `
+    <hr class="modal-hr">
+    <h4 class="settings-h4">Benutzereinstellungen verwalten</h4>
+    <div class="su-add">
+      <input type="email" id="su-new-email" placeholder="user@dihag.com" class="su-input">
+      <button class="btn btn-sm btn-primary" onclick="addUserSetting()">+ Hinzufügen</button>
+    </div>
+    <div id="su-list">${
+      Object.entries(getAllUserSettings())
+        .filter(([k]) => k !== email)
+        .map(([k, v]) => userRow(k, v)).join('') ||
+      '<p class="su-empty">Noch keine weiteren Benutzer konfiguriert.</p>'
+    }</div>` : '';
+
+  $id('settings-body').innerHTML = `
+    <h4 class="settings-h4">Meine Einstellungen <small>(${esc(email)})</small></h4>
+    <div class="settings-row">
+      <span class="settings-label">Auto-Aktualisierung (alle 30s)</span>
+      <label class="tgl-wrap">
+        <input type="checkbox" id="s-ar" ${s.autoRefresh ? 'checked' : ''}
+          onchange="saveUserSettings('${esc(email)}',{autoRefresh:this.checked});this.checked?startAutoRefresh():stopAutoRefresh()">
+        <span class="tgl"></span>
+      </label>
+    </div>
+    <div class="settings-row">
+      <span class="settings-label">Elemente laden (max.)</span>
+      <input type="number" id="s-ps" value="${s.pageSize}" min="10" max="500" step="10" class="su-num"
+        onchange="saveUserSettings('${esc(email)}',{pageSize:parseInt(this.value)||100})">
+    </div>
+    ${adminSection}`;
+  $id('settings-modal').classList.remove('hidden');
+}
+function closeSettings() { $id('settings-modal').classList.add('hidden'); }
+function addUserSetting() {
+  const em = ($id('su-new-email')?.value || '').trim().toLowerCase();
+  if (!em.includes('@')) { toast('Bitte gültige E-Mail-Adresse eingeben.', 'error'); return; }
+  saveUserSettings(em, { autoRefresh: true, pageSize: 100 });
+  openSettings();
 }
 
 function closePdfViewer() {
@@ -2213,6 +2342,14 @@ function cleanTitle(t) {
     .replace(/^Einkauf\s*[-–]\s*BANF\s*#\d+\s*[-–]\s*/i, '')
     .replace(/\s*[-–]\s*[\d.,]+\s*€\s*$/i, '')
     .trim() || t;
+}
+
+// Show status badge + current approver (if a column matching APPROVER_COL_RE exists)
+function statusWithApprover(item) {
+  const approver = getApproverVal(item);
+  const badge    = statusBadge(getStatusVal(item));
+  if (!approver) return badge;
+  return `${badge}<span class="status-approver" title="Aktueller Genehmiger">👤 ${esc(approver)}</span>`;
 }
 
 function statusBadge(s) {
