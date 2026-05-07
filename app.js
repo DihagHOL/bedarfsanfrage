@@ -16,22 +16,22 @@ const SP_BASE   = 'https://' + SP_SITE.split(':/')[0] + '/' + SP_SITE.split(':/'
 const FORM_FIELDS = [
   // Step 1: Bedarf
   { key:'Title',             label:'Bezeichnung',                  step:1, required:true  },
-  { key:'Beschreibung',      label:'Beschreibung',                 step:1, alsoTry:['Description','Beschreibung_x002f_Begruendung'] },
+  { key:'Beschreibung',      label:'Beschreibung',                 step:1, alsoTry:['Description','Beschreibung_x002f_Begruendung','Grund'] },
   { key:'Warengruppe',       label:'Warengruppe',                  step:1, required:true, alsoTry:['ProductCategory'] },
   { key:'Prioritaet',        label:'Priorität',                    step:1, alsoTry:['Priority','Priorit_x00e4_t'] },
   // Step 2: Menge
   { key:'Menge',             label:'Menge',                        step:2, required:true, alsoTry:['Quantity','Amount'] },
   { key:'Mengeneinheit',     label:'Mengeneinheit',                step:2, required:true, alsoTry:['Unit','UnitOfMeasure'] },
   { key:'Mindestlagermenge', label:'Mindestlagermenge',            step:2, alsoTry:['MinStock','MinLager'] },
-  { key:'Termin',            label:'Benötigt bis',                 step:2, required:true, alsoTry:['Deadline','DueDate','Ben_x00f6_tigtBis'] },
+  { key:'Termin',            label:'Benötigt bis',                 step:2, required:true, alsoTry:['Deadline','DueDate','Ben_x00f6_tigtBis','Ben_x00f6_tigtbis'] },
   // Step 3: Beschaffung
-  { key:'Artikelnummer',     label:'Artikelnummer',                 step:1, alsoTry:['MaterialNumber','ItemNumber'] },
+  { key:'Artikelnummer',     label:'Artikelnummer',                 step:1, alsoTry:['MaterialNumber','ItemNumber','Artikelnummer_x002f_Nummernangab'] },
   { key:'Beschaffungslogik', label:'Beschaffungsart',              step:3, required:true, alsoTry:['Materialtyp','ProcurementType'] },
   { key:'Lieferant',         label:'Lieferant 1',                  step:3, alsoTry:['Vendor','Supplier'] },
   { key:'Lieferant2',        label:'Lieferant 2 (Alternative)',    step:3, alsoTry:['Vendor2','Supplier2','Lieferant_2'] },
   { key:'Lieferant3',        label:'Lieferant 3 (Alternative)',    step:3, alsoTry:['Vendor3','Supplier3','Lieferant_3'] },
   { key:'Lieferant4',        label:'Lieferant 4 (Alternative)',    step:3, alsoTry:['Vendor4','Supplier4','Lieferant_4'] },
-  { key:'GeschaetzterPreis',    label:'Geschätzter Preis',            step:3, alsoTry:['EstimatedPrice','Preis','Price'] },
+  { key:'GeschaetzterPreis',    label:'Geschätzter Preis',            step:3, alsoTry:['EstimatedPrice','Preis','Price','Gesch_x00e4_tzterPreisnetto_x002'] },
   { key:'Kostenstelle',         label:'Kostenstelle',                 step:3, alsoTry:['CostCenter'] },
   { key:'LeadBuyerAbschluss',   label:'Lead-Buyer-Abschluss',         step:3, alsoTry:['LeadBuyer','LeadBuyerAbschlus'] },
 ];
@@ -508,6 +508,13 @@ async function discoverSP() {
   }
 }
 
+// Decode SP hex-encoded field names like "Gesch_x00e4_tzter" → "Geschätzter"
+function decodeSpFieldName(name) {
+  return (name || '').replace(/_x([0-9a-fA-F]{4})_/g, (_, hex) =>
+    String.fromCharCode(parseInt(hex, 16))
+  );
+}
+
 function resolveColName(fd) {
   if (fd.key === 'Title') return 'Title';
   // Only consider writable, non-sealed columns
@@ -523,6 +530,16 @@ function resolveColName(fd) {
     const dn = (c.displayName||'').toLowerCase().replace(/[^a-z0-9äöüß]/g,'');
     if (dn === labelNorm) return k;
   }
+  // Fuzzy hex-decode fallback: decode SP internal name and compare normalised
+  // e.g. "Gesch_x00e4_tzterPreisnetto_x002" decoded ≈ "GeschätzterPreisnetto..."
+  const keyNorm = fd.key.toLowerCase().replace(/[^a-z0-9äöüß]/g,'');
+  for (const [k, c] of Object.entries(colByKey)) {
+    if (!ok(c)) continue;
+    const decoded = decodeSpFieldName(k).toLowerCase().replace(/[^a-z0-9äöüß]/g,'');
+    if (decoded === keyNorm) return k;
+    // Prefix match (SP truncates names at 32 chars)
+    if (decoded.length >= 10 && (decoded.startsWith(keyNorm) || keyNorm.startsWith(decoded))) return k;
+  }
   return null;
 }
 
@@ -533,7 +550,7 @@ async function loadItems(showToast = true) {
   try {
     const pageSize = account ? getSettings(account.username).pageSize : 100;
     const data = await gGet(
-      `/sites/${siteId}/lists/${listId}/items?$expand=fields&$top=${pageSize}&$orderby=createdDateTime desc`
+      `/sites/${siteId}/lists/${listId}/items?$expand=fields($select=*)&$top=${pageSize}&$orderby=createdDateTime desc`
     );
     allItems = data.value || [];
     if (showToast) toast('Daten aktualisiert', 'success');
