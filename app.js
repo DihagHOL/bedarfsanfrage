@@ -103,7 +103,7 @@ function getSettings(email) {
     compactView:        false,   // dense single-line cards in list views
     hideCompleted:      false,   // hide bestellt/erledigt/abgelehnt in Meine Anfragen
     defaultSort:        'date-desc', // default sort for Meine Anfragen
-    canSeeAll:          false,   // admin-granted: show Alle Anfragen tab
+    canSeeDashboard:    false,   // admin-granted: show Dashboard tab (all items visible)
   }, all[(email||'').toLowerCase()] || {});
 }
 function saveUserSettings(email, patch, _skipSP = false) {
@@ -129,21 +129,21 @@ async function loadSpSettings() {
   if (!siteId) return;
   try {
     const tok = await getToken();
-    const url = `${API}/sites/${siteId}/drive/root:/${SP_CONFIG_NAME}:/content`;
+    if (!tok) return;    const url = `${API}/sites/${siteId}/drive/root:/${SP_CONFIG_NAME}:/content`;
     const r   = await fetch(url, {
       headers: { Authorization: 'Bearer ' + tok, 'Cache-Control': 'no-cache', Pragma: 'no-cache' }
     });
     if (r.status === 404) return; // file doesn't exist yet — first run
-    if (!r.ok) return;
+    if (!r.ok) { console.warn('[loadSpSettings] HTTP', r.status); return; }
     const remote = await r.json();
-    // Merge remote into localStorage: remote wins for granted flags so admin
-    // grants propagate to users on all devices.
+    // Remote WINS for every key — admin grants on SP override stale local cache.
+    // This ensures canSeeDashboard, autoRefresh etc. propagate cross-device.
     const local = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
     for (const [em, cfg] of Object.entries(remote)) {
-      local[em] = Object.assign(local[em] || {}, cfg);
+      local[em] = Object.assign({}, local[em] || {}, cfg); // remote fields overwrite local
     }
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(local));
-    console.log('[loadSpSettings] synced', Object.keys(remote).length, 'user(s) from SP');
+    console.log('[loadSpSettings] synced', Object.keys(remote).length, 'user(s) from SP:', Object.keys(remote).join(', '));
   } catch(e) {
     console.warn('[loadSpSettings]', e.message);
   }
@@ -323,6 +323,7 @@ async function bootDone() {
     await loadItems(false);
     $id('boot').style.display = 'none';
     $id('app').style.display  = 'flex';
+    applyNavVisibility(); // re-apply after SP settings loaded (grants may have changed)
     // Auto-refresh is admin-controlled. Clear any self-set value from old localStorage
     // if admin hasn't explicitly granted the feature (autoRefreshGranted flag).
     if (account) {
@@ -339,7 +340,8 @@ async function bootDone() {
     $id('hdr-av').textContent   = name.split(' ').map(p=>p[0]||'').join('').substring(0,2).toUpperCase();
     $id('hdr-name').textContent = name;
     $id('hdr-mail').textContent = account?.username || '';
-    navigate(isAdmin() ? 'dashboard' : 'mine');
+    const canDash = isAdmin() || getSettings((account?.username||'').toLowerCase()).canSeeDashboard;
+    navigate(canDash ? 'dashboard' : 'mine');
   } catch(e) {
     $id('boot-sub').textContent = 'Fehler beim Laden: ' + e.message;
     $id('boot-spinner').style.display = 'none';
@@ -597,14 +599,11 @@ function isAdmin() { return account?.username?.toLowerCase() === ADMIN_EMAIL; }
 
 // Show/hide nav items based on role and admin-granted permissions.
 function applyNavVisibility() {
-  const dashNav = document.querySelector('.nav-item[data-view="dashboard"]');
-  if (dashNav) dashNav.style.display = isAdmin() ? '' : 'none';
-
-  const allNav  = document.querySelector('.nav-item[data-view="all"]');
-  if (allNav) {
-    const canAll = isAdmin() || !!(account && getSettings(account.username).canSeeAll);
-    allNav.style.display = canAll ? '' : 'none';
-  }
+  const email    = (account?.username || '').toLowerCase();
+  const s        = getSettings(email);
+  const canDash  = isAdmin() || s.canSeeDashboard;
+  const dashNav  = document.querySelector('.nav-item[data-view="dashboard"]');
+  if (dashNav) dashNav.style.display = canDash ? '' : 'none';
 }
 // Alias kept for any remaining call-sites
 const applyDashboardVisibility = applyNavVisibility;
@@ -688,8 +687,10 @@ function renderStatusChips() {
   const el = $id('status-chips');
   if (!el) return;
 
-  // Non-admins see only their own items in the Dashboard.
-  const baseItems = isAdmin() ? allItems : myItems();
+  // Admin and canSeeDashboard users see all items; others see only their own.
+  const _dEmail   = (account?.username||'').toLowerCase();
+  const _canDash  = isAdmin() || getSettings(_dEmail).canSeeDashboard;
+  const baseItems = _canDash ? allItems : myItems();
 
   // Count per status
   const counts = {};
@@ -751,8 +752,9 @@ function setDashFilter(status) {
 
 function filterDashboard() {
   const search = ($id('search-dashboard')?.value || '').toLowerCase();
-  // Non-admins see only their own items in the Dashboard.
-  let items = isAdmin() ? [...allItems] : [...myItems()];
+  const _fEmail  = (account?.username||'').toLowerCase();
+  const _fCanAll = isAdmin() || getSettings(_fEmail).canSeeDashboard;
+  let items = _fCanAll ? [...allItems] : [...myItems()];
   if (search) items = items.filter(i =>
     (getField(i,'Title')||'').toLowerCase().includes(search) || String(i.id||'').includes(search)
   );
@@ -2294,26 +2296,35 @@ function closePanel() {
 }
 
 function bindPanelEvents(itemId) {
-  $id('panel-close')?.addEventListener('click', closePanel);
-  $id('panel-order')?.addEventListener('click', () => openOrderModal(itemId));
-  $id('panel-besch')?.addEventListener('click', () => openBeschModal(itemId));
+  // IMPORTANT: scope all DOM queries to the CURRENT panel container.
+  // Multiple views (mine, dashboard) each render renderPanel() and produce identical
+  // IDs (panel-attach-body, panel-history-body, …). document.getElementById() would
+  // return the first match — usually the wrong panel. Use scoped queries instead.
+  const panelRoot = $id(`panel-${currentView}-content`);
+  const pq = sel => panelRoot?.querySelector(sel);
 
-  // Async: load approver history from version log, then refresh the approval section
-  // so past approvers are shown per stage (doesn't block initial render).
+  pq('#panel-close')?.addEventListener('click', closePanel);
+  pq('#panel-order')?.addEventListener('click', () => openOrderModal(itemId));
+  pq('#panel-besch')?.addEventListener('click', () => openBeschModal(itemId));
+
+  // Async: load approver history, then refresh the approval section in THIS panel.
   loadApproverHistory(itemId).then(() => {
-    const el = $id('panel-approval-body');
+    const el = pq('#panel-approval-body');
     if (!el) return;
     const item = allItems.find(x => String(x.id) === String(itemId));
     if (!item) return;
     el.innerHTML = buildApprovalInner(item, getStatusVal(item) || 'Eingereicht');
   });
-  // Load attachments
-  const attachEl = $id('panel-attach-body');
+
+  // Load attachments — scoped to this panel
+  const attachEl = pq('#panel-attach-body');
   if (attachEl) {
     getSpToken()
-      .then(tok => fetch(`${SP_BASE}/_api/web/lists/getByTitle('${SP_LIST}')/items(${itemId})/AttachmentFiles?_=${Date.now()}`,
+      .then(tok => fetch(
+        `${SP_BASE}/_api/web/lists/getByTitle('${SP_LIST}')/items(${itemId})/AttachmentFiles?_=${Date.now()}`,
         { headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json;odata=nometadata',
-            'Cache-Control': 'no-cache', Pragma: 'no-cache' } }))
+            'Cache-Control': 'no-cache', Pragma: 'no-cache' } }
+      ))
       .then(r => r.ok ? r.json() : { value: [] })
       .then(data => {
         const files = data.value || [];
@@ -2323,19 +2334,21 @@ function bindPanelEvents(itemId) {
       })
       .catch(() => { attachEl.innerHTML = '<span class="no-order">Anhänge konnten nicht geladen werden.</span>'; });
   }
-  $id('panel-history')?.addEventListener('click', () => {
-    const sec = $id('panel-history-section');
+
+  pq('#panel-history')?.addEventListener('click', () => {
+    const sec = pq('#panel-history-section');
     if (!sec) return;
     const isOpen = sec.style.display !== 'none';
     sec.style.display = isOpen ? 'none' : '';
-    $id('panel-history').textContent = isOpen ? '📋 Verlauf' : '📋 Verlauf ▲';
-    if (!isOpen) loadVersionHistory(itemId);
+    pq('#panel-history').textContent = isOpen ? '📋 Verlauf' : '📋 Verlauf ▲';
+    if (!isOpen) loadVersionHistory(itemId, pq);
   });
 }
 
 let _vhLoaded = {};
-async function loadVersionHistory(itemId) {
-  const el = $id('panel-history-body');
+async function loadVersionHistory(itemId, pq) {
+  // pq: scoped query function from bindPanelEvents (avoids duplicate-ID collision)
+  const el = pq ? pq('#panel-history-body') : $id('panel-history-body');
   if (!el) return;
   if (_vhLoaded[itemId]) return;
   _vhLoaded[itemId] = true;
@@ -2726,9 +2739,9 @@ function openSettings() {
           onchange="saveUserSettings('${esc(em)}',{autoRefresh:this.checked,autoRefreshGranted:this.checked})">
         <span class="tgl"></span>
       </label>
-      <label class="tgl-wrap" title="Alle Anfragen sehen">
-        <input type="checkbox" ${us.canSeeAll ? 'checked' : ''}
-          onchange="saveUserSettings('${esc(em)}',{canSeeAll:this.checked})">
+      <label class="tgl-wrap" title="Dashboard-Zugriff (alle Anfragen)">
+        <input type="checkbox" ${us.canSeeDashboard ? 'checked' : ''}
+          onchange="saveUserSettings('${esc(em)}',{canSeeDashboard:this.checked})">
         <span class="tgl"></span>
       </label>
       <input type="number" value="${us.pageSize||100}" min="10" max="500" step="10"
@@ -2748,7 +2761,7 @@ function openSettings() {
     <div class="su-header-row">
       <span class="su-email" style="font-size:.7rem;color:#6b7280">E-Mail</span>
       <span class="su-col-lbl" title="Auto-Refresh (30s)">⏱</span>
-      <span class="su-col-lbl" title="Alle Anfragen sehen">📋</span>
+      <span class="su-col-lbl" title="Dashboard-Zugriff">📊</span>
       <span class="su-col-lbl" title="Max. Elemente">Elem.</span>
       <span style="width:22px"></span>
     </div>
@@ -2775,18 +2788,18 @@ function openSettings() {
     : `<div class="settings-row"><span class="settings-label">⏱ Auto-Aktualisierung</span>
         ${roVal(s.autoRefresh && s.autoRefreshGranted, 'Aktiviert')}</div>`;
 
-  // canSeeAll: admin can toggle for self; others see read-only
+  // canSeeDashboard: admin can toggle for self; others see read-only
   const allRow = adminMode
     ? `<div class="settings-row">
-        <span class="settings-label">📋 Alle Anfragen sehen</span>
+        <span class="settings-label">📊 Dashboard-Zugriff</span>
         <label class="tgl-wrap">
-          <input type="checkbox" ${s.canSeeAll ? 'checked' : ''}
-            onchange="saveUserSettings('${esc(email)}',{canSeeAll:this.checked});applyNavVisibility()">
+          <input type="checkbox" ${s.canSeeDashboard ? 'checked' : ''}
+            onchange="saveUserSettings('${esc(email)}',{canSeeDashboard:this.checked});applyNavVisibility()">
           <span class="tgl"></span>
         </label>
        </div>`
-    : `<div class="settings-row"><span class="settings-label">📋 Alle Anfragen sehen</span>
-        ${roVal(s.canSeeAll, 'Freigegeben')}</div>`;
+    : `<div class="settings-row"><span class="settings-label">📊 Dashboard-Zugriff</span>
+        ${roVal(s.canSeeDashboard, 'Freigegeben')}</div>`;
 
   $id('settings-body').innerHTML = `
     <div class="settings-section-title">⚙️ Meine Einstellungen</div>
