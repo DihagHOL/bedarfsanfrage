@@ -233,13 +233,29 @@ function getApproverVal(item) {
 
   if (!item?.fields) return null;
 
-  // Debug: log all non-system fields so we can identify the approver column name/type.
-  // (Remove once the correct column is confirmed.)
-  const dbg = Object.entries(item.fields)
+  // ── Debug: scan item.fields for any genehmig-like key ──
+  const dbgFields = Object.entries(item.fields)
     .filter(([k]) => !SYSTEM_FIELDS.has(k) && /genehmig/i.test(k))
     .map(([k, v]) => `${k}=${JSON.stringify(v)}`);
-  if (dbg.length) console.log('[getApproverVal] Genehmiger-like fields:', dbg.join(' | '));
-  else            console.log('[getApproverVal] no genehmiger-like field found. all keys:', Object.keys(item.fields).filter(k => !SYSTEM_FIELDS.has(k)).join(', '));
+  if (dbgFields.length) {
+    console.log('[getApproverVal] fields genehmig-like:', dbgFields.join(' | '));
+  } else {
+    console.log('[getApproverVal] no genehmig field in item.fields. keys:', Object.keys(item.fields).filter(k => !SYSTEM_FIELDS.has(k)).join(', '));
+  }
+  // ── Debug: scan colByKey (SP schema) for genehmig-like display/internal names ──
+  const dbgCols = Object.entries(colByKey)
+    .filter(([k, c]) => !SYSTEM_FIELDS.has(k) && (/genehmig/i.test(k) || /genehmig/i.test(c.displayName||'')))
+    .map(([k, c]) => `${k} (display="${c.displayName}" readOnly=${c.readOnly})`);
+  if (dbgCols.length) {
+    console.log('[getApproverVal] colByKey genehmig-like:', dbgCols.join(' | '));
+  } else {
+    // Dump all writable non-system cols so we can identify the right one
+    const allCols = Object.entries(colByKey)
+      .filter(([k, c]) => !SYSTEM_FIELDS.has(k) && !c.readOnly)
+      .map(([k, c]) => `${k}="${c.displayName}"`)
+      .join(', ');
+    console.log('[getApproverVal] NO genehmig column in SP schema. writable cols:', allCols);
+  }
 
   // 1. Match via colByKey display names (e.g. displayName = "Genehmiger").
   for (const [k, c] of Object.entries(colByKey)) {
