@@ -214,18 +214,28 @@ function toggleAutoRefresh() {
 // Broad regex to catch German/English naming variants.
 const APPROVER_COL_RE = /\bgenehmiger\b|\bbearbeiter\b|aktuelle[rs]?\s*(bearbeiter|zugewiesen|genehmiger)|current.?approver/i;
 function getApproverVal(item) {
-  // Helper to extract a printable string from a field value (handles Person/Lookup objects).
+  // Helper: extract a printable string from a field value (handles Person/Lookup objects).
   function extractStr(raw) {
     if (raw == null) return null;
     if (typeof raw === 'object') {
       const name = raw.displayName || raw.LookupValue || raw.Title || raw.title || raw.text;
-      return (name && name !== '[object Object]') ? name : null;
+      return (name && name !== '[object Object]') ? String(name).trim() || null : null;
     }
     const s = String(raw).trim();
     return (s && s !== '[object Object]') ? s : null;
   }
 
-  // 1. Check columns discovered by discoverSP (by display name match).
+  if (!item?.fields) return null;
+
+  // Debug: log all non-system fields so we can identify the approver column name/type.
+  // (Remove once the correct column is confirmed.)
+  const dbg = Object.entries(item.fields)
+    .filter(([k]) => !SYSTEM_FIELDS.has(k) && /genehmig/i.test(k))
+    .map(([k, v]) => `${k}=${JSON.stringify(v)}`);
+  if (dbg.length) console.log('[getApproverVal] Genehmiger-like fields:', dbg.join(' | '));
+  else            console.log('[getApproverVal] no genehmiger-like field found. all keys:', Object.keys(item.fields).filter(k => !SYSTEM_FIELDS.has(k)).join(', '));
+
+  // 1. Match via colByKey display names (e.g. displayName = "Genehmiger").
   for (const [k, c] of Object.entries(colByKey)) {
     if (SYSTEM_FIELDS.has(k)) continue;
     if (APPROVER_COL_RE.test(c.displayName || k)) {
@@ -233,17 +243,30 @@ function getApproverVal(item) {
       if (v) return v;
     }
   }
-  // 2. Fallback: scan item.fields directly for any key matching the regex
-  //    (catches cases where internal SP column name differs from displayName).
-  if (item?.fields) {
-    for (const [k, raw] of Object.entries(item.fields)) {
-      if (SYSTEM_FIELDS.has(k)) continue;
-      if (APPROVER_COL_RE.test(k)) {
-        const v = extractStr(raw);
-        if (v) return v;
-      }
+
+  // 2. Scan item.fields keys directly — catches "Genehmiger0" and other SP
+  //    internal-name variants where the \b word-boundary would fail.
+  for (const [k, raw] of Object.entries(item.fields)) {
+    if (SYSTEM_FIELDS.has(k)) continue;
+    if (/genehmiger/i.test(k)) {          // no \b — matches Genehmiger, Genehmiger0, etc.
+      const v = extractStr(raw);
+      if (v) return v;
     }
   }
+
+  // 3. Person column: Graph API stores Person fields as {colName}Id (numeric lookup ID)
+  //    and the display name in {colName} as null. Try to extract from LookupId fields.
+  for (const [k, raw] of Object.entries(item.fields)) {
+    if (SYSTEM_FIELDS.has(k)) continue;
+    // Keys like "GenehmigerId", "Genehmiger0Id"
+    if (/genehmiger\w*id$/i.test(k) && raw != null) {
+      // Only a numeric ID available — not useful as display text, skip
+      // (would need an extra Graph /users call; avoid for performance)
+      console.log('[getApproverVal] Person-LookupId found:', k, '=', raw, '— no display name in fields');
+      break;
+    }
+  }
+
   return null;
 }
 
@@ -1016,14 +1039,16 @@ function statusTimeline(statusVal, item) {
   const isRej = /abgelehnt/i.test(sv);
 
   // Fixed display order — smIdx maps to STAGE_MAP entry for column lookup (-1 = no approval col).
+  // test(sv): flexible regex match against the raw SP status value (handles SP wording variants,
+  //           e.g. "strategische Einkauf" vs "strategischer Einkauf").
   const DISPLAY = [
-    { label: 'Eingereicht',                         smIdx: -1              },
-    { label: 'In Prüfung (Einkauf)',                smIdx:  0              },
-    { label: 'In Prüfung (Werkleitung)',            smIdx:  1              },
-    { label: 'In Prüfung (strategischer Einkauf)', smIdx:  2              },
-    { label: 'In Prüfung (Controlling)',            smIdx:  3              },
-    { label: 'Freigegeben',                         smIdx: -1              },
-    { label: 'Bestellt',                            smIdx: -1              },
+    { label: 'Eingereicht',                         smIdx: -1, test: v => /^eingereicht$/i.test(v) },
+    { label: 'In Prüfung (Einkauf)',                smIdx:  0, test: v => /pr[üu]fung/i.test(v) && /einkauf/i.test(v) && !/strategisch/i.test(v) },
+    { label: 'In Prüfung (Werkleitung)',            smIdx:  1, test: v => /werkleitung/i.test(v) },
+    { label: 'In Prüfung (strategischer Einkauf)', smIdx:  2, test: v => /strategisch/i.test(v) },
+    { label: 'In Prüfung (Controlling)',            smIdx:  3, test: v => /controlling/i.test(v) },
+    { label: 'Freigegeben',                         smIdx: -1, test: v => /^freigegeben$/i.test(v) },
+    { label: 'Bestellt',                            smIdx: -1, test: v => /^bestellt$/i.test(v) },
   ];
 
   // Collect all approval-related columns that have a value on this item.
@@ -1048,12 +1073,11 @@ function statusTimeline(statusVal, item) {
     return cols.length ? cols[0].val : null;
   }
 
-  const svL        = sv.toLowerCase();
-  const currentIdx = DISPLAY.findIndex(d => d.label.toLowerCase() === svL);
+  const currentIdx = DISPLAY.findIndex(d => d.test(sv));
 
   return DISPLAY.map((d, i) => {
     const decision  = getDecision(d.smIdx);
-    const isCurrent = d.label.toLowerCase() === svL;
+    const isCurrent = d.test(sv);
     const hasData   = decision != null;
 
     let dot, cls;
