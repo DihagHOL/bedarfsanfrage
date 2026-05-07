@@ -16,7 +16,7 @@ const SP_BASE   = 'https://' + SP_SITE.split(':/')[0] + '/' + SP_SITE.split(':/'
 const FORM_FIELDS = [
   // Step 1: Bedarf
   { key:'Title',             label:'Bezeichnung',                  step:1, required:true  },
-  { key:'Beschreibung',      label:'Beschreibung / Begründung',    step:1, alsoTry:['Description','Beschreibung_x002f_Begruendung'] },
+  { key:'Beschreibung',      label:'Beschreibung',                 step:1, alsoTry:['Description','Beschreibung_x002f_Begruendung'] },
   { key:'Warengruppe',       label:'Warengruppe',                  step:1, required:true, alsoTry:['ProductCategory'] },
   { key:'Prioritaet',        label:'Priorität',                    step:1, alsoTry:['Priority','Priorit_x00e4_t'] },
   // Step 2: Menge
@@ -25,13 +25,13 @@ const FORM_FIELDS = [
   { key:'Mindestlagermenge', label:'Mindestlagermenge',            step:2, alsoTry:['MinStock','MinLager'] },
   { key:'Termin',            label:'Benötigt bis',                 step:2, required:true, alsoTry:['Deadline','DueDate','Ben_x00f6_tigtBis'] },
   // Step 3: Beschaffung
-  { key:'Artikelnummer',     label:'Artikelnummer / TID',           step:1, alsoTry:['MaterialNumber','ItemNumber'] },
+  { key:'Artikelnummer',     label:'Artikelnummer',                 step:1, alsoTry:['MaterialNumber','ItemNumber'] },
   { key:'Beschaffungslogik', label:'Beschaffungsart',              step:3, required:true, alsoTry:['Materialtyp','ProcurementType'] },
   { key:'Lieferant',         label:'Lieferant 1',                  step:3, alsoTry:['Vendor','Supplier'] },
   { key:'Lieferant2',        label:'Lieferant 2 (Alternative)',    step:3, alsoTry:['Vendor2','Supplier2','Lieferant_2'] },
   { key:'Lieferant3',        label:'Lieferant 3 (Alternative)',    step:3, alsoTry:['Vendor3','Supplier3','Lieferant_3'] },
   { key:'Lieferant4',        label:'Lieferant 4 (Alternative)',    step:3, alsoTry:['Vendor4','Supplier4','Lieferant_4'] },
-  { key:'GeschaetzterPreis',    label:'Geschätzter Preis netto (€)',  step:3, alsoTry:['EstimatedPrice','Preis','Price'] },
+  { key:'GeschaetzterPreis',    label:'Geschätzter Preis',            step:3, alsoTry:['EstimatedPrice','Preis','Price'] },
   { key:'Kostenstelle',         label:'Kostenstelle',                 step:3, alsoTry:['CostCenter'] },
   { key:'LeadBuyerAbschluss',   label:'Lead-Buyer-Abschluss',         step:3, alsoTry:['LeadBuyer','LeadBuyerAbschlus'] },
 ];
@@ -166,19 +166,34 @@ function toggleAutoRefresh() {
 // Broad regex to catch German/English naming variants.
 const APPROVER_COL_RE = /\bgenehmiger\b|\bbearbeiter\b|aktuelle[rs]?\s*(bearbeiter|zugewiesen|genehmiger)|current.?approver/i;
 function getApproverVal(item) {
+  // Helper to extract a printable string from a field value (handles Person/Lookup objects).
+  function extractStr(raw) {
+    if (raw == null) return null;
+    if (typeof raw === 'object') {
+      const name = raw.displayName || raw.LookupValue || raw.Title || raw.title || raw.text;
+      return (name && name !== '[object Object]') ? name : null;
+    }
+    const s = String(raw).trim();
+    return (s && s !== '[object Object]') ? s : null;
+  }
+
+  // 1. Check columns discovered by discoverSP (by display name match).
   for (const [k, c] of Object.entries(colByKey)) {
     if (SYSTEM_FIELDS.has(k)) continue;
     if (APPROVER_COL_RE.test(c.displayName || k)) {
-      const raw = getField(item, k);
-      if (!raw && raw !== 0) continue;
-      // Person/lookup fields may come as objects from Graph API
-      if (typeof raw === 'object') {
-        const name = raw.displayName || raw.LookupValue || raw.Title || raw.title || raw.text;
-        if (name && name !== '[object Object]') return name;
-        continue;
+      const v = extractStr(getField(item, k));
+      if (v) return v;
+    }
+  }
+  // 2. Fallback: scan item.fields directly for any key matching the regex
+  //    (catches cases where internal SP column name differs from displayName).
+  if (item?.fields) {
+    for (const [k, raw] of Object.entries(item.fields)) {
+      if (SYSTEM_FIELDS.has(k)) continue;
+      if (APPROVER_COL_RE.test(k)) {
+        const v = extractStr(raw);
+        if (v) return v;
       }
-      const s = String(raw).trim();
-      if (s && s !== '[object Object]') return s;
     }
   }
   return null;
@@ -952,7 +967,7 @@ function statusTimeline(statusVal, item) {
     { label: 'Eingereicht',                         smIdx: -1              },
     { label: 'In Prüfung (Einkauf)',                smIdx:  0              },
     { label: 'In Prüfung (Werkleitung)',            smIdx:  1              },
-    { label: 'In Prüfung (strategischer Einkauf)', smIdx:  2, optional: true },
+    { label: 'In Prüfung (strategischer Einkauf)', smIdx:  2              },
     { label: 'In Prüfung (Controlling)',            smIdx:  3              },
     { label: 'Freigegeben',                         smIdx: -1              },
     { label: 'Bestellt',                            smIdx: -1              },
@@ -987,9 +1002,6 @@ function statusTimeline(statusVal, item) {
     const decision  = getDecision(d.smIdx);
     const isCurrent = d.label.toLowerCase() === svL;
     const hasData   = decision != null;
-
-    // Hide optional stages when no SP data and not current.
-    if (d.optional && !hasData && !isCurrent) return null;
 
     let dot, cls;
     if (hasData) {
@@ -1259,7 +1271,7 @@ function openBeschModal(itemId) {
       </select>
     </div>
     <div class="form-group" style="margin-bottom:12px">
-      <label>Artikelnummer / TID</label>
+      <label>Artikelnummer</label>
       <input type="text" id="b-artikelnummer" value="${esc(gv('Artikelnummer'))}" placeholder="z. B. 4001-00010"/>
     </div>
     <div class="form-group" style="margin-bottom:12px">
@@ -1271,7 +1283,7 @@ function openBeschModal(itemId) {
       <input type="text" id="b-lieferant2" value="${esc(gv('Lieferant2'))}" placeholder="optional"/>
     </div>
     <div class="form-group" style="margin-bottom:12px">
-      <label>Geschätzter Preis netto (€)</label>
+      <label>Geschätzter Preis</label>
       <input type="number" id="b-preis" value="${esc(String(gv('GeschaetzterPreis')))}" min="0" step="0.01" placeholder="0,00"/>
     </div>
     <div class="form-group">
@@ -1621,7 +1633,7 @@ function buildReview() {
         ['Lieferant 2', d.Lieferant2],
         ['Lieferant 3', d.Lieferant3],
         ['Lieferant 4', d.Lieferant4],
-        ['Gesch. Preis (netto)', d.GeschaetzterPreis ? fmtEuro(d.GeschaetzterPreis) : null],
+        ['Geschätzter Preis', d.GeschaetzterPreis ? fmtEuro(d.GeschaetzterPreis) : null],
         ['Kostenstelle', d.Kostenstelle],
       ])}
     </div>
@@ -2522,8 +2534,14 @@ function openSettings() {
 function closeSettings() { $id('settings-modal').classList.add('hidden'); }
 function addUserSetting() {
   const em = ($id('su-new-email')?.value || '').trim().toLowerCase();
-  if (!em.includes('@')) { toast('Bitte gültige E-Mail-Adresse eingeben.', 'error'); return; }
-  saveUserSettings(em, { autoRefresh: true, pageSize: 100 });
+  if (!em || !em.includes('@') || !em.includes('.')) {
+    toast('Bitte gültige E-Mail-Adresse eingeben.', 'error'); return;
+  }
+  const all = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+  if (all[em]) { toast(`${em} ist bereits vorhanden.`, 'info'); openSettings(); return; }
+  // Add with neutral defaults — admin can enable features via the toggles below.
+  saveUserSettings(em, { pageSize: 100 });
+  toast(`Benutzer ${em} hinzugefügt. Berechtigungen können jetzt gesetzt werden.`, 'success');
   openSettings();
 }
 
