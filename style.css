@@ -671,6 +671,10 @@ details#attach-extra-wrap[open] .attach-more-toggle { color:#374151; }
 .ap-meta { font-size: .75rem; color: #6b7280; }
 .ap-approver { font-size: .75rem; color: #4b5563; font-weight: 500; }
 .ap-approver-past { opacity: .65; }
+.ap-inline-comment {
+  margin-top: 4px; font-size: .75rem; color: #6b7280;
+  font-style: italic; line-height: 1.4;
+}
 
 .ap-comment-box {
   margin-top: 8px; padding: 8px 10px;

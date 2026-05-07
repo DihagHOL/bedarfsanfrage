@@ -1228,15 +1228,24 @@ function statusTimeline(statusVal, item) {
     }
 
     // ── Approver line ─────────────────────────────────────────────────────
+    // Approver belongs to the completed stage they acted on, NOT the current pending stage.
     let approverHtml = '';
-    if (isCurrent && item) {
-      // Live value from SP
-      const a = getApproverVal(item);
-      if (a) approverHtml = `<div class="ap-approver">👤 ${esc(a)}</div>`;
-    } else if (approverByStage[d.label]) {
-      // Historical value from version cache (slightly muted)
-      approverHtml = `<div class="ap-approver ap-approver-past">👤 ${esc(approverByStage[d.label])}</div>`;
+    const histApprover = approverByStage[d.label];
+    if (isPast && histApprover) {
+      // Attach comment to the most recently completed stage (i === currentIdx - 1)
+      let commentHtml = '';
+      if (currentIdx >= 0 && i === currentIdx - 1) {
+        const commentCols = approvalCols.filter(c => /kommentar/i.test(c.label || c.key));
+        if (commentCols.length) {
+          commentHtml = commentCols.map(c =>
+            `<div class="ap-inline-comment">💬 ${esc(String(c.val))}</div>`
+          ).join('');
+        }
+      }
+      approverHtml = `<div class="ap-approver ap-approver-past">👤 ${esc(histApprover)}${commentHtml}</div>`;
     }
+    // Note: current (●) stage intentionally shows no approver — the SP field
+    // still holds the previous stage's approver until a new one is assigned.
 
     const bold = isCurrent ? ' style="font-weight:600"' : '';
     return `<div class="approval-stage"><div class="ap-dot ${cls}">${dot}</div>`
@@ -2504,7 +2513,12 @@ function buildApprovalInner(item, statusVal) {
     return `<div class="approval-stage"><div class="ap-dot ${st.cls}">${st.dot}</div><div class="ap-body"><div class="ap-stage-label">${esc(c.label)}</div><span class="ap-badge" style="background:${st.bg};color:${st.color}">${esc(String(c.val))}</span></div></div>`;
   };
   const mainHtml = stages.length ? stages.map(mkStage).join('') : statusTimeline(sv, item);
-  return `<div class="approval-stages">${mainHtml}${extra.map(mkExtra).join('')}</div>`;
+  // When falling back to statusTimeline, comments are already rendered inline under the
+  // completed stage – skip the separate ap-comment-box to avoid duplicates.
+  const extraFiltered = stages.length
+    ? extra
+    : extra.filter(c => !/kommentar/i.test(c.label || c.key));
+  return `<div class="approval-stages">${mainHtml}${extraFiltered.map(mkExtra).join('')}</div>`;
 }
 
 function renderPanel(item, editMode = false) {
