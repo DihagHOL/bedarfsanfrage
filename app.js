@@ -1120,7 +1120,8 @@ function getApproverFromFields(fields) {
 // Result is cached in _approverHistory[itemId].  Returns the cache entry.
 async function loadApproverHistory(itemId) {
   if (_approverHistory[itemId]) return _approverHistory[itemId];
-  const history = {};
+  const history  = {};
+  const visited  = new Set(); // which stages were actually reached
   try {
     const data = await gGet(
       `/sites/${siteId}/lists/${listId}/items/${itemId}/versions?$expand=fields($select=*)&$top=100`
@@ -1128,18 +1129,21 @@ async function loadApproverHistory(itemId) {
     // Sort oldest → newest so later versions overwrite earlier ones for the same stage
     const vers = (data.value || []).sort((a, b) => new Date(a.lastModifiedDateTime) - new Date(b.lastModifiedDateTime));
     for (const v of vers) {
-      const sv = (v.fields?.Stauts || v.fields?.Status || '').trim();
+      const sv       = (v.fields?.Stauts || v.fields?.Status || '').trim();
       const approver = getApproverFromFields(v.fields);
-      if (!approver) continue;
       for (const d of TIMELINE_STAGES) {
-        if (d.test(sv)) { history[d.label] = approver; break; }
+        if (d.test(sv)) {
+          visited.add(d.label);
+          if (approver) history[d.label] = approver;
+          break;
+        }
       }
     }
   } catch(e) {
     console.warn('[loadApproverHistory]', e.message);
   }
-  _approverHistory[itemId] = history;
-  return history;
+  _approverHistory[itemId] = { ...history, _visited: visited };
+  return _approverHistory[itemId];
 }
 
 // Workflow-Reihenfolge für die Status-Zeitleiste (wird in discoverSP() aus SP-Spalte befüllt)
@@ -1195,23 +1199,34 @@ function statusTimeline(statusVal, item) {
     return cols.length ? cols[0].val : null;
   }
 
-  const currentIdx    = TIMELINE_STAGES.findIndex(d => d.test(sv));
+  const currentIdx      = TIMELINE_STAGES.findIndex(d => d.test(sv));
   const approverByStage = item ? (_approverHistory[item.id] || {}) : {};
+  const visitedStages   = approverByStage._visited || null; // Set or null if not loaded yet
+
+  // Terminal "success" stage labels – always render as ✓ green, never ●
+  const TERMINAL_OK = /^(freigegeben|bestellt)$/i;
 
   const rows = TIMELINE_STAGES.map((d, i) => {
-    const isCurrent = d.test(sv);
-    const isPast    = currentIdx >= 0 && i < currentIdx;
-    const decision  = getDecision(d.smIdx);
+    const isCurrent  = d.test(sv);
+    const isPast     = currentIdx >= 0 && i < currentIdx;
+    // Show the single next stage after "Freigegeben" as a pending ● preview
+    const isNextStep = currentIdx >= 0 && i === currentIdx + 1 && TERMINAL_OK.test(sv);
+    const decision   = getDecision(d.smIdx);
 
     // ── Visibility: only show reached stages ──────────────────────────────
-    if (!isCurrent && !isPast) {
-      // When rejected and no currentIdx: show stages that have a decision or
-      // a recorded approver (so the audit trail stays visible), plus Eingereicht.
+    if (!isCurrent && !isPast && !isNextStep) {
       if (isRej && (decision != null || approverByStage[d.label] || i === 0)) {
-        /* show */
+        /* show in rejection audit trail */
       } else {
-        return null; // future stage → hide
+        return null; // future or skipped stage → hide
       }
+    }
+
+    // Past stage: skip if the workflow never actually passed through it
+    // (e.g. strategischer Einkauf was never reached → don't show even if index < currentIdx)
+    // "Eingereicht" (i === 0) is always implicitly visited.
+    if (isPast && i > 0 && visitedStages !== null && !visitedStages.has(d.label)) {
+      return null;
     }
 
     // ── Dot / colour ──────────────────────────────────────────────────────
@@ -1222,7 +1237,11 @@ function statusTimeline(statusVal, item) {
       else if (/abgelehnt|rejected|nein\b/.test(dL))       { dot = '✗'; cls = 'ap-no';      }
       else                                                  { dot = '●'; cls = 'ap-pending'; }
     } else if (isCurrent) {
-      dot = '●'; cls = 'ap-pending';
+      // Terminal success states (Freigegeben, Bestellt) are always green ✓
+      if (TERMINAL_OK.test(d.label)) { dot = '✓'; cls = 'ap-ok'; }
+      else                           { dot = '●'; cls = 'ap-pending'; }
+    } else if (isNextStep) {
+      dot = '●'; cls = 'ap-pending'; // next expected step
     } else {
       dot = '✓'; cls = 'ap-ok';  // passed through
     }
@@ -1231,10 +1250,13 @@ function statusTimeline(statusVal, item) {
     // Approver belongs to the completed stage they acted on, NOT the current pending stage.
     let approverHtml = '';
     const histApprover = approverByStage[d.label];
-    if (isPast && histApprover) {
-      // Attach comment to the most recently completed stage (i === currentIdx - 1)
+    if ((isPast || (isCurrent && TERMINAL_OK.test(d.label))) && histApprover) {
+      // Attach comment to the most recently completed stage
       let commentHtml = '';
-      if (currentIdx >= 0 && i === currentIdx - 1) {
+      const isLastCompleted = isCurrent
+        ? true  // Freigegeben/Bestellt is itself the last completed
+        : (currentIdx >= 0 && i === currentIdx - 1);
+      if (isLastCompleted) {
         const commentCols = approvalCols.filter(c => /kommentar/i.test(c.label || c.key));
         if (commentCols.length) {
           commentHtml = commentCols.map(c =>
@@ -1244,10 +1266,8 @@ function statusTimeline(statusVal, item) {
       }
       approverHtml = `<div class="ap-approver ap-approver-past">👤 ${esc(histApprover)}${commentHtml}</div>`;
     }
-    // Note: current (●) stage intentionally shows no approver — the SP field
-    // still holds the previous stage's approver until a new one is assigned.
 
-    const bold = isCurrent ? ' style="font-weight:600"' : '';
+    const bold = (isCurrent && !TERMINAL_OK.test(d.label)) ? ' style="font-weight:600"' : '';
     return `<div class="approval-stage"><div class="ap-dot ${cls}">${dot}</div>`
          + `<div class="ap-body"><div class="ap-stage-label"${bold}>${esc(d.label)}</div>${approverHtml}</div></div>`;
   }).filter(Boolean);
