@@ -96,7 +96,15 @@ const ADMIN_EMAIL  = 'administrator@dihag.com';
 
 function getSettings(email) {
   const all = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
-  return Object.assign({ autoRefresh: false, pageSize: 100 }, all[(email||'').toLowerCase()] || {});
+  return Object.assign({
+    autoRefresh:        false,
+    autoRefreshGranted: false,
+    pageSize:           100,
+    compactView:        false,   // dense single-line cards in list views
+    hideCompleted:      false,   // hide bestellt/erledigt/abgelehnt in Meine Anfragen
+    defaultSort:        'date-desc', // default sort for Meine Anfragen
+    canSeeAll:          false,   // admin-granted: show Alle Anfragen tab
+  }, all[(email||'').toLowerCase()] || {});
 }
 function saveUserSettings(email, patch, _skipSP = false) {
   const all = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
@@ -587,12 +595,19 @@ function VIEW_TITLES(view) {
 function canSeeDashboard() { return !!account; }
 function isAdmin() { return account?.username?.toLowerCase() === ADMIN_EMAIL; }
 
-// Show Dashboard nav for admins, hide it for regular users.
-// Non-admins start on 'mine' and never need the dashboard nav item.
-function applyDashboardVisibility() {
-  const navItem = document.querySelector('.nav-item[data-view="dashboard"]');
-  if (navItem) navItem.style.display = isAdmin() ? '' : 'none';
+// Show/hide nav items based on role and admin-granted permissions.
+function applyNavVisibility() {
+  const dashNav = document.querySelector('.nav-item[data-view="dashboard"]');
+  if (dashNav) dashNav.style.display = isAdmin() ? '' : 'none';
+
+  const allNav  = document.querySelector('.nav-item[data-view="all"]');
+  if (allNav) {
+    const canAll = isAdmin() || !!(account && getSettings(account.username).canSeeAll);
+    allNav.style.display = canAll ? '' : 'none';
+  }
 }
+// Alias kept for any remaining call-sites
+const applyDashboardVisibility = applyNavVisibility;
 
 function navigate(view, id) {
   if (!canSeeDashboard() && view === 'dashboard') view = 'mine'; // should never happen now
@@ -814,7 +829,8 @@ function renderKanban(items) {
 }
 
 // ── LIST VIEWS ────────────────────────────────────────────────────────────────
-let mineStatusFilter = '';
+let mineStatusFilter  = '';
+let _mineInitialized  = false; // so defaultSort only applies on first load
 let mineSortOrder    = 'date-desc';
 
 function myItems() {
@@ -826,7 +842,16 @@ function myItems() {
 }
 
 function renderList(type) {
-  if (type === 'mine') { renderStatusChipsMine(); filterView('mine'); return; }
+  if (type === 'mine') {
+    // Apply user's defaultSort on first load (not on every re-render so user can override)
+    if (account) {
+      const s = getSettings(account.username);
+      if (!_mineInitialized) { mineSortOrder = s.defaultSort || 'date-desc'; _mineInitialized = true; }
+    }
+    renderStatusChipsMine();
+    filterView('mine');
+    return;
+  }
   const sel = $id(`filter-${type}-status`);
   if (sel && sel.options.length <= 1) {
     const statuses = [...new Set(allItems.map(i => getStatusVal(i)).filter(Boolean))];
@@ -887,7 +912,13 @@ function filterView(type) {
   const search = ($id(`search-${type}`)?.value || '').toLowerCase();
   const priceKey = resolvedFields['GeschaetzterPreis'] || 'GeschaetzterPreis';
 
+  const userSettings = account ? getSettings(account.username) : {};
   let items = type === 'mine' ? myItems() : [...allItems];
+
+  // hideCompleted: filter out terminal states in Meine Anfragen
+  if (type === 'mine' && userSettings.hideCompleted && !mineStatusFilter) {
+    items = items.filter(i => !/^(bestellt|erledigt|abgelehnt)$/i.test(getStatusVal(i)));
+  }
 
   if (search) items = items.filter(i =>
     (getField(i,'Title')||'').toLowerCase().includes(search) ||
@@ -912,9 +943,13 @@ function filterView(type) {
   }
 
   const container = $id(`list-${type}`);
-  if (container) container.innerHTML = items.length
-    ? items.map(i => itemCard(i)).join('')
-    : emptyState(type === 'mine' ? 'Sie haben noch keine Anfragen erstellt.' : 'Keine Anfragen gefunden.');
+  if (container) {
+    // compactView: toggle dense layout class
+    container.classList.toggle('compact-list', !!(userSettings.compactView));
+    container.innerHTML = items.length
+      ? items.map(i => itemCard(i)).join('')
+      : emptyState(type === 'mine' ? 'Sie haben noch keine Anfragen erstellt.' : 'Keine Anfragen gefunden.');
+  }
 }
 
 // ── DETAIL VIEW ───────────────────────────────────────────────────────────────
@@ -2678,37 +2713,44 @@ async function openPdfViewer(relUrl, fileName) {
 
 // ── SETTINGS MODAL ───────────────────────────────────────────────────────────
 function openSettings() {
-  const email   = (account?.username || '').toLowerCase();
-  const s       = getSettings(email);
-  const isAdmin = email === ADMIN_EMAIL;
+  const email    = (account?.username || '').toLowerCase();
+  const s        = getSettings(email);
+  const adminMode = email === ADMIN_EMAIL;
 
-  // Admin section row: per-user feature toggles.
-  // autoRefreshGranted distinguishes admin-granted from old self-set defaults.
+  // ── Admin: per-user row ───────────────────────────────────────────────────
   const userRow = (em, us) => `
-    <div class="su-row">
+    <div class="su-row" id="su-row-${btoa(em).replace(/=/g,'')}">
       <span class="su-email" title="${esc(em)}">${esc(em)}</span>
-      <label class="tgl-wrap" title="Auto-Refresh freischalten">
+      <label class="tgl-wrap" title="Auto-Refresh">
         <input type="checkbox" ${us.autoRefresh && us.autoRefreshGranted ? 'checked' : ''}
-          onchange="saveUserSettings('${esc(em)}',{autoRefresh:this.checked,autoRefreshGranted:this.checked});updateARBtn()">
+          onchange="saveUserSettings('${esc(em)}',{autoRefresh:this.checked,autoRefreshGranted:this.checked})">
+        <span class="tgl"></span>
+      </label>
+      <label class="tgl-wrap" title="Alle Anfragen sehen">
+        <input type="checkbox" ${us.canSeeAll ? 'checked' : ''}
+          onchange="saveUserSettings('${esc(em)}',{canSeeAll:this.checked})">
         <span class="tgl"></span>
       </label>
       <input type="number" value="${us.pageSize||100}" min="10" max="500" step="10"
-        class="su-num" title="Elemente"
+        class="su-num" title="Max. Elemente"
         onchange="saveUserSettings('${esc(em)}',{pageSize:parseInt(this.value)||100})">
-      <span class="su-lbl">Elem.</span>
+      <button class="su-del" title="Benutzer entfernen"
+        onclick="deleteUserSetting('${esc(em)}')">✕</button>
     </div>`;
 
-  const adminSection = isAdmin ? `
+  const adminSection = adminMode ? `
     <hr class="modal-hr">
-    <h4 class="settings-h4">Benutzereinstellungen verwalten</h4>
+    <div class="settings-section-title">👥 Benutzer verwalten</div>
     <div class="su-add">
       <input type="email" id="su-new-email" placeholder="user@dihag.com" class="su-input">
       <button class="btn btn-sm btn-primary" onclick="addUserSetting()">+ Hinzufügen</button>
     </div>
     <div class="su-header-row">
       <span class="su-email" style="font-size:.7rem;color:#6b7280">E-Mail</span>
-      <span class="su-col-lbl" title="Auto-Refresh">⏱</span>
+      <span class="su-col-lbl" title="Auto-Refresh (30s)">⏱</span>
+      <span class="su-col-lbl" title="Alle Anfragen sehen">📋</span>
       <span class="su-col-lbl" title="Max. Elemente">Elem.</span>
+      <span style="width:22px"></span>
     </div>
     <div id="su-list">${
       Object.entries(getAllUserSettings())
@@ -2717,34 +2759,80 @@ function openSettings() {
       '<p class="su-empty">Noch keine weiteren Benutzer konfiguriert.</p>'
     }</div>` : '';
 
-  // Auto-Refresh row: only admin can manage this for themselves.
-  // Non-admins see a read-only status (granted by admin) and cannot toggle it themselves.
-  const arRow = isAdmin ? `
-    <div class="settings-row">
-      <span class="settings-label">Auto-Aktualisierung (alle 30s)</span>
-      <label class="tgl-wrap">
-        <input type="checkbox" id="s-ar" ${s.autoRefresh && s.autoRefreshGranted ? 'checked' : ''}
-          onchange="saveUserSettings('${esc(email)}',{autoRefresh:this.checked,autoRefreshGranted:this.checked});this.checked?startAutoRefresh():stopAutoRefresh()">
-        <span class="tgl"></span>
-      </label>
-    </div>` : `
-    <div class="settings-row">
-      <span class="settings-label">Auto-Aktualisierung</span>
-      <span class="settings-val-ro">${s.autoRefresh && s.autoRefreshGranted ? '✅ Aktiviert' : '—'}</span>
-    </div>`;
+  // ── "Meine Einstellungen" sections ────────────────────────────────────────
+  const roVal = (on, label) => `<span class="settings-val-ro">${on ? `✅ ${label}` : '—'}</span>`;
+
+  // Auto-Refresh: admin can toggle for self; others see read-only
+  const arRow = adminMode
+    ? `<div class="settings-row">
+        <span class="settings-label">⏱ Auto-Aktualisierung (alle 30s)</span>
+        <label class="tgl-wrap">
+          <input type="checkbox" ${s.autoRefresh && s.autoRefreshGranted ? 'checked' : ''}
+            onchange="saveUserSettings('${esc(email)}',{autoRefresh:this.checked,autoRefreshGranted:this.checked});this.checked?startAutoRefresh():stopAutoRefresh()">
+          <span class="tgl"></span>
+        </label>
+       </div>`
+    : `<div class="settings-row"><span class="settings-label">⏱ Auto-Aktualisierung</span>
+        ${roVal(s.autoRefresh && s.autoRefreshGranted, 'Aktiviert')}</div>`;
+
+  // canSeeAll: admin can toggle for self; others see read-only
+  const allRow = adminMode
+    ? `<div class="settings-row">
+        <span class="settings-label">📋 Alle Anfragen sehen</span>
+        <label class="tgl-wrap">
+          <input type="checkbox" ${s.canSeeAll ? 'checked' : ''}
+            onchange="saveUserSettings('${esc(email)}',{canSeeAll:this.checked});applyNavVisibility()">
+          <span class="tgl"></span>
+        </label>
+       </div>`
+    : `<div class="settings-row"><span class="settings-label">📋 Alle Anfragen sehen</span>
+        ${roVal(s.canSeeAll, 'Freigegeben')}</div>`;
 
   $id('settings-body').innerHTML = `
-    <h4 class="settings-h4">Meine Einstellungen <small>(${esc(email)})</small></h4>
+    <div class="settings-section-title">⚙️ Meine Einstellungen</div>
     ${arRow}
+    ${allRow}
     <div class="settings-row">
-      <span class="settings-label">Elemente laden (max.)</span>
-      <input type="number" id="s-ps" value="${s.pageSize}" min="10" max="500" step="10" class="su-num"
+      <span class="settings-label">📄 Elemente laden (max.)</span>
+      <input type="number" value="${s.pageSize}" min="10" max="500" step="10" class="su-num"
         onchange="saveUserSettings('${esc(email)}',{pageSize:parseInt(this.value)||100})">
     </div>
+    <hr class="modal-hr">
+    <div class="settings-section-title">🗂 Ansicht (Meine Anfragen)</div>
+    <div class="settings-row">
+      <span class="settings-label">Kompaktansicht</span>
+      <label class="tgl-wrap">
+        <input type="checkbox" ${s.compactView ? 'checked' : ''}
+          onchange="saveUserSettings('${esc(email)}',{compactView:this.checked});filterView('mine')">
+        <span class="tgl"></span>
+      </label>
+    </div>
+    <div class="settings-row">
+      <span class="settings-label">Abgeschlossene ausblenden</span>
+      <label class="tgl-wrap">
+        <input type="checkbox" ${s.hideCompleted ? 'checked' : ''}
+          onchange="saveUserSettings('${esc(email)}',{hideCompleted:this.checked});filterView('mine')">
+        <span class="tgl"></span>
+      </label>
+    </div>
+    <div class="settings-row">
+      <span class="settings-label">Standard-Sortierung</span>
+      <select class="su-select"
+        onchange="saveUserSettings('${esc(email)}',{defaultSort:this.value});mineSortOrder=this.value;filterView('mine')">
+        <option value="date-desc"  ${s.defaultSort==='date-desc'  ? 'selected':''}>Neueste zuerst</option>
+        <option value="date-asc"   ${s.defaultSort==='date-asc'   ? 'selected':''}>Älteste zuerst</option>
+        <option value="status"     ${s.defaultSort==='status'     ? 'selected':''}>Nach Status</option>
+        <option value="price-desc" ${s.defaultSort==='price-desc' ? 'selected':''}>Preis absteigend</option>
+        <option value="price-asc"  ${s.defaultSort==='price-asc'  ? 'selected':''}>Preis aufsteigend</option>
+      </select>
+    </div>
     ${adminSection}`;
+
   $id('settings-modal').classList.remove('hidden');
 }
+
 function closeSettings() { $id('settings-modal').classList.add('hidden'); }
+
 function addUserSetting() {
   const em = ($id('su-new-email')?.value || '').trim().toLowerCase();
   if (!em || !em.includes('@') || !em.includes('.')) {
@@ -2752,9 +2840,17 @@ function addUserSetting() {
   }
   const all = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
   if (all[em]) { toast(`${em} ist bereits vorhanden.`, 'info'); openSettings(); return; }
-  // Add with neutral defaults — admin can enable features via the toggles below.
   saveUserSettings(em, { pageSize: 100 });
-  toast(`Benutzer ${em} hinzugefügt. Berechtigungen können jetzt gesetzt werden.`, 'success');
+  toast(`${em} hinzugefügt.`, 'success');
+  openSettings();
+}
+
+function deleteUserSetting(em) {
+  const all = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+  delete all[(em||'').toLowerCase()];
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(all));
+  persistSpSettings().catch(() => {});
+  toast(`${em} entfernt.`, 'info');
   openSettings();
 }
 
