@@ -97,15 +97,63 @@ function getSettings(email) {
   const all = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
   return Object.assign({ autoRefresh: false, pageSize: 100, dashboardVisible: false }, all[(email||'').toLowerCase()] || {});
 }
-function saveUserSettings(email, patch) {
+function saveUserSettings(email, patch, _skipSP = false) {
   const all = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
   const key = (email||'').toLowerCase();
   all[key] = Object.assign(getSettings(email), patch);
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(all));
+  // Persist to SP asynchronously so other users/devices pick up the change.
+  if (!_skipSP) persistSpSettings().catch(()=>{});
   return all[key];
 }
 function getAllUserSettings() {
   return JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+}
+
+// ── SP-BASED SETTINGS STORE ───────────────────────────────────────────────────
+// Settings are persisted as a JSON file in the site drive so admin-granted
+// permissions are shared across all users and devices (not just local browser).
+// localStorage stays as a fast in-memory cache; SP is the source of truth.
+const SP_CONFIG_NAME = 'bedarfsanfrage-config.json';
+
+async function loadSpSettings() {
+  if (!siteId) return;
+  try {
+    const tok = await getToken();
+    const url = `${API}/sites/${siteId}/drive/root:/${SP_CONFIG_NAME}:/content`;
+    const r   = await fetch(url, {
+      headers: { Authorization: 'Bearer ' + tok, 'Cache-Control': 'no-cache', Pragma: 'no-cache' }
+    });
+    if (r.status === 404) return; // file doesn't exist yet — first run
+    if (!r.ok) return;
+    const remote = await r.json();
+    // Merge remote into localStorage: remote wins for granted flags so admin
+    // grants propagate to users on all devices.
+    const local = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+    for (const [em, cfg] of Object.entries(remote)) {
+      local[em] = Object.assign(local[em] || {}, cfg);
+    }
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(local));
+    console.log('[loadSpSettings] synced', Object.keys(remote).length, 'user(s) from SP');
+  } catch(e) {
+    console.warn('[loadSpSettings]', e.message);
+  }
+}
+
+async function persistSpSettings() {
+  if (!siteId) return;
+  try {
+    const tok  = await getToken();
+    const url  = `${API}/sites/${siteId}/drive/root:/${SP_CONFIG_NAME}:/content`;
+    const body = localStorage.getItem(SETTINGS_KEY) || '{}';
+    await fetch(url, {
+      method: 'PUT',
+      headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' },
+      body
+    });
+  } catch(e) {
+    console.warn('[persistSpSettings]', e.message);
+  }
 }
 
 // ── AUTO-REFRESH ─────────────────────────────────────────────────────────────
@@ -232,6 +280,9 @@ async function bootDone() {
   $id('boot-sub').textContent = 'Daten werden geladen…';
   try {
     await discoverSP();
+    // Load shared settings from SP (source of truth for admin grants).
+    // Must happen before migration so granted flags are already in localStorage.
+    await loadSpSettings();
     await loadItems(false);
     $id('boot').style.display = 'none';
     $id('app').style.display  = 'flex';
@@ -245,7 +296,7 @@ async function bootDone() {
         const patch = {};
         if (s.autoRefresh   && !s.autoRefreshGranted)  patch.autoRefresh   = false;
         if (s.dashboardVisible && !s.dashboardGranted) patch.dashboardVisible = false;
-        if (Object.keys(patch).length) saveUserSettings(em, patch);
+        if (Object.keys(patch).length) saveUserSettings(em, patch, true); // _skipSP: already synced
       }
     }
     startAutoRefresh();
@@ -298,7 +349,9 @@ async function getSpToken() {
 // ── GRAPH API ────────────────────────────────────────────────────────────────
 async function gGet(path) {
   const tok = await getToken();
-  const r   = await fetch(API + path, { headers:{ Authorization:'Bearer '+tok } });
+  const r   = await fetch(API + path, {
+    headers: { Authorization: 'Bearer ' + tok, 'Cache-Control': 'no-cache', Pragma: 'no-cache' }
+  });
   if (!r.ok) throw new Error(`Graph GET ${r.status}: ${await r.text().catch(()=>'')}`);
   return r.json();
 }
