@@ -369,7 +369,7 @@ textarea.pf-input { resize: vertical; min-height: 52px; }
 
 /* ── Wizard ── */
 .wizard-wrap {
-  max-width: 680px; margin: 0 auto;
+  max-width: 860px; margin: 0 auto;
   background: #fff; border: 1px solid #e5e9ef; border-radius: 14px; overflow: hidden;
 }
 .wizard-header { padding: 18px 26px 0; }
@@ -458,15 +458,17 @@ textarea.pf-input { resize: vertical; min-height: 52px; }
 .info-box.error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
 
 /* ── Review ── */
-.review-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+.review-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.review-section { min-width: 0; } /* prevent grid blowout */
+.review-section:nth-child(3) { grid-column: 1 / -1; } /* Beschaffungsdetails full width */
 .review-section h3 {
   font-size: .75rem; font-weight: 700; text-transform: uppercase;
   letter-spacing: .05em; color: #9ca3af; margin-bottom: 7px;
 }
-.review-row { display: flex; gap: 6px; padding: 5px 0; border-bottom: 1px solid #f3f4f6; font-size: .85rem; }
+.review-row { display: flex; gap: 6px; padding: 5px 0; border-bottom: 1px solid #f3f4f6; font-size: .85rem; min-width: 0; }
 .review-row:last-child { border-bottom: none; }
-.review-label { color: #9ca3af; min-width: 100px; font-size: .78rem; }
-.review-value { font-weight: 500; }
+.review-label { color: #9ca3af; min-width: 80px; flex-shrink: 0; font-size: .78rem; }
+.review-value { font-weight: 500; overflow-wrap: break-word; word-break: break-word; min-width: 0; }
 
 /* ── Detail ── */
 .back-btn { margin-bottom: 14px; }
