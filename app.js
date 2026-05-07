@@ -95,7 +95,7 @@ const ADMIN_EMAIL  = 'administrator@dihag.com';
 
 function getSettings(email) {
   const all = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
-  return Object.assign({ autoRefresh: false, pageSize: 100, dashboardVisible: false }, all[(email||'').toLowerCase()] || {});
+  return Object.assign({ autoRefresh: false, pageSize: 100 }, all[(email||'').toLowerCase()] || {});
 }
 function saveUserSettings(email, patch, _skipSP = false) {
   const all = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
@@ -146,13 +146,19 @@ async function persistSpSettings() {
     const tok  = await getToken();
     const url  = `${API}/sites/${siteId}/drive/root:/${SP_CONFIG_NAME}:/content`;
     const body = localStorage.getItem(SETTINGS_KEY) || '{}';
-    await fetch(url, {
+    const r = await fetch(url, {
       method: 'PUT',
       headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' },
       body
     });
+    if (!r.ok) {
+      const txt = await r.text().catch(() => '');
+      console.error('[persistSpSettings] HTTP', r.status, txt);
+      toast(`Einstellungen konnten nicht in SharePoint gespeichert werden (${r.status})`, 'error');
+    }
   } catch(e) {
     console.warn('[persistSpSettings]', e.message);
+    toast('Einstellungen konnten nicht in SharePoint gespeichert werden', 'error');
   }
 }
 
@@ -309,21 +315,30 @@ async function bootDone() {
     await loadItems(false);
     $id('boot').style.display = 'none';
     $id('app').style.display  = 'flex';
-    // Auto-refresh and Dashboard are admin-controlled features.
-    // Clear any self-set / default values from old localStorage that weren't explicitly
-    // granted by admin (identified by the corresponding *Granted flag).
+    // Auto-refresh is admin-controlled. Clear any self-set value from old localStorage
+    // if admin hasn't explicitly granted the feature (autoRefreshGranted flag).
     if (account) {
       const em = account.username.toLowerCase();
       const s  = getSettings(em);
-      if (em !== ADMIN_EMAIL) {
-        const patch = {};
-        if (s.autoRefresh   && !s.autoRefreshGranted)  patch.autoRefresh   = false;
-        if (s.dashboardVisible && !s.dashboardGranted) patch.dashboardVisible = false;
-        if (Object.keys(patch).length) saveUserSettings(em, patch, true); // _skipSP: already synced
+      if (em !== ADMIN_EMAIL && s.autoRefresh && !s.autoRefreshGranted) {
+        saveUserSettings(em, { autoRefresh: false }, true); // _skipSP: already synced
       }
     }
     startAutoRefresh();
     applyDashboardVisibility();
+    // For non-admins, rename the "Dashboard" nav label to "Meine Anfragen"
+    // since the view only shows their own items.
+    if (!isAdmin()) {
+      const dashNav = document.querySelector('.nav-item[data-view="dashboard"]');
+      if (dashNav) {
+        for (const node of dashNav.childNodes) {
+          if (node.nodeType === 3 /* TEXT_NODE */ && node.textContent.trim()) {
+            node.textContent = node.textContent.replace('Dashboard', 'Meine Anfragen');
+            break;
+          }
+        }
+      }
+    }
     // Set user info in sidebar
     const name = account?.name || account?.username || '?';
     $id('hdr-av').textContent   = name.split(' ').map(p=>p[0]||'').join('').substring(0,2).toUpperCase();
@@ -539,30 +554,26 @@ async function loadItems(showToast = true) {
 }
 
 // ── ROUTING ──────────────────────────────────────────────────────────────────
-const VIEW_TITLES = { dashboard:'Dashboard', new:'Neue Bedarfsanfrage',
-  mine:'Meine Anfragen', all:'Alle Anfragen', detail:'Anfrage Details' };
-
-// Whether the current user may see the Dashboard view.
-// Admin always can; for others, admin must have explicitly granted access (dashboardGranted flag).
-function canSeeDashboard() {
-  if (!account) return false;
-  const email = account.username.toLowerCase();
-  if (email === ADMIN_EMAIL) return true;
-  const s = getSettings(email);
-  return !!(s.dashboardVisible && s.dashboardGranted);
+// Dashboard title differs by role: admins see "Dashboard (Alle)", others see "Meine Anfragen"
+function VIEW_TITLES(view) {
+  const map = { new:'Neue Bedarfsanfrage', mine:'Meine Anfragen', all:'Alle Anfragen', detail:'Anfrage Details' };
+  if (view === 'dashboard') return isAdmin() ? 'Dashboard (Alle Anfragen)' : 'Meine Anfragen';
+  return map[view] || view;
 }
 
-// Show/hide dashboard nav item and redirect away if needed. Called on login + settings save.
+// Dashboard is visible to all logged-in users.
+// Non-admins see only their own items; admins see all items.
+function canSeeDashboard() { return !!account; }
+function isAdmin() { return account?.username?.toLowerCase() === ADMIN_EMAIL; }
+
+// No-op: dashboard is always visible — kept for call-site compatibility.
 function applyDashboardVisibility() {
-  const ok = canSeeDashboard();
   const navItem = document.querySelector('.nav-item[data-view="dashboard"]');
-  if (navItem) navItem.style.display = ok ? '' : 'none';
-  if (!ok && currentView === 'dashboard') navigate('mine');
+  if (navItem) navItem.style.display = '';
 }
 
 function navigate(view, id) {
-  // Guard: redirect dashboard to 'mine' for users without access
-  if (view === 'dashboard' && !canSeeDashboard()) { view = 'mine'; }
+  if (!canSeeDashboard() && view === 'dashboard') view = 'mine'; // should never happen now
   // Always close panels of all split views when navigating
   ['mine','all','dashboard'].forEach(v => {
     $id('panel-' + v)?.classList.add('hidden');
@@ -580,7 +591,7 @@ function navigate(view, id) {
   const nav = document.querySelector(`.nav-item[data-view="${view}"]`);
   if (nav) nav.classList.add('active');
 
-  $id('page-title').textContent = VIEW_TITLES[view] || view;
+  $id('page-title').textContent = VIEW_TITLES(view);
   prevView = currentView;
   currentView = view;
 
@@ -640,10 +651,13 @@ function renderStatusChips() {
   const el = $id('status-chips');
   if (!el) return;
 
-  // Count per status from ALL items
+  // Non-admins see only their own items in the Dashboard.
+  const baseItems = isAdmin() ? allItems : myItems();
+
+  // Count per status
   const counts = {};
   let total = 0;
-  for (const item of allItems) {
+  for (const item of baseItems) {
     const s = getStatusVal(item) || '';
     counts[s] = (counts[s] || 0) + 1;
     total++;
@@ -651,8 +665,8 @@ function renderStatusChips() {
 
   // Volume from filtered items only
   const filteredForVol = dashStatusFilter
-    ? allItems.filter(i => (getStatusVal(i) || '') === dashStatusFilter)
-    : allItems;
+    ? baseItems.filter(i => (getStatusVal(i) || '') === dashStatusFilter)
+    : baseItems;
   const volume = filteredForVol.reduce((sum, i) =>
     sum + (parseFloat(getField(i, resolvedFields['GeschaetzterPreis'] || 'GeschaetzterPreis')) || 0), 0);
 
@@ -700,7 +714,8 @@ function setDashFilter(status) {
 
 function filterDashboard() {
   const search = ($id('search-dashboard')?.value || '').toLowerCase();
-  let items = [...allItems];
+  // Non-admins see only their own items in the Dashboard.
+  let items = isAdmin() ? [...allItems] : [...myItems()];
   if (search) items = items.filter(i =>
     (getField(i,'Title')||'').toLowerCase().includes(search) || String(i.id||'').includes(search)
   );
@@ -2553,11 +2568,6 @@ function openSettings() {
           onchange="saveUserSettings('${esc(em)}',{autoRefresh:this.checked,autoRefreshGranted:this.checked});updateARBtn()">
         <span class="tgl"></span>
       </label>
-      <label class="tgl-wrap" title="Dashboard sichtbar">
-        <input type="checkbox" ${us.dashboardVisible && us.dashboardGranted ? 'checked' : ''}
-          onchange="saveUserSettings('${esc(em)}',{dashboardVisible:this.checked,dashboardGranted:this.checked});applyDashboardVisibility()">
-        <span class="tgl"></span>
-      </label>
       <input type="number" value="${us.pageSize||100}" min="10" max="500" step="10"
         class="su-num" title="Elemente"
         onchange="saveUserSettings('${esc(em)}',{pageSize:parseInt(this.value)||100})">
@@ -2574,7 +2584,6 @@ function openSettings() {
     <div class="su-header-row">
       <span class="su-email" style="font-size:.7rem;color:#6b7280">E-Mail</span>
       <span class="su-col-lbl" title="Auto-Refresh">⏱</span>
-      <span class="su-col-lbl" title="Dashboard sichtbar">📊</span>
       <span class="su-col-lbl" title="Max. Elemente">Elem.</span>
     </div>
     <div id="su-list">${
