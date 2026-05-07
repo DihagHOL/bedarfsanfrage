@@ -1222,10 +1222,10 @@ function statusTimeline(statusVal, item) {
       }
     }
 
-    // Past stage: skip if the workflow never actually passed through it
-    // (e.g. strategischer Einkauf was never reached → don't show even if index < currentIdx)
-    // "Eingereicht" (i === 0) is always implicitly visited.
-    if (isPast && i > 0 && visitedStages !== null && !visitedStages.has(d.label)) {
+    // Past stage: only show if someone actually approved it (recorded in version history).
+    // This filters out stages skipped or only briefly touched by automation.
+    // "Eingereicht" (i === 0) is always shown as the starting point.
+    if (isPast && i > 0 && !approverByStage[d.label]) {
       return null;
     }
 
