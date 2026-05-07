@@ -487,6 +487,9 @@ async function discoverSP() {
   const statusCol = Object.values(colByKey).find(c =>
     /^status$/i.test(c.name) || /^stauts$/i.test(c.name)
   );
+  // Store the real internal name so all readers (loadVersionHistory etc.) use the correct key
+  if (statusCol) resolvedFields['Status'] = statusCol.name;
+
   if (statusCol?.choice?.choices?.length) {
     const choices = statusCol.choice.choices;
     // Rebuild STATUS_STYLES
@@ -1129,7 +1132,8 @@ async function loadApproverHistory(itemId) {
     // Sort oldest → newest so later versions overwrite earlier ones for the same stage
     const vers = (data.value || []).sort((a, b) => new Date(a.lastModifiedDateTime) - new Date(b.lastModifiedDateTime));
     for (const v of vers) {
-      const sv       = (v.fields?.Stauts || v.fields?.Status || '').trim();
+      const statusKey = resolvedFields['Status'] || 'Stauts';
+      const sv       = (v.fields?.[statusKey] || v.fields?.Status || v.fields?.Stauts || '').trim();
       const approver = getApproverFromFields(v.fields);
       for (const d of TIMELINE_STAGES) {
         if (d.test(sv)) {
@@ -1291,65 +1295,15 @@ function approvalStyle(val) {
 }
 
 function renderApprovalCard(item) {
+  // Delegate to buildApprovalInner so detail view and panel share identical logic
+  // (same timeline, same inline comments, same approver placement).
   const statusVal = getStatusVal(item) || 'Eingereicht';
-
-  // Find all approval-related columns that have a value on this item
-  const found = Object.entries(colByKey)
-    .filter(([k, c]) => APPROVAL_RE.test(c.displayName || k) && !SYSTEM_FIELDS.has(k))
-    .map(([k, c]) => ({ key: k, label: c.displayName || k, val: getField(item, k) }))
-    .filter(c => c.val !== null && c.val !== undefined && c.val !== '');
-
-  // Group into stages; ungrouped = shown below without stage header
-  const stages = STAGE_MAP.map(s => ({
-    label: s.label,
-    cols:  found.filter(c => s.re.test(c.label) || s.re.test(c.key)),
-  })).filter(s => s.cols.length);
-  const assigned = new Set(stages.flatMap(s => s.cols.map(c => c.key)));
-  const ungrouped = found.filter(c => !assigned.has(c.key));
-
-  const stagesHtml = stages.map(s => {
-    // Pick the "decision" field (contains genehmig/entscheid/freigab/ablehn)
-    const decisionCol = s.cols.find(c => /genehmig|entscheid|freigab|ablehn/i.test(c.label));
-    const otherCols   = s.cols.filter(c => c !== decisionCol);
-    const st = decisionCol ? approvalStyle(decisionCol.val) : { bg:'#f3f4f6', color:'#6b7280', dot:'○', cls:'ap-neutral' };
-    return `
-      <div class="approval-stage">
-        <div class="ap-dot ${st.cls}">${st.dot}</div>
-        <div class="ap-body">
-          <div class="ap-stage-label">${esc(s.label)}</div>
-          ${decisionCol ? `<span class="ap-badge" style="background:${st.bg};color:${st.color}">${esc(String(decisionCol.val))}</span>` : ''}
-          ${otherCols.map(c => `<div class="ap-meta">${esc(c.label)}: ${esc(String(c.val))}</div>`).join('')}
-        </div>
-      </div>`;
-  }).join('');
-
-  const ungroupedHtml = ungrouped.map(c => {
-    const st = approvalStyle(c.val);
-    const isComment = /kommentar|ablehn|grund/i.test(c.label);
-    if (isComment) return `<div class="ap-comment-box"><strong>${esc(c.label)}:</strong> ${esc(String(c.val))}</div>`;
-    return `<div class="approval-stage">
-      <div class="ap-dot ${st.cls}">${st.dot}</div>
-      <div class="ap-body">
-        <div class="ap-stage-label">${esc(c.label)}</div>
-        <span class="ap-badge" style="background:${st.bg};color:${st.color}">${esc(String(c.val))}</span>
-      </div>
-    </div>`;
-  }).join('');
-
-  // Always show the status timeline when no stage-grouped approval columns have data.
-  // Comments/ungrouped fields (e.g. GenehmigungsKommentar) are shown BELOW the timeline,
-  // not instead of it – so the workflow progress stays visible even when a comment is present.
-  const mainContent = stages.length ? stagesHtml : statusTimeline(statusVal, item);
-
   return `
     <div class="detail-card">
       <div class="detail-card-header">Status &amp; Genehmigung</div>
       <div class="detail-card-body">
         <div class="ap-current-status">${statusWithApprover(item)}</div>
-        <div class="approval-stages">
-          ${mainContent}
-          ${ungroupedHtml}
-        </div>
+        ${buildApprovalInner(item, statusVal)}
       </div>
     </div>`;
 }
