@@ -216,9 +216,11 @@ function toggleAutoRefresh() {
 }
 
 // ── APPROVER DISPLAY ─────────────────────────────────────────────────────────
-// Looks for columns containing the current approver/responsible person.
-// Broad regex to catch German/English naming variants.
-const APPROVER_COL_RE = /\bgenehmiger\b|\bbearbeiter\b|aktuelle[rs]?\s*(bearbeiter|zugewiesen|genehmiger)|current.?approver/i;
+// Confirmed SP internal name: Entscheider_x002a_in (display: "Genehmiger")
+// Also checks colByKey display names for future-proofing.
+const APPROVER_DIRECT_KEYS = ['Entscheider_x002a_in', 'Genehmiger', 'CurrentApprover'];
+const APPROVER_COL_RE = /\bgenehmiger\b|\bentscheider\b|\bbearbeiter\b|aktuelle[rs]?\s*(bearbeiter|zugewiesen|genehmiger)|current.?approver/i;
+
 function getApproverVal(item) {
   // Helper: extract a printable string from a field value (handles Person/Lookup objects).
   function extractStr(raw) {
@@ -233,31 +235,13 @@ function getApproverVal(item) {
 
   if (!item?.fields) return null;
 
-  // ── Debug: scan item.fields for any genehmig-like key ──
-  const dbgFields = Object.entries(item.fields)
-    .filter(([k]) => !SYSTEM_FIELDS.has(k) && /genehmig/i.test(k))
-    .map(([k, v]) => `${k}=${JSON.stringify(v)}`);
-  if (dbgFields.length) {
-    console.log('[getApproverVal] fields genehmig-like:', dbgFields.join(' | '));
-  } else {
-    console.log('[getApproverVal] no genehmig field in item.fields. keys:', Object.keys(item.fields).filter(k => !SYSTEM_FIELDS.has(k)).join(', '));
-  }
-  // ── Debug: scan colByKey (SP schema) for genehmig-like display/internal names ──
-  const dbgCols = Object.entries(colByKey)
-    .filter(([k, c]) => !SYSTEM_FIELDS.has(k) && (/genehmig/i.test(k) || /genehmig/i.test(c.displayName||'')))
-    .map(([k, c]) => `${k} (display="${c.displayName}" readOnly=${c.readOnly})`);
-  if (dbgCols.length) {
-    console.log('[getApproverVal] colByKey genehmig-like:', dbgCols.join(' | '));
-  } else {
-    // Dump all writable non-system cols so we can identify the right one
-    const allCols = Object.entries(colByKey)
-      .filter(([k, c]) => !SYSTEM_FIELDS.has(k) && !c.readOnly)
-      .map(([k, c]) => `${k}="${c.displayName}"`)
-      .join(', ');
-    console.log('[getApproverVal] NO genehmig column in SP schema. writable cols:', allCols);
+  // 1. Direct known keys (fastest path — confirmed SP internal names)
+  for (const k of APPROVER_DIRECT_KEYS) {
+    const v = extractStr(item.fields[k]);
+    if (v) return v;
   }
 
-  // 1. Match via colByKey display names (e.g. displayName = "Genehmiger").
+  // 2. Match via colByKey display names (catches renamed/future columns)
   for (const [k, c] of Object.entries(colByKey)) {
     if (SYSTEM_FIELDS.has(k)) continue;
     if (APPROVER_COL_RE.test(c.displayName || k)) {
@@ -266,26 +250,12 @@ function getApproverVal(item) {
     }
   }
 
-  // 2. Scan item.fields keys directly — catches "Genehmiger0" and other SP
-  //    internal-name variants where the \b word-boundary would fail.
+  // 3. Scan item.fields keys directly as last resort
   for (const [k, raw] of Object.entries(item.fields)) {
     if (SYSTEM_FIELDS.has(k)) continue;
-    if (/genehmiger/i.test(k)) {          // no \b — matches Genehmiger, Genehmiger0, etc.
+    if (APPROVER_COL_RE.test(k)) {
       const v = extractStr(raw);
       if (v) return v;
-    }
-  }
-
-  // 3. Person column: Graph API stores Person fields as {colName}Id (numeric lookup ID)
-  //    and the display name in {colName} as null. Try to extract from LookupId fields.
-  for (const [k, raw] of Object.entries(item.fields)) {
-    if (SYSTEM_FIELDS.has(k)) continue;
-    // Keys like "GenehmigerId", "Genehmiger0Id"
-    if (/genehmiger\w*id$/i.test(k) && raw != null) {
-      // Only a numeric ID available — not useful as display text, skip
-      // (would need an extra Graph /users call; avoid for performance)
-      console.log('[getApproverVal] Person-LookupId found:', k, '=', raw, '— no display name in fields');
-      break;
     }
   }
 
