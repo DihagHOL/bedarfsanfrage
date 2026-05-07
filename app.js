@@ -1054,6 +1054,69 @@ const STAGE_MAP = [
   { label: 'Geschäftsführung',           re: /\bgf\b|geschäftsführ|geschaeftsfuehr/i },
 ];
 
+// Fixed semantic stage order for the timeline (independent of SP choice order).
+// smIdx maps to STAGE_MAP entry for approval-column lookup; -1 = no approval col.
+const TIMELINE_STAGES = [
+  { label: 'Eingereicht',                         smIdx: -1, test: v => /^eingereicht$/i.test(v) },
+  { label: 'In Prüfung (Einkauf)',                smIdx:  0, test: v => /pr[üu]fung/i.test(v) && /einkauf/i.test(v) && !/strategisch/i.test(v) },
+  { label: 'In Prüfung (Werkleitung)',            smIdx:  1, test: v => /werkleitung/i.test(v) },
+  { label: 'In Prüfung (strategischer Einkauf)', smIdx:  2, test: v => /strategisch/i.test(v) },
+  { label: 'In Prüfung (Controlling)',            smIdx:  3, test: v => /controlling/i.test(v) },
+  { label: 'Freigegeben',                         smIdx: -1, test: v => /^freigegeben$/i.test(v) },
+  { label: 'Bestellt',                            smIdx: -1, test: v => /^bestellt$/i.test(v) },
+];
+
+// Approver-history cache built from item version history.
+// { itemId: { 'In Prüfung (Einkauf)': 'Max Mustermann', … } }
+const _approverHistory = {};
+
+// Extract approver name directly from a raw fields object (used for version scanning).
+function getApproverFromFields(fields) {
+  if (!fields) return null;
+  function extractStr(raw) {
+    if (raw == null) return null;
+    if (typeof raw === 'object') {
+      const n = raw.displayName || raw.LookupValue || raw.Title || raw.title;
+      return (n && n !== '[object Object]') ? String(n).trim() || null : null;
+    }
+    const s = String(raw).trim();
+    return (s && s !== '[object Object]') ? s : null;
+  }
+  for (const k of APPROVER_DIRECT_KEYS) {
+    const v = extractStr(fields[k]);
+    if (v) return v;
+    const lid = fields[k + 'LookupId'];
+    if (lid != null) { const n = spUserMap[String(lid)]; if (n) return n; }
+  }
+  return null;
+}
+
+// Load version history for an item and record which approver was set at each timeline stage.
+// Result is cached in _approverHistory[itemId].  Returns the cache entry.
+async function loadApproverHistory(itemId) {
+  if (_approverHistory[itemId]) return _approverHistory[itemId];
+  const history = {};
+  try {
+    const data = await gGet(
+      `/sites/${siteId}/lists/${listId}/items/${itemId}/versions?$expand=fields($select=*)&$top=100`
+    );
+    // Sort oldest → newest so later versions overwrite earlier ones for the same stage
+    const vers = (data.value || []).sort((a, b) => new Date(a.lastModifiedDateTime) - new Date(b.lastModifiedDateTime));
+    for (const v of vers) {
+      const sv = (v.fields?.Stauts || v.fields?.Status || '').trim();
+      const approver = getApproverFromFields(v.fields);
+      if (!approver) continue;
+      for (const d of TIMELINE_STAGES) {
+        if (d.test(sv)) { history[d.label] = approver; break; }
+      }
+    }
+  } catch(e) {
+    console.warn('[loadApproverHistory]', e.message);
+  }
+  _approverHistory[itemId] = history;
+  return history;
+}
+
 // Workflow-Reihenfolge für die Status-Zeitleiste (wird in discoverSP() aus SP-Spalte befüllt)
 const WORKFLOW_STAGES = [
   'Eingereicht',
@@ -1079,26 +1142,12 @@ function statusColorFor(val) {
 }
 
 // Data-driven status timeline.
-// Uses a FIXED semantic display order (not WORKFLOW_STAGES from discoverSP, which can be
-// misordered by SP and cause completed stages to appear before earlier ones).
-// When item is provided, SP approval column values are read per stage for ✓/✗ dots.
-// 'strategischer Einkauf' is optional and only shown when SP data exists or it is current.
+// Only renders stages that have already been reached (past ✓ or current ●).
+// Future stages are hidden.  When rejected, shows completed stages + Abgelehnt row.
+// Past approvers are read from _approverHistory[item.id] (populated async by loadApproverHistory).
 function statusTimeline(statusVal, item) {
   const sv    = (statusVal || '').trim();
   const isRej = /abgelehnt/i.test(sv);
-
-  // Fixed display order — smIdx maps to STAGE_MAP entry for column lookup (-1 = no approval col).
-  // test(sv): flexible regex match against the raw SP status value (handles SP wording variants,
-  //           e.g. "strategische Einkauf" vs "strategischer Einkauf").
-  const DISPLAY = [
-    { label: 'Eingereicht',                         smIdx: -1, test: v => /^eingereicht$/i.test(v) },
-    { label: 'In Prüfung (Einkauf)',                smIdx:  0, test: v => /pr[üu]fung/i.test(v) && /einkauf/i.test(v) && !/strategisch/i.test(v) },
-    { label: 'In Prüfung (Werkleitung)',            smIdx:  1, test: v => /werkleitung/i.test(v) },
-    { label: 'In Prüfung (strategischer Einkauf)', smIdx:  2, test: v => /strategisch/i.test(v) },
-    { label: 'In Prüfung (Controlling)',            smIdx:  3, test: v => /controlling/i.test(v) },
-    { label: 'Freigegeben',                         smIdx: -1, test: v => /^freigegeben$/i.test(v) },
-    { label: 'Bestellt',                            smIdx: -1, test: v => /^bestellt$/i.test(v) },
-  ];
 
   // Collect all approval-related columns that have a value on this item.
   const approvalCols = item
@@ -1108,8 +1157,7 @@ function statusTimeline(statusVal, item) {
         .filter(c => c.val != null && c.val !== '')
     : [];
 
-  // Return the decision value (genehmigt/abgelehnt/…) for a STAGE_MAP[smIdx] stage.
-  // smIdx 0 = Einkauf: exclude any column also matching /strategisch/ to avoid cross-contamination.
+  // Return the formal decision value for a STAGE_MAP stage.
   function getDecision(smIdx) {
     if (smIdx < 0 || smIdx >= STAGE_MAP.length) return null;
     const sm = STAGE_MAP[smIdx];
@@ -1122,39 +1170,65 @@ function statusTimeline(statusVal, item) {
     return cols.length ? cols[0].val : null;
   }
 
-  const currentIdx = DISPLAY.findIndex(d => d.test(sv));
+  const currentIdx    = TIMELINE_STAGES.findIndex(d => d.test(sv));
+  const approverByStage = item ? (_approverHistory[item.id] || {}) : {};
 
-  return DISPLAY.map((d, i) => {
-    const decision  = getDecision(d.smIdx);
+  const rows = TIMELINE_STAGES.map((d, i) => {
     const isCurrent = d.test(sv);
-    const hasData   = decision != null;
+    const isPast    = currentIdx >= 0 && i < currentIdx;
+    const decision  = getDecision(d.smIdx);
 
+    // ── Visibility: only show reached stages ──────────────────────────────
+    if (!isCurrent && !isPast) {
+      // When rejected and no currentIdx: show stages that have a decision or
+      // a recorded approver (so the audit trail stays visible), plus Eingereicht.
+      if (isRej && (decision != null || approverByStage[d.label] || i === 0)) {
+        /* show */
+      } else {
+        return null; // future stage → hide
+      }
+    }
+
+    // ── Dot / colour ──────────────────────────────────────────────────────
     let dot, cls;
-    if (hasData) {
+    if (decision != null) {
       const dL = String(decision).toLowerCase();
       if (/freigegeben|genehmigt|approved|ja\b/.test(dL)) { dot = '✓'; cls = 'ap-ok';      }
       else if (/abgelehnt|rejected|nein\b/.test(dL))       { dot = '✗'; cls = 'ap-no';      }
-      else                                                  { dot = '○'; cls = 'ap-neutral'; }
+      else                                                  { dot = '●'; cls = 'ap-pending'; }
     } else if (isCurrent) {
       dot = '●'; cls = 'ap-pending';
-    } else if (currentIdx >= 0 && i < currentIdx) {
-      dot = '✓'; cls = 'ap-ok';   // we've passed through this stage
-    } else if (isRej && i === 0) {
-      dot = '✓'; cls = 'ap-ok';   // eingereicht was reached before rejection
     } else {
-      dot = '○'; cls = 'ap-neutral';
+      dot = '✓'; cls = 'ap-ok';  // passed through
+    }
+
+    // ── Approver line ─────────────────────────────────────────────────────
+    let approverHtml = '';
+    if (isCurrent && item) {
+      // Live value from SP
+      const a = getApproverVal(item);
+      if (a) approverHtml = `<div class="ap-approver">👤 ${esc(a)}</div>`;
+    } else if (approverByStage[d.label]) {
+      // Historical value from version cache (slightly muted)
+      approverHtml = `<div class="ap-approver ap-approver-past">👤 ${esc(approverByStage[d.label])}</div>`;
     }
 
     const bold = isCurrent ? ' style="font-weight:600"' : '';
-    // Show current approver next to the active stage (● dot only)
-    let approverHtml = '';
-    if (isCurrent && item) {
-      const approver = getApproverVal(item);
-      if (approver) approverHtml = `<div class="ap-approver">👤 ${esc(approver)}</div>`;
-    }
     return `<div class="approval-stage"><div class="ap-dot ${cls}">${dot}</div>`
          + `<div class="ap-body"><div class="ap-stage-label"${bold}>${esc(d.label)}</div>${approverHtml}</div></div>`;
-  }).filter(Boolean).join('');
+  }).filter(Boolean);
+
+  // Rejection terminal row
+  if (isRej) {
+    rows.push(
+      `<div class="approval-stage">` +
+      `<div class="ap-dot ap-no">✗</div>` +
+      `<div class="ap-body"><div class="ap-stage-label" style="color:#b91c1c;font-weight:600">Abgelehnt</div></div>` +
+      `</div>`
+    );
+  }
+
+  return rows.join('');
 }
 
 function approvalStyle(val) {
@@ -2191,6 +2265,16 @@ function bindPanelEvents(itemId) {
   $id('panel-close')?.addEventListener('click', closePanel);
   $id('panel-order')?.addEventListener('click', () => openOrderModal(itemId));
   $id('panel-besch')?.addEventListener('click', () => openBeschModal(itemId));
+
+  // Async: load approver history from version log, then refresh the approval section
+  // so past approvers are shown per stage (doesn't block initial render).
+  loadApproverHistory(itemId).then(() => {
+    const el = $id('panel-approval-body');
+    if (!el) return;
+    const item = allItems.find(x => String(x.id) === String(itemId));
+    if (!item) return;
+    el.innerHTML = buildApprovalInner(item, getStatusVal(item) || 'Eingereicht');
+  });
   // Load attachments
   const attachEl = $id('panel-attach-body');
   if (attachEl) {
@@ -2346,6 +2430,38 @@ async function saveEdits(itemId) {
   toast('Fehler: Zu viele unbekannte Felder.', 'error');
 }
 
+// Build the inner HTML for the "Status & Genehmigung" approval section.
+// Extracted so it can be called both from renderPanel and from the async
+// loadApproverHistory refresh without re-rendering the whole panel.
+function buildApprovalInner(item, statusVal) {
+  const sv = statusVal || getStatusVal(item) || 'Eingereicht';
+  const found = Object.entries(colByKey)
+    .filter(([k,c]) => APPROVAL_RE.test(c.displayName||k) && !SYSTEM_FIELDS.has(k))
+    .map(([k,c]) => ({ key:k, label:c.displayName||k, val:getField(item,k) }))
+    .filter(c => c.val !== null && c.val !== undefined && c.val !== '');
+  if (!found.length) return `<div class="approval-stages">${statusTimeline(sv, item)}</div>`;
+  const stages = STAGE_MAP.map(s => ({ label:s.label, cols:found.filter(c=>s.re.test(c.label)||s.re.test(c.key)) })).filter(s=>s.cols.length);
+  const assigned = new Set(stages.flatMap(s=>s.cols.map(c=>c.key)));
+  const extra = found.filter(c=>!assigned.has(c.key));
+  const mkStage = s => {
+    const dec = s.cols.find(c=>/genehmig|entscheid|freigab|ablehn/i.test(c.label));
+    const others = s.cols.filter(c=>c!==dec);
+    const st = dec ? approvalStyle(dec.val) : {bg:'#f3f4f6',color:'#6b7280',dot:'○',cls:'ap-neutral'};
+    return `<div class="approval-stage"><div class="ap-dot ${st.cls}">${st.dot}</div><div class="ap-body">
+      <div class="ap-stage-label">${esc(s.label)}</div>
+      ${dec?`<span class="ap-badge" style="background:${st.bg};color:${st.color}">${esc(String(dec.val))}</span>`:''}
+      ${others.map(c=>`<div class="ap-meta">${esc(c.label)}: ${esc(String(c.val))}</div>`).join('')}
+    </div></div>`;
+  };
+  const mkExtra = c => {
+    const st = approvalStyle(c.val);
+    if (/kommentar|ablehn|grund/i.test(c.label)) return `<div class="ap-comment-box"><strong>${esc(c.label)}:</strong> ${esc(String(c.val))}</div>`;
+    return `<div class="approval-stage"><div class="ap-dot ${st.cls}">${st.dot}</div><div class="ap-body"><div class="ap-stage-label">${esc(c.label)}</div><span class="ap-badge" style="background:${st.bg};color:${st.color}">${esc(String(c.val))}</span></div></div>`;
+  };
+  const mainHtml = stages.length ? stages.map(mkStage).join('') : statusTimeline(sv, item);
+  return `<div class="approval-stages">${mainHtml}${extra.map(mkExtra).join('')}</div>`;
+}
+
 function renderPanel(item, editMode = false) {
   const statusVal = getStatusVal(item) || 'Eingereicht';
   const createdBy = item.createdBy?.user?.displayName || item.createdBy?.user?.email || '–';
@@ -2403,36 +2519,7 @@ function renderPanel(item, editMode = false) {
      <button class="btn btn-outline btn-sm" id="panel-besch">✏️ Beschaffung</button>
      <button class="btn btn-outline btn-sm" id="panel-history">📋 Verlauf</button>`;
 
-  // Approval inner HTML (reuse logic from renderApprovalCard but without the wrapping card)
-  const approvalInner = (() => {
-    const found = Object.entries(colByKey)
-      .filter(([k,c]) => APPROVAL_RE.test(c.displayName||k) && !SYSTEM_FIELDS.has(k))
-      .map(([k,c]) => ({ key:k, label:c.displayName||k, val:getField(item,k) }))
-      .filter(c => c.val !== null && c.val !== undefined && c.val !== '');
-    if (!found.length) return `<div class="approval-stages">${statusTimeline(statusVal, item)}</div>`;
-    const stages = STAGE_MAP.map(s => ({ label:s.label, cols:found.filter(c=>s.re.test(c.label)||s.re.test(c.key)) })).filter(s=>s.cols.length);
-    const assigned = new Set(stages.flatMap(s=>s.cols.map(c=>c.key)));
-    const extra = found.filter(c=>!assigned.has(c.key));
-    const mkStage = s => {
-      const dec = s.cols.find(c=>/genehmig|entscheid|freigab|ablehn/i.test(c.label));
-      const others = s.cols.filter(c=>c!==dec);
-      const st = dec ? approvalStyle(dec.val) : {bg:'#f3f4f6',color:'#6b7280',dot:'○',cls:'ap-neutral'};
-      return `<div class="approval-stage"><div class="ap-dot ${st.cls}">${st.dot}</div><div class="ap-body">
-        <div class="ap-stage-label">${esc(s.label)}</div>
-        ${dec?`<span class="ap-badge" style="background:${st.bg};color:${st.color}">${esc(String(dec.val))}</span>`:''}
-        ${others.map(c=>`<div class="ap-meta">${esc(c.label)}: ${esc(String(c.val))}</div>`).join('')}
-      </div></div>`;
-    };
-    const mkExtra = c => {
-      const st = approvalStyle(c.val);
-      if (/kommentar|ablehn|grund/i.test(c.label)) return `<div class="ap-comment-box"><strong>${esc(c.label)}:</strong> ${esc(String(c.val))}</div>`;
-      return `<div class="approval-stage"><div class="ap-dot ${st.cls}">${st.dot}</div><div class="ap-body"><div class="ap-stage-label">${esc(c.label)}</div><span class="ap-badge" style="background:${st.bg};color:${st.color}">${esc(String(c.val))}</span></div></div>`;
-    };
-    // Same rule as renderApprovalCard: always show timeline when no stage columns
-    // have data; comments/ungrouped shown BELOW, not instead of the timeline.
-    const mainHtml = stages.length ? stages.map(mkStage).join('') : statusTimeline(statusVal, item);
-    return `<div class="approval-stages">${mainHtml}${extra.map(mkExtra).join('')}</div>`;
-  })();
+  const approvalInner = buildApprovalInner(item, statusVal);
 
   return `
     <div class="panel-hdr">
@@ -2475,7 +2562,7 @@ function renderPanel(item, editMode = false) {
       </div>
       <div class="pf-section">
         <div class="pf-sec-title">Status &amp; Genehmigung</div>
-        ${approvalInner}
+        <div id="panel-approval-body">${approvalInner}</div>
       </div>
       <div class="pf-section">
         <div class="pf-sec-title">Bestellung (Einkauf)</div>
