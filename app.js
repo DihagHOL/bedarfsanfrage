@@ -2065,15 +2065,24 @@ async function submitRequest() {
       const errors = [];
       for (const file of wizardFiles) {
         try {
+          // Read the file buffer ONCE before entering the retry loop so a
+          // second attempt doesn't try to re-read a potentially consumed stream.
+          const buf = await file.arrayBuffer();
           // SP REST may not yet have propagated the new item (same lag as PATCH 404).
           // Wrap in retryOn404 so we wait up to ~4.8s before giving up.
-          const fname = encodeURIComponent(file.name);
-          const uploadUrl = `${SP_BASE}/_api/web/lists/getByTitle('${SP_LIST}')/items(${itemId})/AttachmentFiles/add(FileName='${fname}')`;
+          // Filename: single-quote chars must be escaped as %27 inside the OData string literal.
+          const fname = file.name.replace(/'/g, "''");
+          const fnameUrl = encodeURIComponent(fname);
+          const uploadUrl = `${SP_BASE}/_api/web/lists/getByTitle('${SP_LIST}')/items(${itemId})/AttachmentFiles/add(FileName='${fnameUrl}')`;
           await retryOn404(async () => {
             const r = await fetch(uploadUrl, {
               method: 'POST',
-              headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json;odata=nometadata' },
-              body: await file.arrayBuffer()
+              headers: {
+                Authorization: 'Bearer ' + tok,
+                Accept: 'application/json;odata=nometadata',
+                'Content-Type': 'application/octet-stream',
+              },
+              body: buf,
             });
             if (!r.ok) {
               const txt = await r.text().catch(() => '');
