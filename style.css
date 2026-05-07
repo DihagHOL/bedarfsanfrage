@@ -554,6 +554,7 @@ details#attach-extra-wrap[open] .attach-more-toggle { color:#374151; }
 .settings-h4  { font-size: .92rem; font-weight: 600; margin-bottom: 12px; color: #1e2939; }
 .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid #f3f4f6; }
 .settings-label { font-size: .88rem; color: #374151; }
+.settings-val-ro { font-size: .88rem; color: #6b7280; }
 .modal-hr  { border: none; border-top: 1px solid #e5e7eb; margin: 16px 0; }
 /* Toggle switch */
 .tgl-wrap  { position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; }

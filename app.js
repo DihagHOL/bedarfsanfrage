@@ -326,25 +326,12 @@ async function bootDone() {
     }
     startAutoRefresh();
     applyDashboardVisibility();
-    // For non-admins, rename the "Dashboard" nav label to "Meine Anfragen"
-    // since the view only shows their own items.
-    if (!isAdmin()) {
-      const dashNav = document.querySelector('.nav-item[data-view="dashboard"]');
-      if (dashNav) {
-        for (const node of dashNav.childNodes) {
-          if (node.nodeType === 3 /* TEXT_NODE */ && node.textContent.trim()) {
-            node.textContent = node.textContent.replace('Dashboard', 'Meine Anfragen');
-            break;
-          }
-        }
-      }
-    }
     // Set user info in sidebar
     const name = account?.name || account?.username || '?';
     $id('hdr-av').textContent   = name.split(' ').map(p=>p[0]||'').join('').substring(0,2).toUpperCase();
     $id('hdr-name').textContent = name;
     $id('hdr-mail').textContent = account?.username || '';
-    navigate('dashboard');
+    navigate(isAdmin() ? 'dashboard' : 'mine');
   } catch(e) {
     $id('boot-sub').textContent = 'Fehler beim Laden: ' + e.message;
     $id('boot-spinner').style.display = 'none';
@@ -600,10 +587,11 @@ function VIEW_TITLES(view) {
 function canSeeDashboard() { return !!account; }
 function isAdmin() { return account?.username?.toLowerCase() === ADMIN_EMAIL; }
 
-// No-op: dashboard is always visible — kept for call-site compatibility.
+// Show Dashboard nav for admins, hide it for regular users.
+// Non-admins start on 'mine' and never need the dashboard nav item.
 function applyDashboardVisibility() {
   const navItem = document.querySelector('.nav-item[data-view="dashboard"]');
-  if (navItem) navItem.style.display = '';
+  if (navItem) navItem.style.display = isAdmin() ? '' : 'none';
 }
 
 function navigate(view, id) {
@@ -2729,9 +2717,8 @@ function openSettings() {
       '<p class="su-empty">Noch keine weiteren Benutzer konfiguriert.</p>'
     }</div>` : '';
 
-  // Auto-Refresh row: only admin can manage this for themselves and others.
-  // Non-admin users see no toggle; admin also saves autoRefreshGranted to survive the
-  // login migration that clears old self-set autoRefresh values.
+  // Auto-Refresh row: only admin can manage this for themselves.
+  // Non-admins see a read-only status (granted by admin) and cannot toggle it themselves.
   const arRow = isAdmin ? `
     <div class="settings-row">
       <span class="settings-label">Auto-Aktualisierung (alle 30s)</span>
@@ -2740,7 +2727,11 @@ function openSettings() {
           onchange="saveUserSettings('${esc(email)}',{autoRefresh:this.checked,autoRefreshGranted:this.checked});this.checked?startAutoRefresh():stopAutoRefresh()">
         <span class="tgl"></span>
       </label>
-    </div>` : '';
+    </div>` : `
+    <div class="settings-row">
+      <span class="settings-label">Auto-Aktualisierung</span>
+      <span class="settings-val-ro">${s.autoRefresh && s.autoRefreshGranted ? '✅ Aktiviert' : '—'}</span>
+    </div>`;
 
   $id('settings-body').innerHTML = `
     <h4 class="settings-h4">Meine Einstellungen <small>(${esc(email)})</small></h4>
