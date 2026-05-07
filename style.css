@@ -657,6 +657,7 @@ details#attach-extra-wrap[open] .attach-more-toggle { color:#374151; }
   font-size: .75rem; font-weight: 600; width: fit-content;
 }
 .ap-meta { font-size: .75rem; color: #6b7280; }
+.ap-approver { font-size: .75rem; color: #4b5563; font-weight: 500; }
 
 .ap-comment-box {
   margin-top: 8px; padding: 8px 10px;

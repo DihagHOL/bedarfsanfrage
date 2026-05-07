@@ -80,6 +80,7 @@ let msalApp, account;
 let siteId = null, listId = null;
 let allItems = [];
 let colByKey   = {};  // internal name → column definition (from SP)
+let spUserMap  = {};  // SP user id (string) → display name (for Person-column LookupId resolution)
 let resolvedFields = {};  // FORM_FIELDS key → actual SP internal name (null if not found)
 let currentView = 'dashboard';
 let prevView    = 'dashboard';
@@ -237,8 +238,15 @@ function getApproverVal(item) {
 
   // 1. Direct known keys (fastest path — confirmed SP internal names)
   for (const k of APPROVER_DIRECT_KEYS) {
+    // Text/object value
     const v = extractStr(item.fields[k]);
     if (v) return v;
+    // Person-column LookupId variant (e.g. "Entscheider_x002a_inLookupId" = 42)
+    const lid = item.fields[k + 'LookupId'];
+    if (lid != null) {
+      const name = spUserMap[String(lid)];
+      if (name) return name;
+    }
   }
 
   // 2. Match via colByKey display names (catches renamed/future columns)
@@ -247,6 +255,12 @@ function getApproverVal(item) {
     if (APPROVER_COL_RE.test(c.displayName || k)) {
       const v = extractStr(getField(item, k));
       if (v) return v;
+      // Also try LookupId variant for Person columns
+      const lid = item.fields[k + 'LookupId'];
+      if (lid != null) {
+        const name = spUserMap[String(lid)];
+        if (name) return name;
+      }
     }
   }
 
@@ -491,6 +505,23 @@ async function discoverSP() {
       WORKFLOW_STAGES.push(...stages);
     }
     console.log('[discoverSP] Status-Werte synchronisiert:', choices);
+  }
+
+  // 5. Build SP user map (id → display name) for Person-column LookupId resolution.
+  //    Person columns via Graph API return only a numeric LookupId; we need this map
+  //    to show the approver's name instead of a raw ID.
+  try {
+    const usersRes = await gGet(
+      `/sites/${siteId}/lists('User Information List')/items?$expand=fields($select=Title,EMail,Name)&$top=500`
+    );
+    spUserMap = {};
+    for (const u of (usersRes.value || [])) {
+      const name = u.fields?.Title || u.fields?.Name || u.fields?.EMail;
+      if (name) spUserMap[String(u.id)] = name;
+    }
+    console.log('[discoverSP] spUserMap loaded:', Object.keys(spUserMap).length, 'users');
+  } catch(e) {
+    console.warn('[discoverSP] Could not load User Information List:', e.message);
   }
 }
 
@@ -1115,8 +1146,14 @@ function statusTimeline(statusVal, item) {
     }
 
     const bold = isCurrent ? ' style="font-weight:600"' : '';
+    // Show current approver next to the active stage (● dot only)
+    let approverHtml = '';
+    if (isCurrent && item) {
+      const approver = getApproverVal(item);
+      if (approver) approverHtml = `<div class="ap-approver">👤 ${esc(approver)}</div>`;
+    }
     return `<div class="approval-stage"><div class="ap-dot ${cls}">${dot}</div>`
-         + `<div class="ap-body"><div class="ap-stage-label"${bold}>${esc(d.label)}</div></div></div>`;
+         + `<div class="ap-body"><div class="ap-stage-label"${bold}>${esc(d.label)}</div>${approverHtml}</div></div>`;
   }).filter(Boolean).join('');
 }
 
