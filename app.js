@@ -1250,12 +1250,10 @@ function statusTimeline(statusVal, item) {
     // Approver belongs to the completed stage they acted on, NOT the current pending stage.
     let approverHtml = '';
     const histApprover = approverByStage[d.label];
-    if ((isPast || (isCurrent && TERMINAL_OK.test(d.label))) && histApprover) {
-      // Attach comment to the most recently completed stage
+    if (isPast && histApprover) {
+      // Attach comment to the most recently completed stage (last past stage before current)
       let commentHtml = '';
-      const isLastCompleted = isCurrent
-        ? true  // Freigegeben/Bestellt is itself the last completed
-        : (currentIdx >= 0 && i === currentIdx - 1);
+      const isLastCompleted = currentIdx >= 0 && i === currentIdx - 1;
       if (isLastCompleted) {
         const commentCols = approvalCols.filter(c => /kommentar/i.test(c.label || c.key));
         if (commentCols.length) {
