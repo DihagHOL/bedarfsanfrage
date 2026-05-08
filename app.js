@@ -159,32 +159,37 @@ async function persistSpSettings() {
     const tok  = await getToken();
     const body = localStorage.getItem(SETTINGS_KEY) || '{}';
 
-    // Fetch current eTag so SharePoint accepts the PUT without 409/412.
-    // If the file doesn't exist yet (404) we omit If-Match entirely (first upload).
-    const metaUrl = `${API}/sites/${siteId}/drive/root:/${SP_CONFIG_NAME}`;
-    let eTag = null;
-    try {
-      const meta = await fetch(metaUrl, { headers: { Authorization: 'Bearer ' + tok } });
-      if (meta.ok) {
-        const mj = await meta.json();
-        eTag = mj.eTag || mj['@microsoft.graph.eTag'] || null;
-      }
-    } catch(_) {}
+    // Use an upload session with conflictBehavior=replace — this bypasses eTag
+    // checks entirely and works for both new and existing files.
+    const sessionUrl = `${API}/sites/${siteId}/drive/root:/${SP_CONFIG_NAME}:/createUploadSession`;
+    const sr = await fetch(sessionUrl, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item: { '@microsoft.graph.conflictBehavior': 'replace' } }),
+    });
+    if (!sr.ok) {
+      const txt = await sr.text().catch(() => '');
+      console.error('[persistSpSettings] createUploadSession HTTP', sr.status, txt);
+      toast(`Einstellungen konnten nicht in SharePoint gespeichert werden (${sr.status})`, 'error');
+      return;
+    }
+    const { uploadUrl } = await sr.json();
 
-    const uploadUrl = `${API}/sites/${siteId}/drive/root:/${SP_CONFIG_NAME}:/content`;
-    const headers = {
-      Authorization:  'Bearer ' + tok,
-      'Content-Type': 'application/json',
-    };
-    if (eTag) headers['If-Match'] = eTag;
-
-    const r = await fetch(uploadUrl, { method: 'PUT', headers, body });
+    const bytes = new TextEncoder().encode(body);
+    const r = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: {
+        'Content-Length': String(bytes.length),
+        'Content-Range':  `bytes 0-${bytes.length - 1}/${bytes.length}`,
+      },
+      body: bytes,
+    });
     if (!r.ok) {
       const txt = await r.text().catch(() => '');
-      console.error('[persistSpSettings] HTTP', r.status, txt);
+      console.error('[persistSpSettings] upload HTTP', r.status, txt);
       toast(`Einstellungen konnten nicht in SharePoint gespeichert werden (${r.status})`, 'error');
     } else {
-      console.log('[persistSpSettings] gespeichert, eTag war:', eTag);
+      console.log('[persistSpSettings] gespeichert via Upload-Session');
     }
   } catch(e) {
     console.warn('[persistSpSettings]', e.message);
