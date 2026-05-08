@@ -156,16 +156,35 @@ async function loadSpSettings() {
 async function persistSpSettings() {
   if (!siteId) return;
   try {
-    const tok  = await getToken();
-    const body = localStorage.getItem(SETTINGS_KEY) || '{}';
+    const tok   = await getToken();
+    const body  = localStorage.getItem(SETTINGS_KEY) || '{}';
+    const bytes = new TextEncoder().encode(body);
 
-    // Use an upload session with conflictBehavior=replace — this bypasses eTag
-    // checks entirely and works for both new and existing files.
-    const sessionUrl = `${API}/sites/${siteId}/drive/root:/${SP_CONFIG_NAME}:/createUploadSession`;
-    const sr = await fetch(sessionUrl, {
-      method: 'POST',
-      headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ item: { '@microsoft.graph.conflictBehavior': 'replace' } }),
+    // Step 1: read current eTag (required by createUploadSession for existing files).
+    // 404 = file not yet created; proceed without If-Match.
+    let eTag = null;
+    const metaR = await fetch(`${API}/sites/${siteId}/drive/root:/${SP_CONFIG_NAME}`, {
+      headers: { Authorization: 'Bearer ' + tok },
+    });
+    if (metaR.ok) {
+      const mj = await metaR.json();
+      eTag = mj.eTag || mj['@odata.etag'] || null;
+      console.log('[persistSpSettings] eTag gelesen:', eTag);
+    } else if (metaR.status !== 404) {
+      console.warn('[persistSpSettings] meta HTTP', metaR.status);
+    }
+
+    // Step 2: open upload session, passing the eTag so SP accepts the request.
+    const sessionHeaders = {
+      Authorization:  'Bearer ' + tok,
+      'Content-Type': 'application/json',
+    };
+    if (eTag) sessionHeaders['If-Match'] = eTag;
+
+    const sr = await fetch(`${API}/sites/${siteId}/drive/root:/${SP_CONFIG_NAME}:/createUploadSession`, {
+      method:  'POST',
+      headers: sessionHeaders,
+      body:    JSON.stringify({ item: { '@microsoft.graph.conflictBehavior': 'replace' } }),
     });
     if (!sr.ok) {
       const txt = await sr.text().catch(() => '');
@@ -175,9 +194,9 @@ async function persistSpSettings() {
     }
     const { uploadUrl } = await sr.json();
 
-    const bytes = new TextEncoder().encode(body);
+    // Step 3: upload content to the session URL (no auth header needed here).
     const r = await fetch(uploadUrl, {
-      method: 'PUT',
+      method:  'PUT',
       headers: {
         'Content-Length': String(bytes.length),
         'Content-Range':  `bytes 0-${bytes.length - 1}/${bytes.length}`,
@@ -189,7 +208,7 @@ async function persistSpSettings() {
       console.error('[persistSpSettings] upload HTTP', r.status, txt);
       toast(`Einstellungen konnten nicht in SharePoint gespeichert werden (${r.status})`, 'error');
     } else {
-      console.log('[persistSpSettings] gespeichert via Upload-Session');
+      console.log('[persistSpSettings] gespeichert ✓');
     }
   } catch(e) {
     console.warn('[persistSpSettings]', e.message);
