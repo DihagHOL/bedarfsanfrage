@@ -120,35 +120,101 @@ function getAllUserSettings() {
 }
 
 // ── SP-BASED SETTINGS STORE ───────────────────────────────────────────────────
-// Settings are persisted as a JSON file in the site drive so admin-granted
-// permissions are shared across all users and devices (not just local browser).
+// Settings are persisted as a SharePoint List item (not a drive file) so that
+// all site members can read it — drive files require elevated SP permissions.
 // localStorage stays as a fast in-memory cache; SP is the source of truth.
-const SP_CONFIG_NAME = 'bedarfsanfrage-config.json';
+const SP_CONFIG_LIST = 'BedarfsanfrageConfig'; // display name of the config list
+let _cfgListId  = null; // cached Graph list GUID
+let _cfgItemId  = null; // cached item ID of the single "settings" item
+let _cfgJsonCol = null; // actual internal column name (may differ from requested)
+
+async function _getCfgListId(tok) {
+  if (_cfgListId) return _cfgListId;
+  const r = await fetch(
+    `${API}/sites/${siteId}/lists?$select=id,displayName&$filter=displayName eq '${SP_CONFIG_LIST}'`,
+    { headers: { Authorization: 'Bearer ' + tok } }
+  );
+  if (r.ok) {
+    const d = await r.json();
+    _cfgListId = d.value?.[0]?.id || null;
+  }
+  return _cfgListId;
+}
+
+async function _ensureCfgList(tok) {
+  let id = await _getCfgListId(tok);
+  if (id) return id;
+
+  // Admin creates the list on first use
+  const cr = await fetch(`${API}/sites/${siteId}/lists`, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ displayName: SP_CONFIG_LIST, list: { template: 'genericList' } }),
+  });
+  if (!cr.ok) {
+    console.error('[persistSpSettings] Liste konnte nicht erstellt werden', cr.status, await cr.text().catch(()=>''));
+    return null;
+  }
+  const newList = await cr.json();
+  id = newList.id;
+  _cfgListId = id;
+
+  // Add a multiline-text column for the JSON blob
+  const colR = await fetch(`${API}/sites/${siteId}/lists/${id}/columns`, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'SettingsJson', text: { allowMultipleLines: true } }),
+  });
+  if (colR.ok) {
+    const col = await colR.json();
+    _cfgJsonCol = col.name; // SP may suffix the name (e.g. "SettingsJson0")
+    console.log('[persistSpSettings] Spalte erstellt:', _cfgJsonCol);
+  }
+  return id;
+}
+
+async function _getJsonColName(tok, listId) {
+  if (_cfgJsonCol) return _cfgJsonCol;
+  const r = await fetch(
+    `${API}/sites/${siteId}/lists/${listId}/columns?$select=name&$filter=name eq 'SettingsJson'`,
+    { headers: { Authorization: 'Bearer ' + tok } }
+  );
+  if (r.ok) {
+    const d = await r.json();
+    // SP may have stored as SettingsJson, SettingsJson0, etc. — take first match
+    _cfgJsonCol = d.value?.find(c => c.name.startsWith('SettingsJson'))?.name || 'SettingsJson';
+  }
+  return _cfgJsonCol || 'SettingsJson';
+}
 
 async function loadSpSettings() {
   if (!siteId) { console.warn('[loadSpSettings] siteId fehlt, übersprungen'); return; }
   try {
-    const tok = await getToken();
+    const tok    = await getToken();
     if (!tok) { console.warn('[loadSpSettings] kein Token'); return; }
-    const url = `${API}/sites/${siteId}/drive/root:/${SP_CONFIG_NAME}:/content`;
-    console.log('[loadSpSettings] lade von:', url);
-    const r   = await fetch(url, {
-      headers: { Authorization: 'Bearer ' + tok, 'Cache-Control': 'no-cache', Pragma: 'no-cache' }
-    });
-    if (r.status === 404) { console.warn('[loadSpSettings] Konfigurationsdatei noch nicht vorhanden (404)'); return; }
+    const listId = await _getCfgListId(tok);
+    if (!listId) { console.warn('[loadSpSettings] Liste noch nicht vorhanden'); return; }
+    const col    = await _getJsonColName(tok, listId);
+
+    const r = await fetch(
+      `${API}/sites/${siteId}/lists/${listId}/items?$top=1&$expand=fields($select=Title,${col})`,
+      { headers: { Authorization: 'Bearer ' + tok, 'Cache-Control': 'no-cache' } }
+    );
     if (!r.ok) { console.warn('[loadSpSettings] HTTP', r.status, await r.text().catch(()=>'')); return; }
-    const remote = await r.json();
+    const d   = await r.json();
+    const raw = d.value?.[0]?.fields?.[col];
+    if (!raw) { console.warn('[loadSpSettings] kein Inhalt in Listeneintrag'); return; }
+
+    const remote = JSON.parse(raw);
     console.log('[loadSpSettings] SP-Inhalt:', JSON.stringify(remote));
-    // Remote WINS for every key — admin grants on SP override stale local cache.
-    const local = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+    const local  = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
     for (const [em, cfg] of Object.entries(remote)) {
-      local[em] = Object.assign({}, local[em] || {}, cfg); // remote fields overwrite local
+      local[em] = Object.assign({}, local[em] || {}, cfg); // remote WINS
     }
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(local));
     const email = (account?.username || '').toLowerCase();
-    const mySetting = local[email];
     console.log('[loadSpSettings] synced', Object.keys(remote).length, 'user(s):', Object.keys(remote).join(', '));
-    console.log('[loadSpSettings] eigene Settings nach Merge:', JSON.stringify(mySetting));
+    console.log('[loadSpSettings] eigene Settings nach Merge:', JSON.stringify(local[email]));
   } catch(e) {
     console.warn('[loadSpSettings] Fehler:', e.message);
   }
@@ -157,64 +223,59 @@ async function loadSpSettings() {
 async function persistSpSettings() {
   if (!siteId) return;
   try {
-    const tok   = await getToken();
-    const body  = localStorage.getItem(SETTINGS_KEY) || '{}';
-    const bytes = new TextEncoder().encode(body);
+    const tok    = await getToken();
+    const listId = await _ensureCfgList(tok);
+    if (!listId) return;
+    const col    = await _getJsonColName(tok, listId);
+    const body   = localStorage.getItem(SETTINGS_KEY) || '{}';
+    console.log('[persistSpSettings] speichere:', body);
 
-    // Step 1: read current eTag (required by createUploadSession for existing files).
-    // 404 = file not yet created; proceed without If-Match.
-    let eTag = null;
-    const metaR = await fetch(`${API}/sites/${siteId}/drive/root:/${SP_CONFIG_NAME}`, {
-      headers: { Authorization: 'Bearer ' + tok },
-    });
-    if (metaR.ok) {
-      const mj = await metaR.json();
-      eTag = mj.eTag || mj['@odata.etag'] || null;
-      console.log('[persistSpSettings] eTag gelesen:', eTag);
-    } else if (metaR.status !== 404) {
-      console.warn('[persistSpSettings] meta HTTP', metaR.status);
+    // Find existing item (or create one)
+    if (!_cfgItemId) {
+      const ir = await fetch(
+        `${API}/sites/${siteId}/lists/${listId}/items?$top=1&$select=id`,
+        { headers: { Authorization: 'Bearer ' + tok } }
+      );
+      if (ir.ok) _cfgItemId = (await ir.json()).value?.[0]?.id || null;
     }
 
-    // Step 2: open upload session, passing the eTag so SP accepts the request.
-    const sessionHeaders = {
-      Authorization:  'Bearer ' + tok,
-      'Content-Type': 'application/json',
-    };
-    if (eTag) sessionHeaders['If-Match'] = eTag;
-
-    const sr = await fetch(`${API}/sites/${siteId}/drive/root:/${SP_CONFIG_NAME}:/createUploadSession`, {
-      method:  'POST',
-      headers: sessionHeaders,
-      body:    JSON.stringify({ item: { '@microsoft.graph.conflictBehavior': 'replace' } }),
-    });
-    if (!sr.ok) {
-      const txt = await sr.text().catch(() => '');
-      console.error('[persistSpSettings] createUploadSession HTTP', sr.status, txt);
-      toast(`Einstellungen konnten nicht in SharePoint gespeichert werden (${sr.status})`, 'error');
-      return;
-    }
-    const { uploadUrl } = await sr.json();
-
-    // Step 3: upload content to the session URL (no auth header needed here).
-    const r = await fetch(uploadUrl, {
-      method:  'PUT',
-      headers: {
-        'Content-Length': String(bytes.length),
-        'Content-Range':  `bytes 0-${bytes.length - 1}/${bytes.length}`,
-      },
-      body: bytes,
-    });
-    console.log('[persistSpSettings] body wird gespeichert:', body);
-    if (!r.ok) {
-      const txt = await r.text().catch(() => '');
-      console.error('[persistSpSettings] upload HTTP', r.status, txt);
-      toast(`Einstellungen konnten nicht in SharePoint gespeichert werden (${r.status})`, 'error');
+    if (_cfgItemId) {
+      // Update existing item
+      const r = await fetch(
+        `${API}/sites/${siteId}/lists/${listId}/items/${_cfgItemId}/fields`,
+        {
+          method:  'PATCH',
+          headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ [col]: body }),
+        }
+      );
+      if (!r.ok) {
+        console.error('[persistSpSettings] PATCH', r.status, await r.text().catch(()=>''));
+        toast(`Einstellungen konnten nicht gespeichert werden (${r.status})`, 'error');
+      } else {
+        console.log('[persistSpSettings] gespeichert ✓');
+      }
     } else {
-      console.log('[persistSpSettings] gespeichert ✓');
+      // Create first item
+      const r = await fetch(
+        `${API}/sites/${siteId}/lists/${listId}/items`,
+        {
+          method:  'POST',
+          headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ fields: { Title: 'settings', [col]: body } }),
+        }
+      );
+      if (r.ok) {
+        _cfgItemId = (await r.json()).id;
+        console.log('[persistSpSettings] Eintrag erstellt ✓');
+      } else {
+        console.error('[persistSpSettings] POST', r.status, await r.text().catch(()=>''));
+        toast(`Einstellungen konnten nicht gespeichert werden (${r.status})`, 'error');
+      }
     }
   } catch(e) {
     console.warn('[persistSpSettings]', e.message);
-    toast('Einstellungen konnten nicht in SharePoint gespeichert werden', 'error');
+    toast('Einstellungen konnten nicht gespeichert werden', 'error');
   }
 }
 
