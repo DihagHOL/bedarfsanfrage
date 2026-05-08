@@ -161,7 +161,11 @@ async function persistSpSettings() {
     const body = localStorage.getItem(SETTINGS_KEY) || '{}';
     const r = await fetch(url, {
       method: 'PUT',
-      headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' },
+      headers: {
+        Authorization: 'Bearer ' + tok,
+        'Content-Type': 'application/json',
+        'If-Match': '*',   // overwrite regardless of eTag — avoids 409 resourceModified
+      },
       body
     });
     if (!r.ok) {
