@@ -120,94 +120,97 @@ function getAllUserSettings() {
 }
 
 // ── SP-BASED SETTINGS STORE ───────────────────────────────────────────────────
-// Settings are persisted as a SharePoint List item (not a drive file) so that
-// all site members can read it — drive files require elevated SP permissions.
+// Config is stored in a SharePoint list item using the SP REST API.
+// SP REST uses getSpToken() and respects the user's native SP permissions
+// (e.g. Site Owner can create lists) — Graph API requires Sites.Manage.All
+// which we don't have as an app permission.
 // localStorage stays as a fast in-memory cache; SP is the source of truth.
-const SP_CONFIG_LIST = 'BedarfsanfrageConfig'; // display name of the config list
-let _cfgListId  = null; // cached Graph list GUID
-let _cfgItemId  = null; // cached item ID of the single "settings" item
-let _cfgJsonCol = null; // actual internal column name (may differ from requested)
+const SP_CONFIG_LIST = 'BedarfsanfrageConfig';
+// Base URL derived from SP_SITE constant ('dihag.sharepoint.com:/sites/gruppe_shb')
+const SP_REST = 'https://' + SP_SITE.replace(':/', '') + '/_api/web';
+let _cfgItemId = null; // cached SP list item Id
 
-async function _getCfgListId(tok) {
-  if (_cfgListId) return _cfgListId;
-  const r = await fetch(
-    `${API}/sites/${siteId}/lists?$select=id,displayName&$filter=displayName eq '${SP_CONFIG_LIST}'`,
-    { headers: { Authorization: 'Bearer ' + tok } }
-  );
-  if (r.ok) {
-    const d = await r.json();
-    _cfgListId = d.value?.[0]?.id || null;
-  }
-  return _cfgListId;
+// SP REST: common JSON headers (Bearer token makes X-RequestDigest unnecessary)
+function _spHdr(tok, extra = {}) {
+  return Object.assign({
+    Authorization: 'Bearer ' + tok,
+    Accept:        'application/json;odata=nometadata',
+    'Content-Type':'application/json;odata=verbose',
+  }, extra);
 }
 
-async function _ensureCfgList(tok) {
-  let id = await _getCfgListId(tok);
-  if (id) return id;
+async function _ensureCfgListSp(tok) {
+  // Check if list already exists
+  const chk = await fetch(
+    `${SP_REST}/lists/getByTitle('${SP_CONFIG_LIST}')`,
+    { headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json;odata=nometadata' } }
+  );
+  if (chk.ok) return true;
+  if (chk.status !== 404 && chk.status !== 400) {
+    console.error('[persistSpSettings] Liste-Check HTTP', chk.status, await chk.text().catch(()=>''));
+    return false;
+  }
 
-  // Admin creates the list on first use
-  const cr = await fetch(`${API}/sites/${siteId}/lists`, {
+  // Create list via SP REST (respects Site Owner permissions, no Sites.Manage.All needed)
+  const cr = await fetch(`${SP_REST}/lists`, {
     method: 'POST',
-    headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ displayName: SP_CONFIG_LIST, list: { template: 'genericList' } }),
+    headers: _spHdr(tok),
+    body: JSON.stringify({
+      '__metadata': { 'type': 'SP.List' },
+      'BaseTemplate': 100,
+      'Title': SP_CONFIG_LIST,
+    }),
   });
   if (!cr.ok) {
-    console.error('[persistSpSettings] Liste konnte nicht erstellt werden', cr.status, await cr.text().catch(()=>''));
-    return null;
+    const t = await cr.text().catch(()=>'');
+    console.error('[persistSpSettings] Liste erstellen HTTP', cr.status, t);
+    toast(`Konfigurationsliste konnte nicht erstellt werden (${cr.status}). Bitte manuell in SharePoint anlegen: "${SP_CONFIG_LIST}"`, 'error');
+    return false;
   }
-  const newList = await cr.json();
-  id = newList.id;
-  _cfgListId = id;
+  console.log('[persistSpSettings] Liste erstellt ✓');
 
-  // Add a multiline-text column for the JSON blob
-  const colR = await fetch(`${API}/sites/${siteId}/lists/${id}/columns`, {
-    method: 'POST',
-    headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: 'SettingsJson', text: { allowMultipleLines: true } }),
-  });
-  if (colR.ok) {
-    const col = await colR.json();
-    _cfgJsonCol = col.name; // SP may suffix the name (e.g. "SettingsJson0")
-    console.log('[persistSpSettings] Spalte erstellt:', _cfgJsonCol);
-  }
-  return id;
-}
-
-async function _getJsonColName(tok, listId) {
-  if (_cfgJsonCol) return _cfgJsonCol;
-  const r = await fetch(
-    `${API}/sites/${siteId}/lists/${listId}/columns?$select=name&$filter=name eq 'SettingsJson'`,
-    { headers: { Authorization: 'Bearer ' + tok } }
+  // Add multiline text column "SettingsJson" (FieldTypeKind 3 = Note)
+  const fc = await fetch(
+    `${SP_REST}/lists/getByTitle('${SP_CONFIG_LIST}')/fields`,
+    {
+      method: 'POST',
+      headers: _spHdr(tok),
+      body: JSON.stringify({
+        '__metadata': { 'type': 'SP.FieldMultiLineText' },
+        'FieldTypeKind': 3,
+        'Title': 'SettingsJson',
+        'StaticName': 'SettingsJson',
+      }),
+    }
   );
-  if (r.ok) {
-    const d = await r.json();
-    // SP may have stored as SettingsJson, SettingsJson0, etc. — take first match
-    _cfgJsonCol = d.value?.find(c => c.name.startsWith('SettingsJson'))?.name || 'SettingsJson';
-  }
-  return _cfgJsonCol || 'SettingsJson';
+  console.log('[persistSpSettings] Spalte erstellt:', fc.ok ? '✓' : `HTTP ${fc.status}`);
+  return true;
 }
 
 async function loadSpSettings() {
   if (!siteId) { console.warn('[loadSpSettings] siteId fehlt, übersprungen'); return; }
   try {
-    const tok    = await getToken();
-    if (!tok) { console.warn('[loadSpSettings] kein Token'); return; }
-    const listId = await _getCfgListId(tok);
-    if (!listId) { console.warn('[loadSpSettings] Liste noch nicht vorhanden'); return; }
-    const col    = await _getJsonColName(tok, listId);
+    const tok = await getSpToken();
+    if (!tok) { console.warn('[loadSpSettings] kein SP-Token'); return; }
 
     const r = await fetch(
-      `${API}/sites/${siteId}/lists/${listId}/items?$top=1&$expand=fields($select=Title,${col})`,
-      { headers: { Authorization: 'Bearer ' + tok, 'Cache-Control': 'no-cache' } }
+      `${SP_REST}/lists/getByTitle('${SP_CONFIG_LIST}')/items?$top=1&$select=Id,SettingsJson`,
+      { headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json;odata=nometadata', 'Cache-Control': 'no-cache' } }
     );
+    if (r.status === 404 || r.status === 400) { console.warn('[loadSpSettings] Liste nicht vorhanden'); return; }
     if (!r.ok) { console.warn('[loadSpSettings] HTTP', r.status, await r.text().catch(()=>'')); return; }
+
     const d   = await r.json();
-    const raw = d.value?.[0]?.fields?.[col];
-    if (!raw) { console.warn('[loadSpSettings] kein Inhalt in Listeneintrag'); return; }
+    const item = d.value?.[0];
+    if (!item) { console.warn('[loadSpSettings] kein Eintrag'); return; }
+    if (item.Id) _cfgItemId = item.Id;
+
+    const raw = item.SettingsJson;
+    if (!raw) { console.warn('[loadSpSettings] Spalte SettingsJson leer'); return; }
 
     const remote = JSON.parse(raw);
     console.log('[loadSpSettings] SP-Inhalt:', JSON.stringify(remote));
-    const local  = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+    const local = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
     for (const [em, cfg] of Object.entries(remote)) {
       local[em] = Object.assign({}, local[em] || {}, cfg); // remote WINS
     }
@@ -223,34 +226,37 @@ async function loadSpSettings() {
 async function persistSpSettings() {
   if (!siteId) return;
   try {
-    const tok    = await getToken();
-    const listId = await _ensureCfgList(tok);
-    if (!listId) return;
-    const col    = await _getJsonColName(tok, listId);
-    const body   = localStorage.getItem(SETTINGS_KEY) || '{}';
+    const tok = await getSpToken();
+    const ok  = await _ensureCfgListSp(tok);
+    if (!ok) return;
+
+    const body = localStorage.getItem(SETTINGS_KEY) || '{}';
     console.log('[persistSpSettings] speichere:', body);
 
-    // Find existing item (or create one)
+    // Resolve item ID if not cached
     if (!_cfgItemId) {
       const ir = await fetch(
-        `${API}/sites/${siteId}/lists/${listId}/items?$top=1&$select=id`,
-        { headers: { Authorization: 'Bearer ' + tok } }
+        `${SP_REST}/lists/getByTitle('${SP_CONFIG_LIST}')/items?$top=1&$select=Id`,
+        { headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json;odata=nometadata' } }
       );
-      if (ir.ok) _cfgItemId = (await ir.json()).value?.[0]?.id || null;
+      if (ir.ok) _cfgItemId = (await ir.json()).value?.[0]?.Id || null;
     }
 
     if (_cfgItemId) {
-      // Update existing item
+      // MERGE update (SP REST uses POST + X-HTTP-Method: MERGE)
       const r = await fetch(
-        `${API}/sites/${siteId}/lists/${listId}/items/${_cfgItemId}/fields`,
+        `${SP_REST}/lists/getByTitle('${SP_CONFIG_LIST}')/items(${_cfgItemId})`,
         {
-          method:  'PATCH',
-          headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ [col]: body }),
+          method: 'POST',
+          headers: _spHdr(tok, { 'IF-MATCH': '*', 'X-HTTP-Method': 'MERGE' }),
+          body: JSON.stringify({
+            '__metadata': { 'type': `SP.Data.${SP_CONFIG_LIST}ListItem` },
+            'SettingsJson': body,
+          }),
         }
       );
       if (!r.ok) {
-        console.error('[persistSpSettings] PATCH', r.status, await r.text().catch(()=>''));
+        console.error('[persistSpSettings] MERGE HTTP', r.status, await r.text().catch(()=>''));
         toast(`Einstellungen konnten nicht gespeichert werden (${r.status})`, 'error');
       } else {
         console.log('[persistSpSettings] gespeichert ✓');
@@ -258,18 +264,22 @@ async function persistSpSettings() {
     } else {
       // Create first item
       const r = await fetch(
-        `${API}/sites/${siteId}/lists/${listId}/items`,
+        `${SP_REST}/lists/getByTitle('${SP_CONFIG_LIST}')/items`,
         {
-          method:  'POST',
-          headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ fields: { Title: 'settings', [col]: body } }),
+          method: 'POST',
+          headers: _spHdr(tok),
+          body: JSON.stringify({
+            '__metadata': { 'type': `SP.Data.${SP_CONFIG_LIST}ListItem` },
+            'Title': 'settings',
+            'SettingsJson': body,
+          }),
         }
       );
       if (r.ok) {
-        _cfgItemId = (await r.json()).id;
-        console.log('[persistSpSettings] Eintrag erstellt ✓');
+        _cfgItemId = (await r.json())?.Id || null;
+        console.log('[persistSpSettings] Eintrag erstellt ✓, Id:', _cfgItemId);
       } else {
-        console.error('[persistSpSettings] POST', r.status, await r.text().catch(()=>''));
+        console.error('[persistSpSettings] POST HTTP', r.status, await r.text().catch(()=>''));
         toast(`Einstellungen konnten nicht gespeichert werden (${r.status})`, 'error');
       }
     }
