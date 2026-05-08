@@ -120,15 +120,14 @@ function getAllUserSettings() {
 }
 
 // ── SP-BASED SETTINGS STORE ───────────────────────────────────────────────────
-// Config is stored in a SharePoint list item using the SP REST API.
-// SP REST uses getSpToken() and respects the user's native SP permissions
-// (e.g. Site Owner can create lists) — Graph API requires Sites.Manage.All
-// which we don't have as an app permission.
-// localStorage stays as a fast in-memory cache; SP is the source of truth.
-const SP_CONFIG_LIST = 'BedarfsanfrageConfig';
-// Base URL derived from SP_SITE constant ('dihag.sharepoint.com:/sites/gruppe_shb')
+// SharePoint list/drive creation requires Manage.All permissions the app does
+// not have. Instead we use a token-based grant system:
+//   Admin  → generates a compact base64 token from current user grants
+//          → copies it and sends to the user (e.g. via Teams/Email)
+//   User   → pastes token in Settings modal → grants applied locally
+// localStorage is the runtime cache; token is the out-of-band sync channel.
 const SP_REST = 'https://' + SP_SITE.replace(':/', '/') + '/_api/web';
-let _cfgItemId = null; // cached SP list item Id
+let _cfgItemId = null;
 
 // SP REST: common JSON headers (Bearer token makes X-RequestDigest unnecessary)
 function _spHdr(tok, extra = {}) {
@@ -139,155 +138,10 @@ function _spHdr(tok, extra = {}) {
   }, extra);
 }
 
-async function _ensureCfgListSp(tok) {
-  // Check if list already exists
-  const chk = await fetch(
-    `${SP_REST}/lists/getByTitle('${SP_CONFIG_LIST}')`,
-    { headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json;odata=nometadata' } }
-  );
-  if (chk.ok) return true;
-  if (chk.status !== 404 && chk.status !== 400) {
-    console.error('[persistSpSettings] Liste-Check HTTP', chk.status, await chk.text().catch(()=>''));
-    return false;
-  }
-
-  // Create list via SP REST (respects Site Owner permissions, no Sites.Manage.All needed)
-  const cr = await fetch(`${SP_REST}/lists`, {
-    method: 'POST',
-    headers: _spHdr(tok),
-    body: JSON.stringify({
-      '__metadata': { 'type': 'SP.List' },
-      'BaseTemplate': 100,
-      'Title': SP_CONFIG_LIST,
-    }),
-  });
-  if (!cr.ok) {
-    const t = await cr.text().catch(()=>'');
-    console.error('[persistSpSettings] Liste erstellen HTTP', cr.status, t);
-    toast(`Konfigurationsliste konnte nicht erstellt werden (${cr.status}). Bitte manuell in SharePoint anlegen: "${SP_CONFIG_LIST}"`, 'error');
-    return false;
-  }
-  console.log('[persistSpSettings] Liste erstellt ✓');
-
-  // Add multiline text column "SettingsJson" (FieldTypeKind 3 = Note)
-  const fc = await fetch(
-    `${SP_REST}/lists/getByTitle('${SP_CONFIG_LIST}')/fields`,
-    {
-      method: 'POST',
-      headers: _spHdr(tok),
-      body: JSON.stringify({
-        '__metadata': { 'type': 'SP.FieldMultiLineText' },
-        'FieldTypeKind': 3,
-        'Title': 'SettingsJson',
-        'StaticName': 'SettingsJson',
-      }),
-    }
-  );
-  console.log('[persistSpSettings] Spalte erstellt:', fc.ok ? '✓' : `HTTP ${fc.status}`);
-  return true;
-}
-
-async function loadSpSettings() {
-  if (!siteId) { console.warn('[loadSpSettings] siteId fehlt, übersprungen'); return; }
-  try {
-    const tok = await getSpToken();
-    if (!tok) { console.warn('[loadSpSettings] kein SP-Token'); return; }
-
-    const r = await fetch(
-      `${SP_REST}/lists/getByTitle('${SP_CONFIG_LIST}')/items?$top=1&$select=Id,SettingsJson`,
-      { headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json;odata=nometadata', 'Cache-Control': 'no-cache' } }
-    );
-    if (r.status === 404 || r.status === 400) { console.warn('[loadSpSettings] Liste nicht vorhanden'); return; }
-    if (!r.ok) { console.warn('[loadSpSettings] HTTP', r.status, await r.text().catch(()=>'')); return; }
-
-    const d   = await r.json();
-    const item = d.value?.[0];
-    if (!item) { console.warn('[loadSpSettings] kein Eintrag'); return; }
-    if (item.Id) _cfgItemId = item.Id;
-
-    const raw = item.SettingsJson;
-    if (!raw) { console.warn('[loadSpSettings] Spalte SettingsJson leer'); return; }
-
-    const remote = JSON.parse(raw);
-    console.log('[loadSpSettings] SP-Inhalt:', JSON.stringify(remote));
-    const local = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
-    for (const [em, cfg] of Object.entries(remote)) {
-      local[em] = Object.assign({}, local[em] || {}, cfg); // remote WINS
-    }
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(local));
-    const email = (account?.username || '').toLowerCase();
-    console.log('[loadSpSettings] synced', Object.keys(remote).length, 'user(s):', Object.keys(remote).join(', '));
-    console.log('[loadSpSettings] eigene Settings nach Merge:', JSON.stringify(local[email]));
-  } catch(e) {
-    console.warn('[loadSpSettings] Fehler:', e.message);
-  }
-}
-
-async function persistSpSettings() {
-  if (!siteId) return;
-  try {
-    const tok = await getSpToken();
-    const ok  = await _ensureCfgListSp(tok);
-    if (!ok) return;
-
-    const body = localStorage.getItem(SETTINGS_KEY) || '{}';
-    console.log('[persistSpSettings] speichere:', body);
-
-    // Resolve item ID if not cached
-    if (!_cfgItemId) {
-      const ir = await fetch(
-        `${SP_REST}/lists/getByTitle('${SP_CONFIG_LIST}')/items?$top=1&$select=Id`,
-        { headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json;odata=nometadata' } }
-      );
-      if (ir.ok) _cfgItemId = (await ir.json()).value?.[0]?.Id || null;
-    }
-
-    if (_cfgItemId) {
-      // MERGE update (SP REST uses POST + X-HTTP-Method: MERGE)
-      const r = await fetch(
-        `${SP_REST}/lists/getByTitle('${SP_CONFIG_LIST}')/items(${_cfgItemId})`,
-        {
-          method: 'POST',
-          headers: _spHdr(tok, { 'IF-MATCH': '*', 'X-HTTP-Method': 'MERGE' }),
-          body: JSON.stringify({
-            '__metadata': { 'type': `SP.Data.${SP_CONFIG_LIST}ListItem` },
-            'SettingsJson': body,
-          }),
-        }
-      );
-      if (!r.ok) {
-        console.error('[persistSpSettings] MERGE HTTP', r.status, await r.text().catch(()=>''));
-        toast(`Einstellungen konnten nicht gespeichert werden (${r.status})`, 'error');
-      } else {
-        console.log('[persistSpSettings] gespeichert ✓');
-      }
-    } else {
-      // Create first item
-      const r = await fetch(
-        `${SP_REST}/lists/getByTitle('${SP_CONFIG_LIST}')/items`,
-        {
-          method: 'POST',
-          headers: _spHdr(tok),
-          body: JSON.stringify({
-            '__metadata': { 'type': `SP.Data.${SP_CONFIG_LIST}ListItem` },
-            'Title': 'settings',
-            'SettingsJson': body,
-          }),
-        }
-      );
-      if (r.ok) {
-        _cfgItemId = (await r.json())?.Id || null;
-        console.log('[persistSpSettings] Eintrag erstellt ✓, Id:', _cfgItemId);
-      } else {
-        console.error('[persistSpSettings] POST HTTP', r.status, await r.text().catch(()=>''));
-        toast(`Einstellungen konnten nicht gespeichert werden (${r.status})`, 'error');
-      }
-    }
-  } catch(e) {
-    console.warn('[persistSpSettings]', e.message);
-    toast('Einstellungen konnten nicht gespeichert werden', 'error');
-  }
-}
+// No-op: SP sync removed (insufficient permissions to create lists or write drives).
+// Grants are distributed via copy-paste tokens (see openSettings / applyGrantToken).
+async function loadSpSettings()    { /* token-based, no remote fetch needed */ }
+async function persistSpSettings() { /* token-based, no remote write needed */ }
 
 // ── AUTO-REFRESH ─────────────────────────────────────────────────────────────
 // autoRefreshTimer: 1-second tick; arCountdown: seconds until next refresh
@@ -2857,6 +2711,8 @@ function openSettings() {
       <input type="number" value="${us.pageSize||100}" min="10" max="500" step="10"
         class="su-num" title="Max. Elemente"
         onchange="saveUserSettings('${esc(em)}',{pageSize:parseInt(this.value)||100})">
+      <button class="btn btn-sm btn-outline su-token-btn" title="Grant-Token kopieren und an Benutzer senden"
+        onclick="copyGrantToken('${esc(em)}')">📋 Token</button>
       <button class="su-del" title="Benutzer entfernen"
         onclick="deleteUserSetting('${esc(em)}')">✕</button>
     </div>`;
@@ -2911,11 +2767,13 @@ function openSettings() {
     : `<div class="settings-row"><span class="settings-label">📊 Dashboard-Zugriff</span>
         ${roVal(s.canSeeDashboard, 'Freigegeben')}</div>`;
 
-  // Sync-button for non-admin: reloads grants from SP and re-applies nav
+  // Token-import row for non-admin (admin generates token, sends it, user pastes here)
   const syncBtn = !adminMode ? `
-    <div class="settings-row" style="margin-top:4px">
-      <span class="settings-label" style="font-size:.78rem;color:#6b7280">Berechtigungen vom Admin nicht sichtbar?</span>
-      <button class="btn btn-sm btn-outline" onclick="resyncSettings()">🔄 Synchronisieren</button>
+    <div class="settings-row" style="margin-top:6px;gap:6px;flex-wrap:wrap;align-items:center">
+      <span class="settings-label" style="font-size:.78rem;color:#6b7280">Grant-Token vom Admin:</span>
+      <input id="grant-token-input" type="text" placeholder="Token hier einfügen…"
+        class="su-input" style="flex:1;min-width:160px;font-size:.78rem">
+      <button class="btn btn-sm btn-primary" onclick="applyGrantToken()">✅ Anwenden</button>
     </div>` : '';
 
   $id('settings-body').innerHTML = `
@@ -2964,19 +2822,47 @@ function openSettings() {
 
 function closeSettings() { $id('settings-modal').classList.add('hidden'); }
 
-async function resyncSettings() {
-  toast('Einstellungen werden synchronisiert…', 'info');
-  await loadSpSettings();
-  applyNavVisibility();
-  const em = (account?.username || '').toLowerCase();
-  const s  = getSettings(em);
-  console.log('[resyncSettings] nach Sync — canSeeDashboard:', s.canSeeDashboard, '| autoRefresh:', s.autoRefresh);
-  if (s.canSeeDashboard) {
-    toast('Dashboard-Zugriff aktiv. Seite wird neu geladen…', 'success');
-    setTimeout(() => location.reload(), 1200);
-  } else {
-    toast('Keine Änderungen — Dashboard noch nicht freigegeben.', 'info');
-    openSettings(); // refresh modal to show updated values
+// Admin: generate a base64 token for a specific user and copy to clipboard.
+function copyGrantToken(targetEmail) {
+  const settings = getAllUserSettings();
+  const userCfg  = settings[(targetEmail||'').toLowerCase()];
+  if (!userCfg) { toast('Benutzer nicht gefunden.', 'error'); return; }
+  // Token encodes: {email, grants} — only grant fields, not personal preferences
+  const grantFields = ['canSeeDashboard', 'autoRefresh', 'autoRefreshGranted'];
+  const grants = {};
+  grantFields.forEach(k => { if (userCfg[k] !== undefined) grants[k] = userCfg[k]; });
+  const token = btoa(unescape(encodeURIComponent(JSON.stringify({ email: targetEmail.toLowerCase(), grants }))));
+  navigator.clipboard.writeText(token).then(
+    () => toast(`Token für ${targetEmail} kopiert. Bitte an den Benutzer senden.`, 'success'),
+    () => {
+      // Fallback: show in prompt
+      prompt('Token kopieren:', token);
+    }
+  );
+}
+
+// User: paste a token from admin and apply the contained grants.
+function applyGrantToken() {
+  const raw = ($id('grant-token-input')?.value || '').trim();
+  if (!raw) { toast('Bitte Token eingeben.', 'error'); return; }
+  try {
+    const decoded = JSON.parse(decodeURIComponent(escape(atob(raw))));
+    if (!decoded?.email || !decoded?.grants) throw new Error('Ungültiges Format');
+    const myEmail = (account?.username || '').toLowerCase();
+    if (decoded.email !== myEmail) {
+      toast(`Dieser Token ist für ${decoded.email}, nicht für dein Konto.`, 'error'); return;
+    }
+    saveUserSettings(myEmail, decoded.grants);
+    applyNavVisibility();
+    toast('Berechtigungen erfolgreich übernommen!', 'success');
+    if (decoded.grants.canSeeDashboard) {
+      setTimeout(() => location.reload(), 900);
+    } else {
+      openSettings();
+    }
+  } catch(e) {
+    toast('Ungültiger Token — bitte erneut beim Admin anfragen.', 'error');
+    console.warn('[applyGrantToken]', e.message);
   }
 }
 

@@ -589,6 +589,7 @@ details#attach-extra-wrap[open] .attach-more-toggle { color:#374151; }
 .su-empty { font-size: .85rem; color: #9ca3af; font-style: italic; }
 .su-del  { background: none; border: none; cursor: pointer; color: #9ca3af; font-size: .95rem; padding: 2px 4px; border-radius: 4px; line-height: 1; }
 .su-del:hover { background: #fee2e2; color: #dc2626; }
+.su-token-btn { font-size: .72rem !important; padding: 2px 7px !important; white-space: nowrap; }
 .su-select { padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: .84rem; }
 
 /* ── PDF Viewer Modal ── */
