@@ -138,6 +138,7 @@ async function loadSpSettings() {
     if (r.status === 404) { console.warn('[loadSpSettings] Konfigurationsdatei noch nicht vorhanden (404)'); return; }
     if (!r.ok) { console.warn('[loadSpSettings] HTTP', r.status, await r.text().catch(()=>'')); return; }
     const remote = await r.json();
+    console.log('[loadSpSettings] SP-Inhalt:', JSON.stringify(remote));
     // Remote WINS for every key — admin grants on SP override stale local cache.
     const local = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
     for (const [em, cfg] of Object.entries(remote)) {
@@ -147,7 +148,7 @@ async function loadSpSettings() {
     const email = (account?.username || '').toLowerCase();
     const mySetting = local[email];
     console.log('[loadSpSettings] synced', Object.keys(remote).length, 'user(s):', Object.keys(remote).join(', '));
-    console.log('[loadSpSettings] eigene Settings:', JSON.stringify(mySetting));
+    console.log('[loadSpSettings] eigene Settings nach Merge:', JSON.stringify(mySetting));
   } catch(e) {
     console.warn('[loadSpSettings] Fehler:', e.message);
   }
@@ -203,6 +204,7 @@ async function persistSpSettings() {
       },
       body: bytes,
     });
+    console.log('[persistSpSettings] body wird gespeichert:', body);
     if (!r.ok) {
       const txt = await r.text().catch(() => '');
       console.error('[persistSpSettings] upload HTTP', r.status, txt);
