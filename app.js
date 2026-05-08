@@ -127,7 +127,7 @@ function getAllUserSettings() {
 // localStorage stays as a fast in-memory cache; SP is the source of truth.
 const SP_CONFIG_LIST = 'BedarfsanfrageConfig';
 // Base URL derived from SP_SITE constant ('dihag.sharepoint.com:/sites/gruppe_shb')
-const SP_REST = 'https://' + SP_SITE.replace(':/', '') + '/_api/web';
+const SP_REST = 'https://' + SP_SITE.replace(':/', '/') + '/_api/web';
 let _cfgItemId = null; // cached SP list item Id
 
 // SP REST: common JSON headers (Bearer token makes X-RequestDigest unnecessary)
