@@ -126,26 +126,30 @@ function getAllUserSettings() {
 const SP_CONFIG_NAME = 'bedarfsanfrage-config.json';
 
 async function loadSpSettings() {
-  if (!siteId) return;
+  if (!siteId) { console.warn('[loadSpSettings] siteId fehlt, übersprungen'); return; }
   try {
     const tok = await getToken();
-    if (!tok) return;    const url = `${API}/sites/${siteId}/drive/root:/${SP_CONFIG_NAME}:/content`;
+    if (!tok) { console.warn('[loadSpSettings] kein Token'); return; }
+    const url = `${API}/sites/${siteId}/drive/root:/${SP_CONFIG_NAME}:/content`;
+    console.log('[loadSpSettings] lade von:', url);
     const r   = await fetch(url, {
       headers: { Authorization: 'Bearer ' + tok, 'Cache-Control': 'no-cache', Pragma: 'no-cache' }
     });
-    if (r.status === 404) return; // file doesn't exist yet — first run
-    if (!r.ok) { console.warn('[loadSpSettings] HTTP', r.status); return; }
+    if (r.status === 404) { console.warn('[loadSpSettings] Konfigurationsdatei noch nicht vorhanden (404)'); return; }
+    if (!r.ok) { console.warn('[loadSpSettings] HTTP', r.status, await r.text().catch(()=>'')); return; }
     const remote = await r.json();
     // Remote WINS for every key — admin grants on SP override stale local cache.
-    // This ensures canSeeDashboard, autoRefresh etc. propagate cross-device.
     const local = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
     for (const [em, cfg] of Object.entries(remote)) {
       local[em] = Object.assign({}, local[em] || {}, cfg); // remote fields overwrite local
     }
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(local));
-    console.log('[loadSpSettings] synced', Object.keys(remote).length, 'user(s) from SP:', Object.keys(remote).join(', '));
+    const email = (account?.username || '').toLowerCase();
+    const mySetting = local[email];
+    console.log('[loadSpSettings] synced', Object.keys(remote).length, 'user(s):', Object.keys(remote).join(', '));
+    console.log('[loadSpSettings] eigene Settings:', JSON.stringify(mySetting));
   } catch(e) {
-    console.warn('[loadSpSettings]', e.message);
+    console.warn('[loadSpSettings] Fehler:', e.message);
   }
 }
 
@@ -324,6 +328,12 @@ async function bootDone() {
     $id('boot').style.display = 'none';
     $id('app').style.display  = 'flex';
     applyNavVisibility(); // re-apply after SP settings loaded (grants may have changed)
+    // Log what the current user's effective settings are — visible in browser console
+    if (account) {
+      const _em = (account.username || '').toLowerCase();
+      const _s  = getSettings(_em);
+      console.log('[bootDone] User:', _em, '| canSeeDashboard:', _s.canSeeDashboard, '| autoRefresh:', _s.autoRefresh);
+    }
     // Auto-refresh is admin-controlled. Clear any self-set value from old localStorage
     // if admin hasn't explicitly granted the feature (autoRefreshGranted flag).
     if (account) {
@@ -2787,10 +2797,18 @@ function openSettings() {
     : `<div class="settings-row"><span class="settings-label">📊 Dashboard-Zugriff</span>
         ${roVal(s.canSeeDashboard, 'Freigegeben')}</div>`;
 
+  // Sync-button for non-admin: reloads grants from SP and re-applies nav
+  const syncBtn = !adminMode ? `
+    <div class="settings-row" style="margin-top:4px">
+      <span class="settings-label" style="font-size:.78rem;color:#6b7280">Berechtigungen vom Admin nicht sichtbar?</span>
+      <button class="btn btn-sm btn-outline" onclick="resyncSettings()">🔄 Synchronisieren</button>
+    </div>` : '';
+
   $id('settings-body').innerHTML = `
     <div class="settings-section-title">⚙️ Meine Einstellungen</div>
     ${arRow}
     ${allRow}
+    ${syncBtn}
     <div class="settings-row">
       <span class="settings-label">📄 Elemente laden (max.)</span>
       <input type="number" value="${s.pageSize}" min="10" max="500" step="10" class="su-num"
@@ -2831,6 +2849,22 @@ function openSettings() {
 }
 
 function closeSettings() { $id('settings-modal').classList.add('hidden'); }
+
+async function resyncSettings() {
+  toast('Einstellungen werden synchronisiert…', 'info');
+  await loadSpSettings();
+  applyNavVisibility();
+  const em = (account?.username || '').toLowerCase();
+  const s  = getSettings(em);
+  console.log('[resyncSettings] nach Sync — canSeeDashboard:', s.canSeeDashboard, '| autoRefresh:', s.autoRefresh);
+  if (s.canSeeDashboard) {
+    toast('Dashboard-Zugriff aktiv. Seite wird neu geladen…', 'success');
+    setTimeout(() => location.reload(), 1200);
+  } else {
+    toast('Keine Änderungen — Dashboard noch nicht freigegeben.', 'info');
+    openSettings(); // refresh modal to show updated values
+  }
+}
 
 function addUserSetting() {
   const em = ($id('su-new-email')?.value || '').trim().toLowerCase();
