@@ -157,21 +157,34 @@ async function persistSpSettings() {
   if (!siteId) return;
   try {
     const tok  = await getToken();
-    const url  = `${API}/sites/${siteId}/drive/root:/${SP_CONFIG_NAME}:/content`;
     const body = localStorage.getItem(SETTINGS_KEY) || '{}';
-    const r = await fetch(url, {
-      method: 'PUT',
-      headers: {
-        Authorization: 'Bearer ' + tok,
-        'Content-Type': 'application/json',
-        'If-Match': '*',   // overwrite regardless of eTag — avoids 409 resourceModified
-      },
-      body
-    });
+
+    // Fetch current eTag so SharePoint accepts the PUT without 409/412.
+    // If the file doesn't exist yet (404) we omit If-Match entirely (first upload).
+    const metaUrl = `${API}/sites/${siteId}/drive/root:/${SP_CONFIG_NAME}`;
+    let eTag = null;
+    try {
+      const meta = await fetch(metaUrl, { headers: { Authorization: 'Bearer ' + tok } });
+      if (meta.ok) {
+        const mj = await meta.json();
+        eTag = mj.eTag || mj['@microsoft.graph.eTag'] || null;
+      }
+    } catch(_) {}
+
+    const uploadUrl = `${API}/sites/${siteId}/drive/root:/${SP_CONFIG_NAME}:/content`;
+    const headers = {
+      Authorization:  'Bearer ' + tok,
+      'Content-Type': 'application/json',
+    };
+    if (eTag) headers['If-Match'] = eTag;
+
+    const r = await fetch(uploadUrl, { method: 'PUT', headers, body });
     if (!r.ok) {
       const txt = await r.text().catch(() => '');
       console.error('[persistSpSettings] HTTP', r.status, txt);
       toast(`Einstellungen konnten nicht in SharePoint gespeichert werden (${r.status})`, 'error');
+    } else {
+      console.log('[persistSpSettings] gespeichert, eTag war:', eTag);
     }
   } catch(e) {
     console.warn('[persistSpSettings]', e.message);
