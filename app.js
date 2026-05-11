@@ -1639,11 +1639,15 @@ function initWizard() {
     }
   }
   // Reset fields
-  ['Title','Beschreibung','Warengruppe','Prioritaet','Mengeneinheit',
+  ['Title','Beschreibung','Warengruppe','Mengeneinheit',
    'Mindestlagermenge','Termin','Artikelnummer','Lieferant','Lieferant2','Lieferant3','Lieferant4',
    'GeschaetzterPreis','Kostenstelle']
     .forEach(k => { const el = $id('f-'+k); if(el) el.value = ''; });
+  const prioEl = $id('f-Prioritaet'); if (prioEl) prioEl.value = 'Normal'; // Standardwert
   const mengeEl = $id('f-Menge'); if (mengeEl) mengeEl.value = '1'; // Standardwert
+  // Reset submit button in case previous submission left it in a loading state
+  const submitBtn = $id('btn-submit');
+  if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = '✓ Anfrage einreichen'; }
   const firstRadio = document.querySelector('input[name=Beschaffungslogik]');
   if (firstRadio) firstRadio.checked = true;
   document.querySelectorAll('#beschaffungslogik-extra-cards .check-card').forEach(c => c.classList.remove('selected'));
@@ -1713,6 +1717,8 @@ function wNext(step) {
   } else if (step === 3) {
     const lieferant = $id('f-Lieferant').value.trim();
     if (!lieferant) { toast('Bitte mindestens Lieferant 1 angeben.', 'error'); return; }
+    const extraSelected = document.querySelector('#beschaffungslogik-extra-cards .check-card.selected');
+    if (!extraSelected) { toast('Bitte unter „Zusätzlich kombinierbar" eine Option auswählen.', 'error'); return; }
     wizardData.step3 = {
       Beschaffungslogik: [
         document.querySelector('input[name=Beschaffungslogik]:checked')?.value || '',
@@ -2633,7 +2639,7 @@ function renderPanel(item, editMode = false) {
     else if (fd.key === 'Termin' || fd.key === 'Lieferdatum') display = fmtDate(raw);
     else if (fd.key === 'Menge' || fd.key === 'Mindestlagermenge') {
       const n = parseFloat(raw);
-      display = isNaN(n) ? String(raw) : n.toLocaleString('de-DE', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+      display = isNaN(n) ? String(raw) : n.toLocaleString('de-DE', { minimumFractionDigits: 0, maximumFractionDigits: 3 });
     }
     return `<div class="pf-row">${lbl}<span class="pf-val">${esc(display)}</span></div>`;
   };
