@@ -129,7 +129,9 @@
             <div class="form-grid">
               <div class="form-group full">
                 <label>Artikelnummer</label>
-                <input type="text" id="f-Artikelnummer" placeholder="z. B. 4001-00010" oninput="lookupTID(this.value)" autocomplete="off"/>
+                <div class="tid-ac-wrap">
+                  <input type="text" id="f-Artikelnummer" placeholder="z. B. 4001-00010 oder Bezeichnung…" oninput="lookupTID(this.value)" autocomplete="off"/>
+                </div>
                 <div class="tid-match" id="tid-match" style="display:none"></div>
                 <div class="field-hint" id="hint-Artikelnummer"></div>
               </div>
