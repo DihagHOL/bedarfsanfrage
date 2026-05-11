@@ -3047,11 +3047,14 @@ async function openPanel(itemId) {
     if (/^eingereicht$/i.test(sv)) {
       const target = statusChoices.find(c => /pr[üu]fung/i.test(c) && /verkauf/i.test(c))
                   || 'In Prüfung (Verkauf)';
-      console.log('[auto-advance] Eingereicht gefunden → target=', JSON.stringify(target));
+      console.log('[auto-advance] sv=', JSON.stringify(sv), 'statusCol=', statusCol, 'target=', target, 'choices=', statusChoices);
       try {
         await gPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, { [statusCol]: target });
+        // Optimistisch allItems sofort aktualisieren (Graph-Cache umgehen)
+        const cached = allItems.find(i => String(i.id) === String(itemId));
+        if (cached?.fields) cached.fields[statusCol] = target;
         advanced = true;
-        console.log('[auto-advance] PATCH erfolgreich');
+        console.log('[auto-advance] PATCH OK → ' + target);
       } catch(e) {
         console.error('[auto-advance] PATCH fehlgeschlagen:', e.message);
         toast('Status-Update fehlgeschlagen: ' + e.message, 'error');
@@ -3064,6 +3067,8 @@ async function openPanel(itemId) {
       if (inBestKey) {
         try {
           await gPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, { [statusCol]: inBestKey });
+          const cached = allItems.find(i => String(i.id) === String(itemId));
+          if (cached?.fields) cached.fields[statusCol] = inBestKey;
           advanced = true;
         } catch(e) { console.warn('[openPanel] auto-advance Freigegeben failed:', e.message); }
       }
