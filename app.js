@@ -1206,7 +1206,15 @@ function statusTimeline(statusVal, item) {
   const TERMINAL_OK      = /^(freigegeben|bestellt)$/i;
   const IN_BESTELLG      = /^in bestellung$/i;
 
-  const rows = source.map(choiceVal => {
+  // Sort source by logical workflow order (TIMELINE_STAGES index), not SP choice order.
+  // Stages not found in TIMELINE_STAGES (unknown/custom) go at the end.
+  const stageIndex = cv => {
+    const idx = TIMELINE_STAGES.findIndex(d => d.test(cv.trim()));
+    return idx === -1 ? 999 : idx;
+  };
+  const sortedSource = [...source].sort((a, b) => stageIndex(a) - stageIndex(b));
+
+  const rows = sortedSource.map(choiceVal => {
     const cv        = choiceVal.trim();
     const isCurrent = cv.toLowerCase() === svLow;
 
