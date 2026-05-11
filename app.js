@@ -1478,35 +1478,55 @@ async function saveBeschData(itemId) {
 const TID_ENTRIES = Object.entries(TID_MAP); // pre-built for fast filtering
 
 function initTidAutocomplete(inputEl, getRelatedInput) {
-  // getRelatedInput(key) → input element for 'Title' or 'Warengruppe' sibling fields
-  const dropdown = inputEl.closest('.tid-ac-wrap')?.querySelector('.tid-ac-dropdown');
-  if (!dropdown) return;
-
+  // Dropdown appended to <body> with position:fixed to escape panel overflow clipping
+  let dropdown = null;
   let activeIdx = -1;
 
-  function hide() { dropdown.style.display = 'none'; activeIdx = -1; }
+  function getOrCreateDropdown() {
+    if (!dropdown) {
+      dropdown = document.createElement('div');
+      dropdown.className = 'tid-ac-dropdown';
+      dropdown.style.cssText = 'display:none;position:fixed;z-index:9999';
+      document.body.appendChild(dropdown);
+    }
+    return dropdown;
+  }
+
+  function reposition() {
+    if (!dropdown || dropdown.style.display === 'none') return;
+    const r = inputEl.getBoundingClientRect();
+    dropdown.style.left  = r.left + 'px';
+    dropdown.style.top   = (r.bottom + 2) + 'px';
+    dropdown.style.width = r.width + 'px';
+  }
+
+  function hide() {
+    if (dropdown) dropdown.style.display = 'none';
+    activeIdx = -1;
+  }
 
   function show(items) {
     if (!items.length) { hide(); return; }
     activeIdx = -1;
-    dropdown.innerHTML = items.slice(0, 12).map(([ tid, h ], i) =>
+    const dd = getOrCreateDropdown();
+    dd.innerHTML = items.slice(0, 12).map(([ tid, h ], i) =>
       `<div class="tid-ac-item" data-tid="${esc(tid)}" data-idx="${i}">
         <span class="tid-ac-nr">${esc(tid)}</span>
         <span class="tid-ac-name">${esc(h.b)}</span>
         <span class="tid-ac-wg">${esc(h.w)}</span>
       </div>`
     ).join('');
-    dropdown.style.display = 'block';
-    dropdown.querySelectorAll('.tid-ac-item').forEach(el => {
+    dd.querySelectorAll('.tid-ac-item').forEach(el => {
       el.addEventListener('mousedown', e => { e.preventDefault(); selectItem(el.dataset.tid); });
     });
+    dd.style.display = 'block';
+    reposition();
   }
 
   function selectItem(tid) {
     const hit = TID_MAP[tid];
     if (!hit) return;
     inputEl.value = tid;
-    // Auto-fill related fields if they exist and are empty or match a previous auto-fill
     const titleEl = getRelatedInput?.('Title');
     const wgEl    = getRelatedInput?.('Warengruppe');
     if (titleEl && !titleEl.dataset.manual) titleEl.value = hit.b;
@@ -1519,7 +1539,6 @@ function initTidAutocomplete(inputEl, getRelatedInput) {
         wgEl.add(new Option(hit.w, hit.w)); wgEl.value = hit.w;
       } else if (wgEl.tagName === 'INPUT') { wgEl.value = hit.w; }
     }
-    // Show inline confirmation
     const confirm = inputEl.closest('.tid-ac-wrap')?.querySelector('.tid-ac-confirm');
     if (confirm) confirm.textContent = '✓ ' + hit.b + ' · ' + hit.w;
     hide();
@@ -1535,8 +1554,8 @@ function initTidAutocomplete(inputEl, getRelatedInput) {
   });
 
   inputEl.addEventListener('keydown', e => {
+    if (!dropdown || dropdown.style.display === 'none') return;
     const items = dropdown.querySelectorAll('.tid-ac-item');
-    if (!items.length) return;
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       activeIdx = Math.min(activeIdx + 1, items.length - 1);
@@ -1548,12 +1567,18 @@ function initTidAutocomplete(inputEl, getRelatedInput) {
     } else if (e.key === 'Enter' && activeIdx >= 0) {
       e.preventDefault();
       selectItem(items[activeIdx]?.dataset.tid);
-    } else if (e.key === 'Escape') {
-      hide();
-    }
+    } else if (e.key === 'Escape') { hide(); }
   });
 
+  // Reposition on scroll/resize; hide on blur
   inputEl.addEventListener('blur', () => setTimeout(hide, 150));
+  window.addEventListener('scroll', reposition, true);
+  window.addEventListener('resize', reposition);
+
+  // Cleanup when input is removed from DOM (panel close/re-render)
+  new MutationObserver(() => {
+    if (!document.contains(inputEl)) { hide(); if (dropdown) dropdown.remove(); dropdown = null; }
+  }).observe(document.body, { childList: true, subtree: true });
 }
 
 // ── WIZARD ────────────────────────────────────────────────────────────────────

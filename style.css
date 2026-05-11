@@ -346,9 +346,8 @@ body {
 /* ── Artikelnummer autocomplete ── */
 .tid-ac-wrap       { position: relative; flex: 1; }
 .tid-ac-wrap .pf-input { width: 100%; }
-.tid-ac-dropdown   { position: absolute; top: 100%; left: 0; right: 0; z-index: 200;
-  background: #fff; border: 1px solid #d1d5db; border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0,0,0,.12); max-height: 260px; overflow-y: auto; margin-top: 2px; }
+.tid-ac-dropdown   { background: #fff; border: 1px solid #d1d5db; border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.15); max-height: 260px; overflow-y: auto; }
 .tid-ac-item       { display: flex; align-items: baseline; gap: 8px; padding: 7px 10px;
   cursor: pointer; font-size: .82rem; border-bottom: 1px solid #f3f4f6; }
 .tid-ac-item:last-child  { border-bottom: none; }
