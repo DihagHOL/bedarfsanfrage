@@ -996,6 +996,22 @@ details#attach-extra-wrap[open] .attach-more-toggle { color:#374151; }
 .multi-pos-del-placeholder { width: 28px; flex-shrink: 0; }
 
 /* Shared review classes used by multi wizard */
+/* Positionen-Tabelle im Panel */
+.pos-table-wrap { overflow-x: auto; margin-top: 6px; }
+.pos-table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+.pos-th {
+  text-align: left; padding: 5px 8px;
+  background: #f1f5f9; color: #475569;
+  font-weight: 600; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em;
+  border-bottom: 1px solid #e2e8f0;
+}
+.pos-td { padding: 5px 8px; border-bottom: 1px solid #f1f5f9; color: #1e293b; vertical-align: top; }
+.pos-table tbody tr:last-child .pos-td { border-bottom: none; }
+.pos-table tbody tr:hover .pos-td { background: #f8fafc; }
+.pos-nr { width: 32px; text-align: center; color: #94a3b8 !important; }
+.pos-bez { min-width: 140px; }
+.pos-right { text-align: right; }
+
 .review-section-title {
   font-size: .75rem; font-weight: 700; text-transform: uppercase;
   letter-spacing: .05em; color: #9ca3af; margin-bottom: 7px;

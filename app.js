@@ -3637,6 +3637,39 @@ function renderPanel(item, editMode = false) {
         ${fRow(FORM_FIELDS.find(f=>f.key==='Kostenstelle'),     'text')}
         ${gesamtHint ? `<div class="info-box info" style="margin-top:8px;font-size:.78rem">${gesamtHint}</div>` : ''}
       </div>
+      ${(() => {
+        const posRaw = gv('Positionen');
+        if (!posRaw) return '';
+        let positions;
+        try { positions = JSON.parse(posRaw); } catch { return ''; }
+        if (!Array.isArray(positions) || positions.length === 0) return '';
+        const rows = positions.map(p => `
+          <tr>
+            <td class="pos-td pos-nr">${p.Nr ?? ''}</td>
+            <td class="pos-td">${esc(String(p.Artikelnummer || '–'))}</td>
+            <td class="pos-td">${esc(String(p.ExterneArtikelnummer || '–'))}</td>
+            <td class="pos-td pos-bez">${esc(String(p.Bezeichnung || '–'))}</td>
+            <td class="pos-td pos-right">${esc(String(p.Menge || '–'))}</td>
+            <td class="pos-td">${esc(String(p.ME || '–'))}</td>
+          </tr>`).join('');
+        return `
+        <div class="pf-section">
+          <div class="pf-sec-title">Positionen (${positions.length})</div>
+          <div class="pos-table-wrap">
+            <table class="pos-table">
+              <thead><tr>
+                <th class="pos-th pos-nr">#</th>
+                <th class="pos-th">Artikel-Nr.</th>
+                <th class="pos-th">Ext. Artikel-Nr.</th>
+                <th class="pos-th pos-bez">Bezeichnung</th>
+                <th class="pos-th pos-right">Menge</th>
+                <th class="pos-th">ME</th>
+              </tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </div>`;
+      })()}
       <div class="pf-section">
         <div class="pf-sec-title">Status &amp; Genehmigung</div>
         <div id="panel-approval-body">${approvalInner}</div>
