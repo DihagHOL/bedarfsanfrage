@@ -1161,28 +1161,24 @@ function statusTimeline(statusVal, item) {
   const sv     = (statusVal || '').trim();
   const fields = item?.fields || item || {};
 
-  // Source: ONLY real SP choices. If not loaded yet, show just the current status —
-  // never fall back to the hardcoded TIMELINE_STAGES labels (they contain invented
-  // stages like "Genehmigt (Einkauf)" that may not exist in the SP list).
-  const source = statusChoices.length ? statusChoices : [sv];
+  // Source: real SP choices only, deduplicated (SP list sometimes has duplicate entries).
+  // Fallback to [sv] if not yet loaded — never use hardcoded TIMELINE_STAGES labels.
+  const seen   = new Set();
+  const source = (statusChoices.length ? statusChoices : [sv])
+    .filter(c => { const k = c.trim().toLowerCase(); return k && !seen.has(k) && seen.add(k); });
 
   const svLow            = sv.toLowerCase();
-  const currentIdx       = source.findIndex(c => c.trim().toLowerCase() === svLow);
   const isRej            = /^abgelehnt$/i.test(sv);
   const isBestelltNow    = /^bestellt$/i.test(sv);
   const isFreigegebenNow = /^freigegeben$/i.test(sv);
   const TERMINAL_OK      = /^(freigegeben|bestellt)$/i;
   const IN_BESTELLG      = /^in bestellung$/i;
 
-  const rows = source.map((choiceVal, idx) => {
+  const rows = source.map(choiceVal => {
     const cv        = choiceVal.trim();
     const isCurrent = cv.toLowerCase() === svLow;
-    // For normal flow: past = before current in SP order.
-    // For rejected items: DON'T use index — "Abgelehnt" sits at the end of the SP
-    // choice list so index-based "past" would mark Freigegeben etc. as reached.
-    const isPast = !isRej && currentIdx >= 0 && idx < currentIdx;
 
-    // Use TIMELINE_STAGES only to look up approver/comment field names for this choice
+    // Look up approver/comment field names from TIMELINE_STAGES
     const tsd      = TIMELINE_STAGES.find(d => d.test(cv));
     const approver = resolvePersonField(fields, tsd?.approverField);
     const comment  = tsd?.commentField ? String(fields[tsd.commentField] || '').trim() : '';
@@ -1190,16 +1186,23 @@ function statusTimeline(statusVal, item) {
     const isInBestellungFuture = IN_BESTELLG.test(cv) && isFreigegebenNow;
     const isInBestellungPast   = IN_BESTELLG.test(cv) && isBestelltNow;
 
-    // For rejected items use approverField presence instead of index order —
-    // only stages whose approver field was actually filled by the workflow are shown.
-    // This is safe: source = real SP choices, so no invented stage like
-    // "Genehmigt (Einkauf)" can sneak in via a shared approverField.
+    // Visibility rules — NO index-based "past" (index order is meaningless for
+    // branching workflows; "Abgelehnt" sits after "Freigegeben" in SP list order
+    // which would falsely mark it as reached for "Bestellt" items, etc.)
+    //
+    // A stage is shown when:
+    //   • It is the current status                   → always
+    //   • It is "Eingereicht"                        → always (first step, always happened)
+    //   • Its approverField was filled by workflow   → stage was actually reached
+    //     EXCEPT: skip "Genehmigt"-labelled stages for rejected items
+    //     (item was rejected, not approved, even if the field was filled earlier)
+    //   • "In Bestellung" special cases
+    const isGenehmigt = /genehmigt/i.test(cv);
     const visible = isCurrent
-      || isPast
       || /^eingereicht$/i.test(cv)
       || isInBestellungFuture
       || isInBestellungPast
-      || (isRej && approver != null);
+      || (approver != null && !(isRej && isGenehmigt));
 
     if (!visible) return null;
 
@@ -2339,11 +2342,25 @@ function compactRow(item) {
 }
 
 // ── SPLIT PANEL ───────────────────────────────────────────────────────────────
-function openPanel(itemId) {
+async function openPanel(itemId) {
   if (!['mine','all','dashboard'].includes(currentView)) { navigate('detail', itemId); return; }
   panelItemId = String(itemId);
   const item  = allItems.find(i => String(i.id) === panelItemId);
   if (!item) return;
+
+  // Auto-advance: when status is "Freigegeben", immediately set it to "In Bestellung"
+  // so the Einkauf team can start processing. Only do this outside "Meine Anfragen".
+  if (currentView !== 'mine' && /^freigegeben$/i.test((getStatusVal(item) || '').trim())) {
+    const statusCol = resolvedFields['Status'] || 'Status';
+    const inBestKey = statusChoices.find(c => /^in bestellung$/i.test(c.trim()));
+    if (inBestKey) {
+      try {
+        await gPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, { [statusCol]: inBestKey });
+        if (item.fields) item.fields[statusCol] = inBestKey;
+        console.log('[openPanel] Status auto-advanced: Freigegeben → In Bestellung');
+      } catch(e) { console.warn('[openPanel] auto-advance failed:', e.message); }
+    }
+  }
 
   $id(`panel-${currentView}-content`).innerHTML = renderPanel(item);
   $id(`panel-${currentView}`).classList.remove('hidden');
