@@ -3036,17 +3036,29 @@ async function openPanel(itemId) {
   const item  = allItems.find(i => String(i.id) === panelItemId);
   if (!item) return;
 
-  // Auto-advance: when status is "Freigegeben", immediately set it to "In Bestellung"
-  // so the Einkauf team can start processing. Only do this outside "Meine Anfragen".
-  if (currentView !== 'mine' && /^freigegeben$/i.test((getStatusVal(item) || '').trim())) {
+  if (currentView !== 'mine') {
+    const sv        = (getStatusVal(item) || '').trim();
     const statusCol = resolvedFields['Status'] || 'Status';
-    const inBestKey = statusChoices.find(c => /^in bestellung$/i.test(c.trim()));
-    if (inBestKey) {
+
+    // Auto-advance: Eingereicht → In Prüfung (Einkauf)
+    if (/^eingereicht$/i.test(sv)) {
+      const target = statusChoices.find(c => /pr[üu]fung/i.test(c) && /einkauf/i.test(c) && !/strategisch/i.test(c))
+                  || 'In Prüfung (Einkauf)';
       try {
-        await gPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, { [statusCol]: inBestKey });
-        if (item.fields) item.fields[statusCol] = inBestKey;
-        console.log('[openPanel] Status auto-advanced: Freigegeben → In Bestellung');
-      } catch(e) { console.warn('[openPanel] auto-advance failed:', e.message); }
+        await gPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, { [statusCol]: target });
+        if (item.fields) item.fields[statusCol] = target;
+      } catch(e) { console.warn('[openPanel] auto-advance Eingereicht failed:', e.message); }
+    }
+
+    // Auto-advance: Freigegeben → In Bestellung
+    if (/^freigegeben$/i.test(sv)) {
+      const inBestKey = statusChoices.find(c => /^in bestellung$/i.test(c.trim()));
+      if (inBestKey) {
+        try {
+          await gPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, { [statusCol]: inBestKey });
+          if (item.fields) item.fields[statusCol] = inBestKey;
+        } catch(e) { console.warn('[openPanel] auto-advance Freigegeben failed:', e.message); }
+      }
     }
   }
 
@@ -3602,7 +3614,8 @@ function renderPanel(item, editMode = false) {
       <div class="pf-section">
         <div class="pf-sec-title">Beschaffungsdetails</div>
         ${fRow(FORM_FIELDS.find(f=>f.key==='Beschaffungslogik'),'text', BL_OPTS)}
-        ${fRow(FORM_FIELDS.find(f=>f.key==='Artikelnummer'),    'text')}
+        ${fRow(FORM_FIELDS.find(f=>f.key==='Artikelnummer'),         'text')}
+        ${fRow(FORM_FIELDS.find(f=>f.key==='ExterneArtikelnummer'), 'text')}
         ${fRow(FORM_FIELDS.find(f=>f.key==='Lieferant'),        'text')}
         ${fRow(FORM_FIELDS.find(f=>f.key==='GeschaetzterPreis'),'number')}
         ${fRow(FORM_FIELDS.find(f=>f.key==='Kostenstelle'),     'text')}
