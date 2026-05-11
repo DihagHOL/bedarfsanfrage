@@ -538,7 +538,8 @@ textarea.pf-input { resize: vertical; min-height: 52px; }
 .ap-ok      { background: #dcfce7; color: #15803d; }
 .ap-no      { background: #fee2e2; color: #b91c1c; }
 .ap-pending { background: #dbeafe; color: #1d4ed8; font-weight: 700; }
-.ap-circle  { background: #eff6ff; color: #1d4ed8; font-size: 1rem; }
+.ap-circle        { background: #eff6ff; color: #1d4ed8; font-size: 1rem; }
+.ap-circle-future { background: #f3f4f6; color: #9ca3af; font-size: 1rem; }
 .ap-neutral { background: #f3f4f6; color: #9ca3af; border: 1px solid #e5e7eb; }
 /* Einkauf modal – collapsible extra Angebote */
 .attach-more-toggle { font-size:.82rem; color:#1a56db; cursor:pointer; list-style:none; }

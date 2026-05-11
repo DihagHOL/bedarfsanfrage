@@ -1160,12 +1160,14 @@ function statusTimeline(statusVal, item) {
     const comment   = d.commentField ? String(fields[d.commentField] || '').trim() : '';
 
     // ── Visibility ────────────────────────────────────────────────────────
-    // "In Bestellung" is shown as a passed step when current status is "Bestellt"
-    const isInBestellungPast = d.label === 'In Bestellung' && isBestelltNow;
-    const visible = d.label === 'Eingereicht' // always
-      || isCurrent                            // active step
-      || approver != null                     // field filled → stage was reached
-      || isInBestellungPast;                  // "In Bestellung" passed when now "Bestellt"
+    const isFreigegebenNow     = /^freigegeben$/i.test(sv);
+    const isInBestellungFuture = d.label === 'In Bestellung' && isFreigegebenNow;
+    const isInBestellungPast   = d.label === 'In Bestellung' && isBestelltNow;
+    const visible = d.label === 'Eingereicht'  // always
+      || isCurrent                             // active step
+      || approver != null                      // field filled → stage was reached
+      || isInBestellungPast                    // passed when now "Bestellt"
+      || isInBestellungFuture;                 // upcoming when now "Freigegeben"
     if (!visible) return null;
 
     // ── Dot / class ───────────────────────────────────────────────────────
@@ -1175,8 +1177,10 @@ function statusTimeline(statusVal, item) {
       else if (IN_BESTELLG.test(d.label)) { dot = '○'; cls = 'ap-circle';  }
       else if (isRej)                     { dot = '✗'; cls = 'ap-no';      }
       else                                { dot = '●'; cls = 'ap-pending'; }
+    } else if (isInBestellungFuture) {
+      dot = '○'; cls = 'ap-circle-future';    // upcoming, not yet reached
     } else {
-      dot = '✓'; cls = 'ap-ok'; // past stage
+      dot = '✓'; cls = 'ap-ok';               // past stage
     }
 
     // ── Approver + comment ────────────────────────────────────────────────
