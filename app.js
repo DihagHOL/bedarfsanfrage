@@ -2733,9 +2733,12 @@ function renderPanel(item, editMode = false) {
   const lockBadge   = isLocked && !lockedByMe
     ? `<span class="panel-lock-badge">🔒 ${esc(lockData.by)} bearbeitet gerade</span>` : '';
 
+  const canEdit = /pr[üu]fung/i.test(statusVal) && /einkauf/i.test(statusVal) && !/strategisch/i.test(statusVal);
   const editBtn = isMineView ? '' : (isLocked && !lockedByMe)
     ? `<button class="btn btn-outline btn-sm" disabled title="Gesperrt von ${esc(lockData.by)}">🔒 Gesperrt</button>`
-    : `<button class="btn btn-outline btn-sm" id="panel-edit">✏️ Bearbeiten</button>`;
+    : canEdit
+      ? `<button class="btn btn-outline btn-sm" id="panel-edit">✏️ Bearbeiten</button>`
+      : `<button class="btn btn-outline btn-sm" disabled title="Nur bei Status 'In Prüfung (Einkauf)' möglich">✏️ Bearbeiten</button>`;
 
   const buttons = editMode
     ? `${orderBtn}
