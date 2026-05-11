@@ -2642,18 +2642,21 @@ function renderMultiPositions() {
     initTidAutocomplete(inp, key => {
       if (key === 'Artikelnummer') return inp;
       if (key === 'Title') {
-        // Return a proxy object that sets bezeichnung in multiPositions
+        // Proxy: sets this row's Bezeichnung
         return {
           get value() { return multiPositions[idx]?.bezeichnung || ''; },
           set value(v) {
             if (multiPositions[idx]) {
               multiPositions[idx].bezeichnung = v;
-              // update the bez input visually
               const bezEl = document.querySelector(`.mpos-bez[data-idx="${idx}"]`);
               if (bezEl) bezEl.value = v;
             }
           }
         };
+      }
+      if (key === 'Warengruppe') {
+        // Fill global Warengruppe in step 2
+        return $id('mf-Warengruppe');
       }
       return null;
     });
