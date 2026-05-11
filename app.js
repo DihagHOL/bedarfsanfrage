@@ -1590,7 +1590,7 @@ function initTidAutocomplete(inputEl, getRelatedInput) {
     inputEl.value = tid;
     const titleEl = getRelatedInput?.('Title');
     const wgEl    = getRelatedInput?.('Warengruppe');
-    if (titleEl && !titleEl.dataset.manual) titleEl.value = hit.b;
+    if (titleEl && !titleEl.dataset?.manual) titleEl.value = hit.b;
     if (wgEl) {
       let found = false;
       for (const opt of (wgEl.options || [])) {
