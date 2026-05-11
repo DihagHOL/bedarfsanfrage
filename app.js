@@ -31,7 +31,7 @@ const FORM_FIELDS = [
   { key:'Lieferant2',        label:'Lieferant 2 (Alternative)',    step:3, alsoTry:['Vendor2','Supplier2','Lieferant_2'] },
   { key:'Lieferant3',        label:'Lieferant 3 (Alternative)',    step:3, alsoTry:['Vendor3','Supplier3','Lieferant_3'] },
   { key:'Lieferant4',        label:'Lieferant 4 (Alternative)',    step:3, alsoTry:['Vendor4','Supplier4','Lieferant_4'] },
-  { key:'GeschaetzterPreis',    label:'Geschätzter Preis',            step:3, alsoTry:['EstimatedPrice','Preis','Price','Gesch_x00e4_tzterPreisnetto_x002'] },
+  { key:'GeschaetzterPreis',    label:'Bestellvolumen in €',          step:3, alsoTry:['EstimatedPrice','Preis','Price','Gesch_x00e4_tzterPreisnetto_x002'] },
   { key:'Kostenstelle',         label:'Kostenstelle',                 step:3, alsoTry:['CostCenter'] },
   { key:'LeadBuyerAbschluss',   label:'Lead-Buyer-Abschluss',         step:3, alsoTry:['LeadBuyer','LeadBuyerAbschlus'] },
 ];
@@ -1087,7 +1087,10 @@ const TIMELINE_STAGES = [
     test: v => /^freigegeben$/i.test(v),
     approverField: null, commentField: null },
   { label: 'In Bestellung',
-    test: v => /bestellung|bestellt/i.test(v),
+    test: v => /in bestellung/i.test(v),
+    approverField: null, commentField: null },
+  { label: 'Bestellt',
+    test: v => /^bestellt$/i.test(v),
     approverField: null, commentField: null },
   { label: 'Abgelehnt',
     test: v => /^abgelehnt$/i.test(v),
@@ -1121,6 +1124,7 @@ const WORKFLOW_STAGES = [
   'In Prüfung (Controlling)',
   'In Prüfung (strategischer Einkauf)',
   'Freigegeben',
+  'In Bestellung',
   'Bestellt',
 ];
 
@@ -1145,8 +1149,10 @@ function statusColorFor(val) {
 function statusTimeline(statusVal, item) {
   const sv     = (statusVal || '').trim();
   const fields = item?.fields || item || {};
-  const isRej  = /^abgelehnt$/i.test(sv);
-  const TERMINAL_OK = /^(freigegeben|in bestellung|bestellt)$/i;
+  const isRej       = /^abgelehnt$/i.test(sv);
+  const isBestelltNow = /^bestellt$/i.test(sv);
+  const TERMINAL_OK = /^(freigegeben|bestellt)$/i;
+  const IN_BESTELLG = /^in bestellung$/i;
 
   const rows = TIMELINE_STAGES.map(d => {
     const isCurrent = d.test(sv);
@@ -1154,19 +1160,23 @@ function statusTimeline(statusVal, item) {
     const comment   = d.commentField ? String(fields[d.commentField] || '').trim() : '';
 
     // ── Visibility ────────────────────────────────────────────────────────
+    // "In Bestellung" is shown as a passed step when current status is "Bestellt"
+    const isInBestellungPast = d.label === 'In Bestellung' && isBestelltNow;
     const visible = d.label === 'Eingereicht' // always
       || isCurrent                            // active step
-      || approver != null;                    // field filled → stage was reached
+      || approver != null                     // field filled → stage was reached
+      || isInBestellungPast;                  // "In Bestellung" passed when now "Bestellt"
     if (!visible) return null;
 
     // ── Dot / class ───────────────────────────────────────────────────────
     let dot, cls;
     if (isCurrent) {
       if      (TERMINAL_OK.test(d.label)) { dot = '✓'; cls = 'ap-ok';      }
+      else if (IN_BESTELLG.test(d.label)) { dot = '○'; cls = 'ap-circle';  }
       else if (isRej)                     { dot = '✗'; cls = 'ap-no';      }
       else                                { dot = '●'; cls = 'ap-pending'; }
     } else {
-      dot = '✓'; cls = 'ap-ok'; // past stage with approver present
+      dot = '✓'; cls = 'ap-ok'; // past stage
     }
 
     // ── Approver + comment ────────────────────────────────────────────────
@@ -1178,8 +1188,8 @@ function statusTimeline(statusVal, item) {
       approverHtml = `<div class="ap-approver${pastCls}">👤 ${esc(approver)}${commentHtml}</div>`;
     }
 
-    const bold = (isCurrent && !TERMINAL_OK.test(d.label) && !isRej)
-      ? ' style="font-weight:600"' : '';
+    const isActive = isCurrent && !TERMINAL_OK.test(d.label) && !IN_BESTELLG.test(d.label) && !isRej;
+    const bold = isActive ? ' style="font-weight:600"' : '';
     return `<div class="approval-stage"><div class="ap-dot ${cls}">${dot}</div>`
          + `<div class="ap-body"><div class="ap-stage-label"${bold}>${esc(d.label)}</div>${approverHtml}</div></div>`;
   }).filter(Boolean);
@@ -1395,7 +1405,7 @@ function openBeschModal(itemId) {
       <input type="text" id="b-lieferant2" value="${esc(gv('Lieferant2'))}" placeholder="optional"/>
     </div>
     <div class="form-group" style="margin-bottom:12px">
-      <label>Geschätzter Preis</label>
+      <label>Bestellvolumen in €</label>
       <input type="number" id="b-preis" value="${esc(String(gv('GeschaetzterPreis')))}" min="0" step="0.01" placeholder="0,00"/>
     </div>
     <div class="form-group">
@@ -1745,7 +1755,7 @@ function buildReview() {
         ['Lieferant 2', d.Lieferant2],
         ['Lieferant 3', d.Lieferant3],
         ['Lieferant 4', d.Lieferant4],
-        ['Geschätzter Preis', d.GeschaetzterPreis ? fmtEuro(d.GeschaetzterPreis) : null],
+        ['Bestellvolumen in €', d.GeschaetzterPreis ? fmtEuro(d.GeschaetzterPreis) : null],
         ['Kostenstelle', d.Kostenstelle],
       ])}
     </div>
@@ -2186,7 +2196,11 @@ function bindPanelEvents(itemId) {
 
   pq('#panel-close')?.addEventListener('click', closePanel);
   pq('#panel-order')?.addEventListener('click', () => openOrderModal(itemId));
-  pq('#panel-besch')?.addEventListener('click', () => openBeschModal(itemId));
+  pq('#panel-save')?.addEventListener('click', () => savePanelEdits(itemId, panelRoot));
+  pq('#panel-cancel')?.addEventListener('click', () => {
+    const item = allItems.find(i => String(i.id) === String(itemId));
+    if (item) { panelRoot.innerHTML = renderPanel(item); bindPanelEvents(itemId); }
+  });
 
   // Approvers are read directly from item.fields — no async history load needed.
 
@@ -2207,6 +2221,51 @@ function bindPanelEvents(itemId) {
           : '<span class="no-order">Keine Anhänge.</span>';
       })
       .catch(() => { attachEl.innerHTML = '<span class="no-order">Anhänge konnten nicht geladen werden.</span>'; });
+  }
+
+  // Load SP list item comments (modern SharePoint comments via REST v2.1)
+  const commentsSection = pq('#panel-comments-section');
+  const commentsEl      = pq('#panel-comments-body');
+  if (commentsEl && siteId && listId) {
+    // SP REST v2.1 accepts the Graph compound site ID (hostname,siteGuid,webGuid)
+    getSpToken()
+      .then(tok => fetch(
+        `${SP_BASE}/_api/v2.1/sites/${siteId}/lists/${listId}/items/${itemId}/comments?$top=50&_=${Date.now()}`,
+        { headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json',
+            'Cache-Control': 'no-cache', Pragma: 'no-cache' } }
+      ))
+      .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+      .then(data => {
+        const comments = data?.value || [];
+        if (!comments.length) {
+          // Hide section when no comments — keeps panel clean
+          if (commentsSection) commentsSection.style.display = 'none';
+          return;
+        }
+        if (commentsSection) commentsSection.style.display = '';
+        commentsEl.innerHTML = comments.map(c => {
+          const author = c.author?.name || c.author?.loginName || '–';
+          const text   = String(c.text || '').trim();
+          const dt     = c.createdDateTime ? fmtDateTime(c.createdDateTime) : '';
+          const replies = (c.replies || []).map(r => {
+            const ra = r.author?.name || r.author?.loginName || '–';
+            const rt = String(r.text || '').trim();
+            const rd = r.createdDateTime ? fmtDateTime(r.createdDateTime) : '';
+            return `<div class="pf-comment-reply"><span class="pf-comment-author">↪ ${esc(ra)}</span><span class="pf-comment-meta">${esc(rd)}</span><div class="pf-comment-text">${esc(rt)}</div></div>`;
+          }).join('');
+          return `<div class="pf-comment-row">
+            <div class="pf-comment-header"><span class="pf-comment-author">💬 ${esc(author)}</span><span class="pf-comment-meta">${esc(dt)}</span></div>
+            <div class="pf-comment-text">${esc(text)}</div>
+            ${replies}
+          </div>`;
+        }).join('');
+      })
+      .catch(err => {
+        console.warn('[comments] Fehler beim Laden:', err.message);
+        if (commentsSection) commentsSection.style.display = 'none';
+      });
+  } else if (commentsSection) {
+    commentsSection.style.display = 'none';
   }
 
   pq('#panel-history')?.addEventListener('click', () => {
@@ -2320,6 +2379,35 @@ function bindPanelEditEvents(itemId) {
   });
 }
 
+async function savePanelEdits(itemId, panelRoot) {
+  const data = {};
+  (panelRoot || document).querySelectorAll('.pf-input[data-key]').forEach(inp => {
+    data[inp.dataset.key] = inp.value;
+  });
+  const fields = buildFields(data, FORM_FIELDS);
+  if (!Object.keys(fields).length) return;
+
+  const btn = panelRoot?.querySelector('#panel-save') || $id('panel-save');
+  if (btn) { btn.disabled = true; btn.textContent = 'Speichert…'; }
+
+  const patch = { ...fields };
+  const skipped = [];
+  for (let i = 0; i < 15; i++) {
+    try {
+      await gPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, patch);
+      if (skipped.length) toast(`Gespeichert (übersprungen: ${skipped.join(', ')})`, 'info');
+      else toast('Gespeichert ✓', 'success');
+      await loadItems(false);
+      return;
+    } catch(e) {
+      const m = e.message.match(/Field '([^']+)' (?:is not recognized|does not exist)/i);
+      if (!m) { toast('Fehler: ' + e.message, 'error'); if (btn) { btn.disabled=false; btn.textContent='💾 Speichern'; } return; }
+      skipped.push(m[1]); delete patch[m[1]];
+    }
+  }
+  toast('Fehler: Zu viele unbekannte Felder.', 'error');
+}
+
 async function saveEdits(itemId) {
   const data = {};
   document.querySelectorAll('.pf-input[data-key]').forEach(inp => {
@@ -2388,6 +2476,8 @@ function buildApprovalInner(item, statusVal) {
 
 function renderPanel(item, editMode = false) {
   const statusVal = getStatusVal(item) || 'Eingereicht';
+  const isInPruefungEinkauf = /pr[üu]fung/i.test(statusVal) && /einkauf/i.test(statusVal) && !/strategisch/i.test(statusVal);
+  if (isInPruefungEinkauf) editMode = true;
   const createdBy = item.createdBy?.user?.displayName || item.createdBy?.user?.email || '–';
   const createdAt = item.createdDateTime ? fmtDate(item.createdDateTime) : '–';
 
@@ -2417,7 +2507,9 @@ function renderPanel(item, editMode = false) {
         inp = `<textarea class="pf-input" data-key="${fd.key}" rows="2">${esc(String(raw))}</textarea>`;
       } else {
         const val = type === 'date' ? dv(raw) : esc(String(raw));
-        inp = `<input type="${type}" class="pf-input" data-key="${fd.key}" value="${val}"/>`;
+        const isTsd = fd.key === 'Menge' || fd.key === 'Mindestlagermenge';
+        const stepAttr = type === 'number' ? (isTsd ? ' step="0.001"' : ' step="0.01"') : '';
+        inp = `<input type="${type}" class="pf-input" data-key="${fd.key}" value="${val}"${stepAttr}/>`;
       }
       return `<div class="pf-row">${lbl}${inp}</div>`;
     }
@@ -2425,6 +2517,10 @@ function renderPanel(item, editMode = false) {
     let display = String(raw);
     if (fd.key === 'GeschaetzterPreis' || fd.key === 'TatsaechlicherPreis') display = fmtEuro(raw);
     else if (fd.key === 'Termin' || fd.key === 'Lieferdatum') display = fmtDate(raw);
+    else if (fd.key === 'Menge' || fd.key === 'Mindestlagermenge') {
+      const n = parseFloat(raw);
+      display = isNaN(n) ? String(raw) : n.toLocaleString('de-DE', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+    }
     return `<div class="pf-row">${lbl}<span class="pf-val">${esc(display)}</span></div>`;
   };
 
@@ -2437,11 +2533,16 @@ function renderPanel(item, editMode = false) {
   const tatPreis = gv('TatsaechlicherPreis');
 
   const isFreigegeben = /^freigegeben$/i.test((statusVal || '').trim());
-  const buttons = `${isFreigegeben
-      ? `<button class="btn btn-outline btn-sm" id="panel-order">📦 Einkauf-Daten</button>`
-      : `<button class="btn btn-outline btn-sm" id="panel-order" disabled title="Nur bei Status 'Freigegeben' möglich">📦 Einkauf-Daten</button>`}
-     <button class="btn btn-outline btn-sm" id="panel-besch">✏️ Beschaffung</button>
-     <button class="btn btn-outline btn-sm" id="panel-history">📋 Verlauf</button>`;
+  const orderBtn = isFreigegeben
+    ? `<button class="btn btn-outline btn-sm" id="panel-order">📦 Einkauf-Daten</button>`
+    : `<button class="btn btn-outline btn-sm" id="panel-order" disabled title="Nur bei Status 'Freigegeben' möglich">📦 Einkauf-Daten</button>`;
+  const buttons = editMode
+    ? `${orderBtn}
+       <button class="btn btn-primary btn-sm" id="panel-save">💾 Speichern</button>
+       <button class="btn btn-ghost btn-sm" id="panel-cancel">✕ Abbrechen</button>
+       <button class="btn btn-outline btn-sm" id="panel-history">📋 Verlauf</button>`
+    : `${orderBtn}
+       <button class="btn btn-outline btn-sm" id="panel-history">📋 Verlauf</button>`;
 
   const approvalInner = buildApprovalInner(item, statusVal);
 
@@ -2494,6 +2595,10 @@ function renderPanel(item, editMode = false) {
         ${lieferd  ? `<div class="pf-row"><span class="pf-label">Lieferdatum</span><span class="pf-val">${fmtDate(lieferd)}</span></div>` : ''}
         ${tatPreis ? `<div class="pf-row"><span class="pf-label">Tatsächl. Preis</span><span class="pf-val">${fmtEuro(tatPreis)}</span></div>` : ''}
         ${!orderNr && !lieferd && !tatPreis ? '<p class="no-order">Noch keine Bestelldaten.</p>' : ''}
+      </div>
+      <div class="pf-section" id="panel-comments-section">
+        <div class="pf-sec-title">Kommentare</div>
+        <div id="panel-comments-body"><div class="vh-loading">Lädt…</div></div>
       </div>
       <div class="pf-section" id="panel-attach-section">
         <div class="pf-sec-title">Anhänge</div>

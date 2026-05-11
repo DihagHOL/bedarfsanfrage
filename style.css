@@ -538,6 +538,7 @@ textarea.pf-input { resize: vertical; min-height: 52px; }
 .ap-ok      { background: #dcfce7; color: #15803d; }
 .ap-no      { background: #fee2e2; color: #b91c1c; }
 .ap-pending { background: #dbeafe; color: #1d4ed8; font-weight: 700; }
+.ap-circle  { background: #eff6ff; color: #1d4ed8; font-size: 1rem; }
 .ap-neutral { background: #f3f4f6; color: #9ca3af; border: 1px solid #e5e7eb; }
 /* Einkauf modal – collapsible extra Angebote */
 .attach-more-toggle { font-size:.82rem; color:#1a56db; cursor:pointer; list-style:none; }
@@ -590,6 +591,16 @@ details#attach-extra-wrap[open] .attach-more-toggle { color:#374151; }
 .su-del  { background: none; border: none; cursor: pointer; color: #9ca3af; font-size: .95rem; padding: 2px 4px; border-radius: 4px; line-height: 1; }
 .su-del:hover { background: #fee2e2; color: #dc2626; }
 .su-token-btn { font-size: .72rem !important; padding: 2px 7px !important; white-space: nowrap; }
+
+/* ── Panel comments section ── */
+.pf-comment-row { padding: 8px 0; border-bottom: 1px solid #f1f5f9; }
+.pf-comment-row:last-child { border-bottom: none; }
+.pf-comment-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.pf-comment-author { font-size: .78rem; font-weight: 600; color: #374151; }
+.pf-comment-meta   { font-size: .72rem; color: #9ca3af; }
+.pf-comment-text   { font-size: .84rem; color: #1e2939; word-break: break-word; background: #f8fafc; border-left: 3px solid #e2e8f0; padding: 5px 9px; border-radius: 0 4px 4px 0; }
+.pf-comment-reply  { margin-top: 6px; padding-left: 16px; display: flex; flex-direction: column; gap: 2px; }
+.pf-comment-reply .pf-comment-author { color: #6b7280; font-weight: 500; }
 .su-select { padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: .84rem; }
 
 /* ── PDF Viewer Modal ── */
