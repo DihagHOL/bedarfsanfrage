@@ -2226,47 +2226,68 @@ function bindPanelEvents(itemId) {
   // Load SP list item comments (modern SharePoint comments via REST v2.1)
   const commentsSection = pq('#panel-comments-section');
   const commentsEl      = pq('#panel-comments-body');
-  if (commentsEl && siteId && listId) {
-    // SP REST v2.1 accepts the Graph compound site ID (hostname,siteGuid,webGuid)
-    getSpToken()
+
+  function renderComments(comments) {
+    if (!comments.length) {
+      if (commentsSection) commentsSection.style.display = '';  // keep visible so user can write
+      commentsEl.innerHTML = '<span class="no-order">Noch keine Kommentare.</span>';
+      return;
+    }
+    if (commentsSection) commentsSection.style.display = '';
+    commentsEl.innerHTML = comments.map(c => {
+      const author = c.author?.name || c.author?.loginName || '–';
+      const text   = String(c.text || '').trim();
+      const dt     = c.createdDateTime ? fmtDateTime(c.createdDateTime) : '';
+      const replies = (c.replies || []).map(r => {
+        const ra = r.author?.name || r.author?.loginName || '–';
+        const rt = String(r.text || '').trim();
+        const rd = r.createdDateTime ? fmtDateTime(r.createdDateTime) : '';
+        return `<div class="pf-comment-reply"><span class="pf-comment-author">↪ ${esc(ra)}</span><span class="pf-comment-meta">${esc(rd)}</span><div class="pf-comment-text">${esc(rt)}</div></div>`;
+      }).join('');
+      return `<div class="pf-comment-row">
+        <div class="pf-comment-header"><span class="pf-comment-author">💬 ${esc(author)}</span><span class="pf-comment-meta">${esc(dt)}</span></div>
+        <div class="pf-comment-text">${esc(text)}</div>
+        ${replies}
+      </div>`;
+    }).join('');
+  }
+
+  function loadComments() {
+    if (!commentsEl || !siteId || !listId) { if (commentsSection) commentsSection.style.display = ''; return; }
+    return getSpToken()
       .then(tok => fetch(
         `${SP_BASE}/_api/v2.1/sites/${siteId}/lists/${listId}/items/${itemId}/comments?$top=50&_=${Date.now()}`,
         { headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json',
             'Cache-Control': 'no-cache', Pragma: 'no-cache' } }
       ))
       .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
-      .then(data => {
-        const comments = data?.value || [];
-        if (!comments.length) {
-          // Hide section when no comments — keeps panel clean
-          if (commentsSection) commentsSection.style.display = 'none';
-          return;
-        }
-        if (commentsSection) commentsSection.style.display = '';
-        commentsEl.innerHTML = comments.map(c => {
-          const author = c.author?.name || c.author?.loginName || '–';
-          const text   = String(c.text || '').trim();
-          const dt     = c.createdDateTime ? fmtDateTime(c.createdDateTime) : '';
-          const replies = (c.replies || []).map(r => {
-            const ra = r.author?.name || r.author?.loginName || '–';
-            const rt = String(r.text || '').trim();
-            const rd = r.createdDateTime ? fmtDateTime(r.createdDateTime) : '';
-            return `<div class="pf-comment-reply"><span class="pf-comment-author">↪ ${esc(ra)}</span><span class="pf-comment-meta">${esc(rd)}</span><div class="pf-comment-text">${esc(rt)}</div></div>`;
-          }).join('');
-          return `<div class="pf-comment-row">
-            <div class="pf-comment-header"><span class="pf-comment-author">💬 ${esc(author)}</span><span class="pf-comment-meta">${esc(dt)}</span></div>
-            <div class="pf-comment-text">${esc(text)}</div>
-            ${replies}
-          </div>`;
-        }).join('');
-      })
+      .then(data => renderComments(data?.value || []))
       .catch(err => {
-        console.warn('[comments] Fehler beim Laden:', err.message);
-        if (commentsSection) commentsSection.style.display = 'none';
+        console.warn('[comments] Fehler:', err.message);
+        if (commentsSection) commentsSection.style.display = '';
+        if (commentsEl) commentsEl.innerHTML = '<span class="no-order">Kommentare konnten nicht geladen werden.</span>';
       });
-  } else if (commentsSection) {
-    commentsSection.style.display = 'none';
   }
+
+  loadComments();
+
+  // Send button — post new comment then reload
+  pq('#panel-comment-send')?.addEventListener('click', async () => {
+    const inp = pq('#panel-comment-input');
+    const text = inp?.value?.trim();
+    if (!text) return;
+    const btn = pq('#panel-comment-send');
+    btn.disabled = true; btn.textContent = '…';
+    const ok = await postSpComment(itemId, text);
+    btn.disabled = false; btn.textContent = '💬 Senden';
+    if (ok) { if (inp) inp.value = ''; await loadComments(); }
+    else toast('Kommentar konnte nicht gespeichert werden.', 'error');
+  });
+
+  // Ctrl+Enter shortcut in textarea
+  pq('#panel-comment-input')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && e.ctrlKey) pq('#panel-comment-send')?.click();
+  });
 
   pq('#panel-history')?.addEventListener('click', () => {
     const sec = pq('#panel-history-section');
@@ -2475,8 +2496,9 @@ function buildApprovalInner(item, statusVal) {
 }
 
 function renderPanel(item, editMode = false) {
+  const isMineView = currentView === 'mine';
   const statusVal = getStatusVal(item) || 'Eingereicht';
-  const isInPruefungEinkauf = /pr[üu]fung/i.test(statusVal) && /einkauf/i.test(statusVal) && !/strategisch/i.test(statusVal);
+  const isInPruefungEinkauf = !isMineView && /pr[üu]fung/i.test(statusVal) && /einkauf/i.test(statusVal) && !/strategisch/i.test(statusVal);
   if (isInPruefungEinkauf) editMode = true;
   const createdBy = item.createdBy?.user?.displayName || item.createdBy?.user?.email || '–';
   const createdAt = item.createdDateTime ? fmtDate(item.createdDateTime) : '–';
@@ -2533,7 +2555,7 @@ function renderPanel(item, editMode = false) {
   const tatPreis = gv('TatsaechlicherPreis');
 
   const isFreigegeben = /^freigegeben$/i.test((statusVal || '').trim());
-  const orderBtn = isFreigegeben
+  const orderBtn = isMineView ? '' : isFreigegeben
     ? `<button class="btn btn-outline btn-sm" id="panel-order">📦 Einkauf-Daten</button>`
     : `<button class="btn btn-outline btn-sm" id="panel-order" disabled title="Nur bei Status 'Freigegeben' möglich">📦 Einkauf-Daten</button>`;
   const buttons = editMode
@@ -2599,6 +2621,10 @@ function renderPanel(item, editMode = false) {
       <div class="pf-section" id="panel-comments-section">
         <div class="pf-sec-title">Kommentare</div>
         <div id="panel-comments-body"><div class="vh-loading">Lädt…</div></div>
+        <div class="pf-comment-compose">
+          <textarea id="panel-comment-input" class="pf-comment-textarea" rows="2" placeholder="Kommentar schreiben…"></textarea>
+          <button class="btn btn-sm btn-primary" id="panel-comment-send">💬 Senden</button>
+        </div>
       </div>
       <div class="pf-section" id="panel-attach-section">
         <div class="pf-sec-title">Anhänge</div>
@@ -2640,6 +2666,21 @@ function spFullUrl(relUrl) {
     seg.replace(/#/g, '%23').replace(/\?/g, '%3F').replace(/ /g, '%20')
   ).join('/');
   return 'https://' + SP_SITE.split(':/')[0] + safe;
+}
+
+async function postSpComment(itemId, text) {
+  if (!text?.trim() || !siteId || !listId) return false;
+  try {
+    const tok = await getSpToken();
+    const r = await fetch(
+      `${SP_BASE}/_api/v2.1/sites/${siteId}/lists/${listId}/items/${itemId}/comments`,
+      { method: 'POST',
+        headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json',
+          Accept: 'application/json', 'Cache-Control': 'no-cache' },
+        body: JSON.stringify({ text: text.trim() }) }
+    );
+    return r.ok;
+  } catch { return false; }
 }
 
 function openAttachment(relUrl) {

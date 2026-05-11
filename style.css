@@ -601,6 +601,10 @@ details#attach-extra-wrap[open] .attach-more-toggle { color:#374151; }
 .pf-comment-text   { font-size: .84rem; color: #1e2939; word-break: break-word; background: #f8fafc; border-left: 3px solid #e2e8f0; padding: 5px 9px; border-radius: 0 4px 4px 0; }
 .pf-comment-reply  { margin-top: 6px; padding-left: 16px; display: flex; flex-direction: column; gap: 2px; }
 .pf-comment-reply .pf-comment-author { color: #6b7280; font-weight: 500; }
+.pf-comment-compose { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.pf-comment-textarea { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: .84rem; font-family: inherit; resize: vertical; color: #1e2939; }
+.pf-comment-textarea:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 2px rgba(99,102,241,.15); }
+.pf-comment-compose .btn { align-self: flex-end; }
 .su-select { padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: .84rem; }
 
 /* ── PDF Viewer Modal ── */
