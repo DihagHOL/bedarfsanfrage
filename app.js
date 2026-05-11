@@ -43,6 +43,10 @@ const EINKAUF_FIELDS = [
   { key:'TatsaechlicherPreis', label:'Tatsächlicher Preis (€)', alsoTry:['ActualPrice','FinalPrice'] },
 ];
 
+// Kommentarfeld — separates SP-Listenfeld "Kommentare" (Mehrere Textzeilen)
+// Format jedes Eintrags: "[DD.MM.YYYY HH:MM – Autor]: Text\n---\n"
+const KOMMENTAR_FIELD = { key: 'Kommentare', alsoTry: ['Comments', 'Kommentar'] };
+
 // Status-Werte → Darstellung (kommt von Power Automate)
 // Reihenfolge wichtig: spezifischere (exakte) Werte zuerst, Fallback-Partials am Ende
 const STATUS_STYLES = {
@@ -1330,6 +1334,11 @@ async function saveOrderData(itemId) {
   add('Bestellnummer', orderNr);
   if (delivery) add('Lieferdatum', toSpDate(delivery, resolvedFields['Lieferdatum'] || 'Lieferdatum'));
   if (price) add('TatsaechlicherPreis', parseFloat(price));
+  // Wenn Bestellnummer vergeben → Status auf "Bestellt" setzen
+  if (orderNr) {
+    const statusCol = resolvedFields['Status'] || 'Status';
+    if (statusCol) patch[statusCol] = 'Bestellt';
+  }
 
   const hasFields = Object.keys(patch).length > 0;
   if (!hasFields && !files.length) { closeModal(); return; }
@@ -2227,51 +2236,26 @@ function bindPanelEvents(itemId) {
       .catch(() => { attachEl.innerHTML = '<span class="no-order">Anhänge konnten nicht geladen werden.</span>'; });
   }
 
-  // Load SP list item comments (modern SharePoint comments via REST v2.1)
+  // Kommentare aus SP-Listenfeld lesen (Mehrere Textzeilen, Format: "[Datum – Autor]: Text\n---\n")
   const commentsSection = pq('#panel-comments-section');
   const commentsEl      = pq('#panel-comments-body');
 
-  function renderComments(comments) {
-    if (!comments.length) {
-      if (commentsSection) commentsSection.style.display = '';  // keep visible so user can write
+  function loadComments() {
+    if (!commentsEl) return;
+    if (commentsSection) commentsSection.style.display = '';
+    const cur  = allItems.find(i => String(i.id) === String(itemId));
+    const raw  = getField(cur, getKommentarCol());
+    const entries = parseKommentare(raw);
+    if (!entries.length) {
       commentsEl.innerHTML = '<span class="no-order">Noch keine Kommentare.</span>';
       return;
     }
-    if (commentsSection) commentsSection.style.display = '';
-    commentsEl.innerHTML = comments.map(c => {
-      const author = c.author?.name || c.author?.loginName || '–';
-      const text   = String(c.text || '').trim();
-      const dt     = c.createdDateTime ? fmtDateTime(c.createdDateTime) : '';
-      const replies = (c.replies || []).map(r => {
-        const ra = r.author?.name || r.author?.loginName || '–';
-        const rt = String(r.text || '').trim();
-        const rd = r.createdDateTime ? fmtDateTime(r.createdDateTime) : '';
-        return `<div class="pf-comment-reply"><span class="pf-comment-author">↪ ${esc(ra)}</span><span class="pf-comment-meta">${esc(rd)}</span><div class="pf-comment-text">${esc(rt)}</div></div>`;
-      }).join('');
-      return `<div class="pf-comment-row">
-        <div class="pf-comment-header"><span class="pf-comment-author">💬 ${esc(author)}</span><span class="pf-comment-meta">${esc(dt)}</span></div>
-        <div class="pf-comment-text">${esc(text)}</div>
-        ${replies}
-      </div>`;
-    }).join('');
-  }
-
-  function loadComments() {
-    if (!commentsEl || !siteId || !listId) { if (commentsSection) commentsSection.style.display = ''; return; }
-    const spSiteGuid = siteId.split(',')[1] || siteId;
-    return getSpToken()
-      .then(tok => fetch(
-        `${SP_BASE}/_api/v2.1/sites('${spSiteGuid}')/lists('${listId}')/items(${itemId})/comments?$top=50&_=${Date.now()}`,
-        { headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json',
-            'Cache-Control': 'no-cache', Pragma: 'no-cache' } }
-      ))
-      .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
-      .then(data => renderComments(data?.value || []))
-      .catch(err => {
-        console.warn('[comments] Fehler:', err.message);
-        if (commentsSection) commentsSection.style.display = '';
-        if (commentsEl) commentsEl.innerHTML = '<span class="no-order">Kommentare konnten nicht geladen werden.</span>';
-      });
+    commentsEl.innerHTML = [...entries].reverse().map(c =>
+      `<div class="pf-comment-row">
+        <div class="pf-comment-header"><span class="pf-comment-author">💬 ${esc(c.header || '–')}</span></div>
+        <div class="pf-comment-text">${esc(c.text)}</div>
+      </div>`
+    ).join('');
   }
 
   loadComments();
@@ -2646,20 +2630,44 @@ function spFullUrl(relUrl) {
   return 'https://' + SP_SITE.split(':/')[0] + safe;
 }
 
+function getKommentarCol() {
+  // Try resolved name first, then fallbacks
+  const col = resolvedFields[KOMMENTAR_FIELD.key];
+  if (col) return col;
+  for (const t of [KOMMENTAR_FIELD.key, ...KOMMENTAR_FIELD.alsoTry]) {
+    if (colByKey[t]) return t;
+  }
+  return KOMMENTAR_FIELD.key; // fallback — will fail gracefully
+}
+
+function parseKommentare(raw) {
+  if (!raw) return [];
+  return String(raw).split('\n---\n').map(s => s.trim()).filter(Boolean).map(entry => {
+    const m = entry.match(/^\[(.+?)\]:\s*([\s\S]*)$/);
+    if (m) return { header: m[1], text: m[2].trim() };
+    return { header: '', text: entry };
+  });
+}
+
 async function postSpComment(itemId, text) {
-  if (!text?.trim() || !siteId || !listId) return false;
-  const spSiteGuid = siteId.split(',')[1] || siteId;
+  if (!text?.trim()) return false;
+  const col = getKommentarCol();
+  const item = allItems.find(i => String(i.id) === String(itemId));
+  const existing = String(getField(item, col) || '').trim();
+  const author = account?.name || account?.username || 'Unbekannt';
+  const now = new Date();
+  const dt = now.toLocaleString('de-DE', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
+  const newEntry = `[${dt} – ${author}]: ${text.trim()}`;
+  const combined = existing ? existing + '\n---\n' + newEntry : newEntry;
   try {
-    const tok = await getSpToken();
-    const r = await fetch(
-      `${SP_BASE}/_api/v2.1/sites('${spSiteGuid}')/lists('${listId}')/items(${itemId})/comments`,
-      { method: 'POST',
-        headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json',
-          Accept: 'application/json', 'Cache-Control': 'no-cache' },
-        body: JSON.stringify({ text: text.trim() }) }
-    );
-    return r.ok;
-  } catch { return false; }
+    await gPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, { [col]: combined });
+    // Update local cache so re-render is instant
+    if (item?.fields) item.fields[col] = combined;
+    return true;
+  } catch(e) {
+    console.warn('[comments] Speichern fehlgeschlagen:', e.message);
+    return false;
+  }
 }
 
 function openAttachment(relUrl) {
