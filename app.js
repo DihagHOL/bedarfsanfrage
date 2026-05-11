@@ -87,6 +87,12 @@ let colByKey   = {};  // internal name → column definition (from SP)
 let spUserMap  = {};  // SP user id (string) → display name (for Person-column LookupId resolution)
 let resolvedFields = {};  // FORM_FIELDS key → actual SP internal name (null if not found)
 let statusChoices = []; // All SP Status column choices in order (populated in discoverSP)
+
+// ── EDIT LOCK ─────────────────────────────────────────────────────────────────
+// Stores a "user|ISO-expires" value in a SP list field to prevent concurrent edits.
+const LOCK_FIELD_CANDIDATES = ['BearbeitungsSperre', 'EditLock', 'Bearbeitungssperre'];
+let _lockField  = undefined; // undefined = not yet resolved; '' = field not in SP
+let lockTimers  = {};        // itemId (string) → timeout handle
 let currentView = 'dashboard';
 let prevView    = 'dashboard';
 let wizardData  = {};
@@ -2361,10 +2367,15 @@ function bindPanelEvents(itemId) {
   const panelRoot = $id(`panel-${currentView}-content`);
   const pq = sel => panelRoot?.querySelector(sel);
 
-  pq('#panel-close')?.addEventListener('click', closePanel);
+  pq('#panel-close')?.addEventListener('click', async () => {
+    await releaseLock(itemId);
+    closePanel();
+  });
+  pq('#panel-edit')?.addEventListener('click', () => startEditMode(itemId));
   pq('#panel-order')?.addEventListener('click', () => openOrderModal(itemId));
   pq('#panel-save')?.addEventListener('click', () => savePanelEdits(itemId, panelRoot));
-  pq('#panel-cancel')?.addEventListener('click', () => {
+  pq('#panel-cancel')?.addEventListener('click', async () => {
+    await releaseLock(itemId);
     const item = allItems.find(i => String(i.id) === String(itemId));
     if (item) { panelRoot.innerHTML = renderPanel(item); bindPanelEvents(itemId); }
   });
@@ -2565,6 +2576,7 @@ async function savePanelEdits(itemId, panelRoot) {
   for (let i = 0; i < 15; i++) {
     try {
       await gPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, patch);
+      await releaseLock(itemId); // clear edit lock on successful save
       if (skipped.length) toast(`Gespeichert (übersprungen: ${skipped.join(', ')})`, 'info');
       else toast('Gespeichert ✓', 'success');
       await loadItems(false);
@@ -2619,10 +2631,8 @@ function buildApprovalInner(item, statusVal) {
 
 function renderPanel(item, editMode = false) {
   const isMineView = currentView === 'mine';
-  const statusVal = getStatusVal(item) || 'Eingereicht';
-  const isInPruefungEinkauf = !isMineView && /pr[üu]fung/i.test(statusVal) && /einkauf/i.test(statusVal) && !/strategisch/i.test(statusVal);
-  if (isInPruefungEinkauf) editMode = true;
-  const createdBy = item.createdBy?.user?.displayName || item.createdBy?.user?.email || '–';
+  const statusVal  = getStatusVal(item) || 'Eingereicht';
+  const createdBy  = item.createdBy?.user?.displayName || item.createdBy?.user?.email || '–';
   const createdAt = item.createdDateTime ? fmtDate(item.createdDateTime) : '–';
 
   const gv  = key => getField(item, resolvedFields[key] || key) ?? '';
@@ -2690,12 +2700,26 @@ function renderPanel(item, editMode = false) {
   const orderBtn = isMineView ? '' : isFreigegeben
     ? `<button class="btn btn-outline btn-sm" id="panel-order">📦 Einkauf-Daten</button>`
     : `<button class="btn btn-outline btn-sm" id="panel-order" disabled title="Nur bei Status 'Freigegeben' möglich">📦 Einkauf-Daten</button>`;
+
+  // Lock state for the edit button
+  const lockField   = getLockField();
+  const lockData    = parseLock(lockField ? (getField(item, lockField) || '') : '');
+  const isLocked    = lockData && lockData.expiresAt > new Date();
+  const me          = account?.name || account?.username || '';
+  const lockedByMe  = isLocked && lockData.by === me;
+  const lockBadge   = isLocked && !lockedByMe
+    ? `<span class="panel-lock-badge">🔒 ${esc(lockData.by)} bearbeitet gerade</span>` : '';
+
+  const editBtn = isMineView ? '' : (isLocked && !lockedByMe)
+    ? `<button class="btn btn-outline btn-sm" disabled title="Gesperrt von ${esc(lockData.by)}">🔒 Gesperrt</button>`
+    : `<button class="btn btn-outline btn-sm" id="panel-edit">✏️ Bearbeiten</button>`;
+
   const buttons = editMode
     ? `${orderBtn}
        <button class="btn btn-primary btn-sm" id="panel-save">💾 Speichern</button>
        <button class="btn btn-ghost btn-sm" id="panel-cancel">✕ Abbrechen</button>
        <button class="btn btn-outline btn-sm" id="panel-history">📋 Verlauf</button>`
-    : `${orderBtn}
+    : `${editBtn} ${orderBtn}
        <button class="btn btn-outline btn-sm" id="panel-history">📋 Verlauf</button>`;
 
   const approvalInner = buildApprovalInner(item, statusVal);
@@ -2712,6 +2736,7 @@ function renderPanel(item, editMode = false) {
       </div>
       <div class="panel-title">${esc(gv('Title') || '–')}</div>
       <div class="panel-byline">von ${esc(createdBy)} · ${createdAt}</div>
+      ${lockBadge}
       <div class="panel-actions">${buttons}</div>
     </div>
 
@@ -2838,6 +2863,78 @@ async function postSpComment(itemId, text) {
     console.warn('[comments] Speichern fehlgeschlagen:', e.message);
     return false;
   }
+}
+
+// ── LOCK HELPERS ──────────────────────────────────────────────────────────────
+function getLockField() {
+  if (_lockField !== undefined) return _lockField;
+  for (const n of LOCK_FIELD_CANDIDATES) { if (colByKey[n]) { _lockField = n; return n; } }
+  _lockField = ''; return '';
+}
+function parseLock(raw) {
+  if (!raw) return null;
+  const i = String(raw).indexOf('|');
+  if (i < 0) return null;
+  const expiresAt = new Date(String(raw).slice(i + 1));
+  return isNaN(expiresAt.getTime()) ? null : { by: String(raw).slice(0, i), expiresAt };
+}
+async function tryAcquireLock(itemId) {
+  const field = getLockField();
+  const item  = allItems.find(i => String(i.id) === String(itemId));
+  const me    = account?.name || account?.username || 'Unbekannt';
+  if (field && item) {
+    const lock = parseLock(getField(item, field));
+    if (lock && lock.expiresAt > new Date() && lock.by !== me) {
+      const mins = Math.ceil((lock.expiresAt - new Date()) / 60000);
+      toast(`Wird von „${lock.by}" bearbeitet – noch ${mins} Min. gesperrt.`, 'error');
+      return false;
+    }
+    const until = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+    try {
+      await gPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, { [field]: `${me}|${until}` });
+      if (item.fields) item.fields[field] = `${me}|${until}`;
+    } catch(e) { console.warn('[lock] acquire failed (field may not exist in SP):', e.message); }
+  }
+  if (lockTimers[itemId]) clearTimeout(lockTimers[itemId]);
+  lockTimers[String(itemId)] = setTimeout(() => autoReleaseLock(itemId), 15 * 60 * 1000);
+  return true;
+}
+async function releaseLock(itemId) {
+  const key = String(itemId);
+  if (lockTimers[key]) { clearTimeout(lockTimers[key]); delete lockTimers[key]; }
+  const field = getLockField();
+  if (!field) return;
+  const item = allItems.find(i => String(i.id) === key);
+  const me   = account?.name || account?.username || 'Unbekannt';
+  const lock = parseLock(getField(item, field));
+  if (!lock || lock.by !== me) return; // never release someone else's lock
+  try {
+    await gPatch(`/sites/${siteId}/lists/${listId}/items/${key}/fields`, { [field]: '' });
+    if (item?.fields) item.fields[field] = '';
+  } catch(e) { console.warn('[lock] release failed:', e.message); }
+}
+async function autoReleaseLock(itemId) {
+  const key = String(itemId);
+  delete lockTimers[key];
+  await releaseLock(key);
+  if (String(panelItemId) === key) {
+    const item      = allItems.find(i => String(i.id) === key);
+    const panelRoot = $id(`panel-${currentView}-content`);
+    if (item && panelRoot) {
+      toast('Bearbeitungssperre abgelaufen (15 Min.) – Bearbeitungsmodus beendet.', 'info');
+      panelRoot.innerHTML = renderPanel(item);
+      bindPanelEvents(key);
+    }
+  }
+}
+async function startEditMode(itemId) {
+  const ok = await tryAcquireLock(itemId);
+  if (!ok) return;
+  const item      = allItems.find(i => String(i.id) === String(itemId));
+  const panelRoot = $id(`panel-${currentView}-content`);
+  if (!item || !panelRoot) return;
+  panelRoot.innerHTML = renderPanel(item, true);
+  bindPanelEvents(itemId);
 }
 
 function openAttachment(relUrl) {

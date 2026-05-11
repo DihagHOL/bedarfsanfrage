@@ -318,8 +318,14 @@ body {
 }
 .panel-close:hover { background: #f3f4f6; color: #374151; }
 .panel-title   { font-size: 1rem; font-weight: 700; color: #1e2939; margin-bottom: 2px; }
-.panel-byline  { font-size: .75rem; color: #9ca3af; margin-bottom: 10px; }
-.panel-actions { display: flex; gap: 7px; }
+.panel-byline  { font-size: .75rem; color: #9ca3af; margin-bottom: 6px; }
+.panel-lock-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: .75rem; color: #92400e; background: #fef3c7;
+  border: 1px solid #fcd34d; border-radius: 20px;
+  padding: 2px 10px; margin-bottom: 8px;
+}
+.panel-actions { display: flex; gap: 7px; flex-wrap: wrap; }
 
 .panel-body { padding: 0 18px 24px; }
 
