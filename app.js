@@ -1472,6 +1472,90 @@ async function saveBeschData(itemId) {
   toast('Fehler: Zu viele unbekannte Felder.', 'error');
 }
 
+// ── ARTIKELNUMMER AUTOCOMPLETE ────────────────────────────────────────────────
+// Shared between wizard (lookupTID) and panel edit mode (initTidAutocomplete).
+// Searches TID_MAP by number prefix OR name substring.
+const TID_ENTRIES = Object.entries(TID_MAP); // pre-built for fast filtering
+
+function initTidAutocomplete(inputEl, getRelatedInput) {
+  // getRelatedInput(key) → input element for 'Title' or 'Warengruppe' sibling fields
+  const dropdown = inputEl.closest('.tid-ac-wrap')?.querySelector('.tid-ac-dropdown');
+  if (!dropdown) return;
+
+  let activeIdx = -1;
+
+  function hide() { dropdown.style.display = 'none'; activeIdx = -1; }
+
+  function show(items) {
+    if (!items.length) { hide(); return; }
+    activeIdx = -1;
+    dropdown.innerHTML = items.slice(0, 12).map(([ tid, h ], i) =>
+      `<div class="tid-ac-item" data-tid="${esc(tid)}" data-idx="${i}">
+        <span class="tid-ac-nr">${esc(tid)}</span>
+        <span class="tid-ac-name">${esc(h.b)}</span>
+        <span class="tid-ac-wg">${esc(h.w)}</span>
+      </div>`
+    ).join('');
+    dropdown.style.display = 'block';
+    dropdown.querySelectorAll('.tid-ac-item').forEach(el => {
+      el.addEventListener('mousedown', e => { e.preventDefault(); selectItem(el.dataset.tid); });
+    });
+  }
+
+  function selectItem(tid) {
+    const hit = TID_MAP[tid];
+    if (!hit) return;
+    inputEl.value = tid;
+    // Auto-fill related fields if they exist and are empty or match a previous auto-fill
+    const titleEl = getRelatedInput?.('Title');
+    const wgEl    = getRelatedInput?.('Warengruppe');
+    if (titleEl && !titleEl.dataset.manual) titleEl.value = hit.b;
+    if (wgEl) {
+      let found = false;
+      for (const opt of (wgEl.options || [])) {
+        if (opt.value === hit.w) { wgEl.value = hit.w; found = true; break; }
+      }
+      if (!found && wgEl.tagName === 'SELECT') {
+        wgEl.add(new Option(hit.w, hit.w)); wgEl.value = hit.w;
+      } else if (wgEl.tagName === 'INPUT') { wgEl.value = hit.w; }
+    }
+    // Show inline confirmation
+    const confirm = inputEl.closest('.tid-ac-wrap')?.querySelector('.tid-ac-confirm');
+    if (confirm) confirm.textContent = '✓ ' + hit.b + ' · ' + hit.w;
+    hide();
+  }
+
+  inputEl.addEventListener('input', () => {
+    const q = inputEl.value.trim().toLowerCase();
+    if (q.length < 2) { hide(); return; }
+    const matches = TID_ENTRIES.filter(([tid, h]) =>
+      tid.toLowerCase().includes(q) || h.b.toLowerCase().includes(q)
+    );
+    show(matches);
+  });
+
+  inputEl.addEventListener('keydown', e => {
+    const items = dropdown.querySelectorAll('.tid-ac-item');
+    if (!items.length) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      activeIdx = Math.min(activeIdx + 1, items.length - 1);
+      items.forEach((el, i) => el.classList.toggle('tid-ac-active', i === activeIdx));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      activeIdx = Math.max(activeIdx - 1, 0);
+      items.forEach((el, i) => el.classList.toggle('tid-ac-active', i === activeIdx));
+    } else if (e.key === 'Enter' && activeIdx >= 0) {
+      e.preventDefault();
+      selectItem(items[activeIdx]?.dataset.tid);
+    } else if (e.key === 'Escape') {
+      hide();
+    }
+  });
+
+  inputEl.addEventListener('blur', () => setTimeout(hide, 150));
+}
+
 // ── WIZARD ────────────────────────────────────────────────────────────────────
 function lookupTID(val) {
   const tid = (val || '').trim().toUpperCase();
@@ -2215,6 +2299,12 @@ function bindPanelEvents(itemId) {
     if (item) { panelRoot.innerHTML = renderPanel(item); bindPanelEvents(itemId); }
   });
 
+  // Artikelnummer autocomplete in edit mode
+  const tidInput = pq('[data-ac="tid"]');
+  if (tidInput) {
+    initTidAutocomplete(tidInput, key => pq(`.pf-input[data-key="${key}"]`));
+  }
+
   // Approvers are read directly from item.fields — no async history load needed.
 
   // Load attachments — scoped to this panel
@@ -2489,6 +2579,16 @@ function renderPanel(item, editMode = false) {
         inp = `<select class="pf-input" data-key="${fd.key}">${optHtml}</select>`;
       } else if (type === 'textarea') {
         inp = `<textarea class="pf-input" data-key="${fd.key}" rows="2">${esc(String(raw))}</textarea>`;
+      } else if (fd.key === 'Artikelnummer') {
+        const val = esc(String(raw));
+        const hit = TID_MAP[String(raw).trim().toUpperCase()] || null;
+        const hint = hit ? `<div class="tid-ac-confirm">✓ ${esc(hit.b)} · ${esc(hit.w)}</div>` : '';
+        inp = `<div class="tid-ac-wrap">
+          <input type="text" class="pf-input" data-key="Artikelnummer" data-ac="tid"
+            value="${val}" autocomplete="off" placeholder="Nr. oder Bezeichnung…"/>
+          <div class="tid-ac-dropdown" style="display:none"></div>
+          ${hint}
+        </div>`;
       } else {
         const val = type === 'date' ? dv(raw) : esc(String(raw));
         const isTsd = fd.key === 'Menge' || fd.key === 'Mindestlagermenge';
