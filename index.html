@@ -42,6 +42,10 @@
         <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd"/></svg>
         Neue Anfrage
       </a>
+      <a href="#" class="nav-item" data-view="multi">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"/></svg>
+        Sammelanfrage
+      </a>
       <a href="#" class="nav-item" data-view="mine">
         <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"/></svg>
         Meine Anfragen
@@ -335,6 +339,174 @@
               <button class="btn btn-success" id="btn-submit" onclick="submitRequest()">✓ Anfrage einreichen</button>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- SAMMELANFRAGE (multi-position wizard) -->
+      <div id="view-multi" class="view">
+        <div class="wizard-wrap">
+          <div class="wizard-header">
+            <div class="wizard-steps" id="mwizard-steps">
+              <div class="wstep active" data-mstep="1"><span>1</span>Positionen</div>
+              <div class="wstep" data-mstep="2"><span>2</span>Allgemein</div>
+              <div class="wstep" data-mstep="3"><span>3</span>Beschaffung</div>
+              <div class="wstep" data-mstep="4"><span>4</span>Überprüfung</div>
+            </div>
+          </div>
+
+          <!-- Step 1: Positionen -->
+          <div class="wizard-body" id="mwstep-1">
+            <h2>Positionen erfassen</h2>
+            <p class="step-hint">Fügen Sie alle Artikel der Sammelanfrage hinzu.</p>
+            <div id="multi-positions-table">
+              <!-- rows rendered by JS -->
+            </div>
+            <button type="button" class="btn btn-ghost" style="margin-top:10px" onclick="addMultiPosition()">+ Position hinzufügen</button>
+            <div class="wizard-footer">
+              <span></span>
+              <button class="btn btn-primary" onclick="wMultiNext(1)">Weiter →</button>
+            </div>
+          </div>
+
+          <!-- Step 2: Allgemein -->
+          <div class="wizard-body hidden" id="mwstep-2">
+            <h2>Allgemeine Angaben</h2>
+            <p class="step-hint">Warengruppe, Priorität, Beschreibung und Termin für die gesamte Anfrage.</p>
+            <div class="form-grid">
+              <div class="form-group">
+                <label>Warengruppe <span class="req">*</span></label>
+                <select id="mf-Warengruppe">
+                  <option value="">– bitte wählen –</option>
+                  <option>Schrott</option>
+                  <option>Legierungen</option>
+                  <option>Kaufteile</option>
+                  <option>Kaufteile Formerei (Kühlm. ..)</option>
+                  <option>Formstoffkomponenten</option>
+                  <option>Eingußsysteme</option>
+                  <option>exotherme Kappen (Speiser)</option>
+                  <option>Gießfilter</option>
+                  <option>Kerne (bez. Kerne f. Gießerei)</option>
+                  <option>metallurgische Zusatzstoffe</option>
+                  <option>Hilfsstoffe Gießerei</option>
+                  <option>Feuerfestmaterial Ofen/Pfannen</option>
+                  <option>Kohleprodukte (Grafitelektr., Aufk...)</option>
+                  <option>Ersatzteile</option>
+                  <option>Befestigungsteile</option>
+                  <option>Schleif- und Fräsmittel</option>
+                  <option>Strahlmittel</option>
+                  <option>Werkzeug</option>
+                  <option>Arbeitsschutzmittel</option>
+                  <option>Schweißbedarf</option>
+                  <option>Gemeinkostenmaterial</option>
+                  <option>Technische Gase</option>
+                  <option>Treibstoffe, Öle, Fette</option>
+                  <option>sonst. Hilfs- u. Betriebsstoffe</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Priorität</label>
+                <select id="mf-Prioritaet">
+                  <option value="Normal">Normal</option>
+                  <option value="Hoch">Hoch</option>
+                  <option value="Dringend">Dringend</option>
+                </select>
+              </div>
+              <div class="form-group full">
+                <label>Beschreibung / Begründung</label>
+                <textarea id="mf-Beschreibung" rows="3" placeholder="Warum wird dieser Bedarf benötigt?"></textarea>
+              </div>
+              <div class="form-group">
+                <label>Benötigt bis (Termin) <span class="req">*</span></label>
+                <input type="date" id="mf-Termin"/>
+              </div>
+            </div>
+            <div class="wizard-footer">
+              <button class="btn btn-ghost" onclick="wMultiBack(2)">← Zurück</button>
+              <button class="btn btn-primary" onclick="wMultiNext(2)">Weiter →</button>
+            </div>
+          </div>
+
+          <!-- Step 3: Beschaffung -->
+          <div class="wizard-body hidden" id="mwstep-3">
+            <h2>Beschaffungsdetails</h2>
+            <p class="step-hint">Art des Materials, Lieferant und Kostenstelle.</p>
+            <div class="form-grid">
+              <div class="form-group full">
+                <label>Beschaffungsart <span class="req">*</span></label>
+                <div class="radio-cards" id="m-beschaffungslogik-cards">
+                  <label class="radio-card">
+                    <input type="radio" name="mBeschaffungslogik" value="Bestandsmaterial (bestandsgeführt)" checked/>
+                    <div class="rc-icon">📦</div>
+                    <div class="rc-title">Bestandsmaterial</div>
+                    <div class="rc-desc">Lagerartikel mit RGU-Stammdaten.</div>
+                  </label>
+                  <label class="radio-card">
+                    <input type="radio" name="mBeschaffungslogik" value="Nicht-bestandsgeführtes Material"/>
+                    <div class="rc-icon">🆕</div>
+                    <div class="rc-title">Nicht-bestandsgeführtes Material</div>
+                    <div class="rc-desc">Projekt- oder einmalige Beschaffung ohne Lagerführung.</div>
+                  </label>
+                </div>
+                <div class="bl-separator"><span>Zusätzlich kombinierbar</span></div>
+                <div class="radio-cards" id="m-beschaffungslogik-extra-cards">
+                  <div class="radio-card check-card" data-value="Direktes Material" onclick="toggleMBLExtra(this)">
+                    <div class="rc-icon">🏭</div>
+                    <div class="rc-title">Direktes Material</div>
+                    <div class="rc-desc">Produktionsrelevant; fließt direkt ins Endprodukt ein.</div>
+                  </div>
+                  <div class="radio-card check-card" data-value="Indirektes Material / Dienstleistung" onclick="toggleMBLExtra(this)">
+                    <div class="rc-icon">🔧</div>
+                    <div class="rc-title">Indirektes Material / Dienstleistung</div>
+                    <div class="rc-desc">Nicht produktionsrelevant: Betriebsmittel, Verbrauchsmaterial, externe Dienstleistungen.</div>
+                  </div>
+                </div>
+                <div class="field-hint" id="mhint-Beschaffungslogik"></div>
+              </div>
+              <div class="form-group">
+                <label>Lieferant 1 <span class="req">*</span></label>
+                <input type="text" id="mf-Lieferant" placeholder="Firmenname oder Lieferanten-Nr."/>
+                <button type="button" class="btn-add-lief" id="mbtn-add-lieferant-1" onclick="addMLieferant(2)">+ Weiteren Lieferanten hinzufügen</button>
+              </div>
+              <div class="form-group lieferant-extra" id="m-lieferant-extra-2" style="display:none">
+                <label>Lieferant 2 (Alternative)</label>
+                <input type="text" id="mf-Lieferant2" placeholder="optional"/>
+                <button type="button" class="btn-add-lief" id="mbtn-add-lieferant-2" onclick="addMLieferant(3)">+ Weiteren Lieferanten hinzufügen</button>
+              </div>
+              <div class="form-group lieferant-extra" id="m-lieferant-extra-3" style="display:none">
+                <label>Lieferant 3 (Alternative)</label>
+                <input type="text" id="mf-Lieferant3" placeholder="optional"/>
+                <button type="button" class="btn-add-lief" id="mbtn-add-lieferant-3" onclick="addMLieferant(4)">+ Weiteren Lieferanten hinzufügen</button>
+              </div>
+              <div class="form-group lieferant-extra" id="m-lieferant-extra-4" style="display:none">
+                <label>Lieferant 4 (Alternative)</label>
+                <input type="text" id="mf-Lieferant4" placeholder="optional"/>
+              </div>
+              <div class="form-group">
+                <label>Bestellvolumen gesamt in €</label>
+                <input type="number" id="mf-GeschaetzterPreis" min="0" step="0.01" placeholder="0,00"/>
+              </div>
+              <div class="form-group">
+                <label>Kostenstelle</label>
+                <input type="text" id="mf-Kostenstelle" placeholder="z. B. 4200"/>
+              </div>
+            </div>
+            <div class="wizard-footer">
+              <button class="btn btn-ghost" onclick="wMultiBack(3)">← Zurück</button>
+              <button class="btn btn-primary" onclick="wMultiNext(3)">Weiter →</button>
+            </div>
+          </div>
+
+          <!-- Step 4: Review -->
+          <div class="wizard-body hidden" id="mwstep-4">
+            <h2>Überprüfung &amp; Einreichen</h2>
+            <p class="step-hint">Bitte prüfen Sie alle Angaben. Nach dem Einreichen wird <strong>Power Automate</strong> automatisch den Genehmigungsprozess starten.</p>
+            <div id="multi-review-content"></div>
+            <div class="wizard-footer">
+              <button class="btn btn-ghost" onclick="wMultiBack(4)">← Zurück</button>
+              <button class="btn btn-success" id="btn-multi-submit" onclick="submitMultiRequest()">✓ Sammelanfrage einreichen</button>
+            </div>
+          </div>
+
         </div>
       </div>
 

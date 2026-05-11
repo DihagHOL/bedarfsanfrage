@@ -907,6 +907,50 @@ details#attach-extra-wrap[open] .attach-more-toggle { color:#374151; }
 .tid-miss    { color: #b45309; }
 
 /* ── Responsive ── */
+/* ── Multi-position wizard ── */
+.multi-pos-row {
+  display: flex; align-items: flex-start; gap: 10px;
+  background: #fff; border: 1px solid #e5e9ef; border-radius: 10px;
+  padding: 12px 14px; margin-bottom: 10px;
+}
+.multi-pos-num {
+  flex-shrink: 0; width: 24px; height: 24px; line-height: 24px;
+  text-align: center; background: #e5e9ef; border-radius: 50%;
+  font-size: .78rem; font-weight: 700; color: #6b7280; margin-top: 22px;
+}
+.multi-pos-fields {
+  display: flex; flex: 1; gap: 10px; flex-wrap: wrap; align-items: flex-end;
+}
+.multi-pos-field { display: flex; flex-direction: column; gap: 3px; flex: 1 1 140px; }
+.multi-pos-field label { font-size: .78rem; font-weight: 600; color: #374151; }
+.multi-pos-field input,
+.multi-pos-field select {
+  height: 36px; padding: 0 10px; border: 1px solid #d1d5db;
+  border-radius: 7px; font-size: .875rem; background: #fff;
+  transition: border-color .15s;
+}
+.multi-pos-field input:focus,
+.multi-pos-field select:focus { outline: none; border-color: #1a56db; }
+.multi-pos-del {
+  flex-shrink: 0; background: none; border: none; cursor: pointer;
+  color: #ef4444; font-size: 1rem; padding: 4px 6px; margin-top: 20px;
+  border-radius: 4px; transition: background .15s;
+}
+.multi-pos-del:hover { background: #fee2e2; }
+.multi-pos-del-placeholder { width: 28px; flex-shrink: 0; }
+
+/* Shared review classes used by multi wizard */
+.review-section-title {
+  font-size: .75rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .05em; color: #9ca3af; margin-bottom: 7px;
+}
+.review-dl {
+  display: grid; grid-template-columns: 130px 1fr; gap: 5px 10px;
+  font-size: .875rem;
+}
+.review-dl dt { color: #9ca3af; font-size: .8rem; }
+.review-dl dd { font-weight: 500; margin: 0; }
+
 @media (max-width: 960px) {
   .sidebar { transform: translateX(-100%); }
   .sidebar.open { transform: translateX(0); }

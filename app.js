@@ -579,7 +579,7 @@ async function loadItems(showToast = true) {
 // ── ROUTING ──────────────────────────────────────────────────────────────────
 // Dashboard title differs by role: admins see "Dashboard (Alle)", others see "Meine Anfragen"
 function VIEW_TITLES(view) {
-  const map = { new:'Neue Bedarfsanfrage', mine:'Meine Anfragen', all:'Alle Anfragen', detail:'Anfrage Details' };
+  const map = { new:'Neue Bedarfsanfrage', multi:'Sammelanfrage', mine:'Meine Anfragen', all:'Alle Anfragen', detail:'Anfrage Details' };
   if (view === 'dashboard') return isAdmin() ? 'Dashboard (Alle Anfragen)' : 'Meine Anfragen';
   return map[view] || view;
 }
@@ -626,6 +626,7 @@ function navigate(view, id) {
   else if (view === 'mine')      renderList('mine');
   else if (view === 'all')       renderList('all');
   else if (view === 'new')       initWizard();
+  else if (view === 'multi')     initMultiWizard();
   else if (view === 'detail' && id) renderDetail(id);
 }
 
@@ -2189,6 +2190,333 @@ async function submitRequest() {
     toast('Fehler: ' + e.message, 'error');
     btn.disabled = false;
     btn.textContent = '✓ Anfrage einreichen';
+  }
+}
+
+// ── SAMMELANFRAGE (MULTI-POSITION WIZARD) ────────────────────────────────────
+
+let multiPositions = [];   // [{artNr, bezeichnung, menge, me}, ...]
+let multiWizardData = {};  // step2, step3
+
+function initMultiWizard() {
+  multiPositions = [{ artNr: '', bezeichnung: '', menge: '', me: '' }];
+  multiWizardData = {};
+  showMultiStep(1);
+  // Reset Allgemein fields
+  const wg = $id('mf-Warengruppe'); if (wg) wg.value = '';
+  const prioEl = $id('mf-Prioritaet');
+  if (prioEl) {
+    const prioOpts = [...prioEl.options];
+    const normalOpt = prioOpts.find(o => /^(normal|standard)$/i.test(o.value.trim()));
+    prioEl.value = normalOpt ? normalOpt.value : (prioOpts.find(o => o.value !== '')?.value || '');
+  }
+  const beschEl = $id('mf-Beschreibung'); if (beschEl) beschEl.value = '';
+  const terminEl = $id('mf-Termin'); if (terminEl) terminEl.value = '';
+  // Reset Beschaffung fields
+  ['mf-Lieferant','mf-Lieferant2','mf-Lieferant3','mf-Lieferant4','mf-GeschaetzterPreis','mf-Kostenstelle']
+    .forEach(k => { const el = $id(k); if (el) el.value = ''; });
+  const firstRadio = document.querySelector('input[name=mBeschaffungslogik]');
+  if (firstRadio) firstRadio.checked = true;
+  document.querySelectorAll('#m-beschaffungslogik-extra-cards .check-card').forEach(c => c.classList.remove('selected'));
+  [2,3,4].forEach(n => {
+    const grp = $id('m-lieferant-extra-' + n);
+    if (grp) grp.style.display = 'none';
+  });
+  // Reset submit button
+  const sb = $id('btn-multi-submit');
+  if (sb) { sb.disabled = false; sb.textContent = '✓ Sammelanfrage einreichen'; }
+  renderMultiPositions();
+}
+
+function showMultiStep(n) {
+  [1,2,3,4].forEach(i => {
+    const body = $id('mwstep-' + i);
+    if (body) body.classList.toggle('hidden', i !== n);
+    const s = document.querySelector(`.wstep[data-mstep="${i}"]`);
+    if (!s) return;
+    s.classList.remove('active','done');
+    if (i < n)  s.classList.add('done');
+    if (i === n) s.classList.add('active');
+  });
+}
+
+function renderMultiPositions() {
+  const container = $id('multi-positions-table');
+  if (!container) return;
+  if (multiPositions.length === 0) multiPositions.push({ artNr: '', bezeichnung: '', menge: '', me: '' });
+  const meOptions = ['','Lagereinheiten','kg','Stück','Anzahl','m','Paar','Liter'];
+  const rows = multiPositions.map((pos, i) => `
+    <div class="multi-pos-row" data-idx="${i}">
+      <div class="multi-pos-num">${i + 1}</div>
+      <div class="multi-pos-fields">
+        <div class="multi-pos-field">
+          <label>Artikelnummer</label>
+          <div class="tid-ac-wrap">
+            <input type="text" class="mpos-artnr" data-idx="${i}"
+              value="${esc(pos.artNr)}"
+              placeholder="z. B. 4001-00010"
+              oninput="multiPosChange(${i},'artNr',this.value)"
+              autocomplete="off"/>
+          </div>
+        </div>
+        <div class="multi-pos-field" style="flex:2">
+          <label>Bezeichnung <span class="req">*</span></label>
+          <input type="text" class="mpos-bez" data-idx="${i}"
+            value="${esc(pos.bezeichnung)}"
+            placeholder="Artikelbezeichnung"
+            oninput="multiPosChange(${i},'bezeichnung',this.value)"/>
+        </div>
+        <div class="multi-pos-field" style="flex:0 0 90px">
+          <label>Menge <span class="req">*</span></label>
+          <input type="number" class="mpos-menge" data-idx="${i}"
+            value="${esc(pos.menge)}"
+            placeholder="1" min="0.001" step="any"
+            oninput="multiPosChange(${i},'menge',this.value)"/>
+        </div>
+        <div class="multi-pos-field" style="flex:0 0 130px">
+          <label>ME <span class="req">*</span></label>
+          <select class="mpos-me" data-idx="${i}" onchange="multiPosChange(${i},'me',this.value)">
+            ${meOptions.map(o => `<option value="${o}"${pos.me === o ? ' selected' : ''}>${o || '– wählen –'}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      ${multiPositions.length > 1
+        ? `<button type="button" class="multi-pos-del" title="Position entfernen" onclick="removeMultiPosition(${i})">✕</button>`
+        : '<div class="multi-pos-del-placeholder"></div>'}
+    </div>`).join('');
+  container.innerHTML = rows;
+  // Init TID autocomplete for each artnr input
+  container.querySelectorAll('.mpos-artnr').forEach(inp => {
+    const idx = parseInt(inp.dataset.idx, 10);
+    initTidAutocomplete(inp, key => {
+      if (key === 'Artikelnummer') return inp;
+      if (key === 'Title') {
+        // Return a proxy object that sets bezeichnung in multiPositions
+        return {
+          get value() { return multiPositions[idx]?.bezeichnung || ''; },
+          set value(v) {
+            if (multiPositions[idx]) {
+              multiPositions[idx].bezeichnung = v;
+              // update the bez input visually
+              const bezEl = document.querySelector(`.mpos-bez[data-idx="${idx}"]`);
+              if (bezEl) bezEl.value = v;
+            }
+          }
+        };
+      }
+      return null;
+    });
+  });
+}
+
+function multiPosChange(idx, field, val) {
+  if (multiPositions[idx]) multiPositions[idx][field] = val;
+}
+
+function addMultiPosition() {
+  multiPositions.push({ artNr: '', bezeichnung: '', menge: '', me: '' });
+  renderMultiPositions();
+}
+
+function removeMultiPosition(idx) {
+  multiPositions.splice(idx, 1);
+  if (multiPositions.length === 0) multiPositions.push({ artNr: '', bezeichnung: '', menge: '', me: '' });
+  renderMultiPositions();
+}
+
+function toggleMBLExtra(el) {
+  el.classList.toggle('selected');
+}
+
+function addMLieferant(n) {
+  const grp = $id('m-lieferant-extra-' + n);
+  if (grp) grp.style.display = '';
+  const prevBtn = $id('mbtn-add-lieferant-' + (n - 1));
+  if (prevBtn) prevBtn.style.display = 'none';
+}
+
+function wMultiNext(step) {
+  if (step === 1) {
+    // Validate all positions
+    for (let i = 0; i < multiPositions.length; i++) {
+      const p = multiPositions[i];
+      // sync values from DOM (in case oninput didn't fire on all)
+      const bezEl   = document.querySelector(`.mpos-bez[data-idx="${i}"]`);
+      const mengeEl = document.querySelector(`.mpos-menge[data-idx="${i}"]`);
+      const meEl    = document.querySelector(`.mpos-me[data-idx="${i}"]`);
+      const artEl   = document.querySelector(`.mpos-artnr[data-idx="${i}"]`);
+      if (bezEl)   p.bezeichnung = bezEl.value.trim();
+      if (mengeEl) p.menge = mengeEl.value;
+      if (meEl)    p.me = meEl.value;
+      if (artEl)   p.artNr = artEl.value.trim();
+      if (!p.bezeichnung) { toast(`Position ${i + 1}: Bitte Bezeichnung angeben.`, 'error'); return; }
+      if (!p.menge || parseFloat(p.menge) <= 0) { toast(`Position ${i + 1}: Bitte gültige Menge eingeben.`, 'error'); return; }
+      if (!p.me)   { toast(`Position ${i + 1}: Bitte Mengeneinheit wählen.`, 'error'); return; }
+    }
+  } else if (step === 2) {
+    const wg     = $id('mf-Warengruppe').value;
+    const termin = $id('mf-Termin').value;
+    if (!wg)     { toast('Bitte Warengruppe wählen.', 'error'); return; }
+    if (!termin) { toast('Bitte Benötigt-bis-Datum angeben.', 'error'); return; }
+    multiWizardData.step2 = {
+      Warengruppe:  wg,
+      Prioritaet:   $id('mf-Prioritaet').value,
+      Beschreibung: $id('mf-Beschreibung').value.trim(),
+      Termin:       termin,
+    };
+  } else if (step === 3) {
+    const lieferant = $id('mf-Lieferant').value.trim();
+    if (!lieferant) { toast('Bitte mindestens Lieferant 1 angeben.', 'error'); return; }
+    const extraSelected = document.querySelector('#m-beschaffungslogik-extra-cards .check-card.selected');
+    if (!extraSelected) { toast('Bitte unter „Zusätzlich kombinierbar" eine Option auswählen.', 'error'); return; }
+    multiWizardData.step3 = {
+      Beschaffungslogik: [
+        document.querySelector('input[name=mBeschaffungslogik]:checked')?.value || '',
+        ...[...document.querySelectorAll('#m-beschaffungslogik-extra-cards .check-card.selected')].map(c => c.dataset.value)
+      ].filter(Boolean).join(', '),
+      Lieferant:         $id('mf-Lieferant').value.trim(),
+      Lieferant2:        $id('mf-Lieferant2').value.trim(),
+      Lieferant3:        $id('mf-Lieferant3').value.trim(),
+      Lieferant4:        $id('mf-Lieferant4').value.trim(),
+      GeschaetzterPreis: $id('mf-GeschaetzterPreis').value ? parseFloat($id('mf-GeschaetzterPreis').value) : null,
+      Kostenstelle:      $id('mf-Kostenstelle').value.trim(),
+    };
+    buildMultiReview();
+  }
+  showMultiStep(step + 1);
+}
+
+function wMultiBack(step) {
+  showMultiStep(step - 1);
+}
+
+function buildMultiReview() {
+  const s2 = multiWizardData.step2 || {};
+  const s3 = multiWizardData.step3 || {};
+  const posRows = multiPositions.map((p, i) => `
+    <tr>
+      <td style="padding:4px 8px;color:#6b7280">${i + 1}</td>
+      <td style="padding:4px 8px">${esc(p.artNr) || '–'}</td>
+      <td style="padding:4px 8px">${esc(p.bezeichnung)}</td>
+      <td style="padding:4px 8px;text-align:right">${esc(p.menge)}</td>
+      <td style="padding:4px 8px">${esc(p.me)}</td>
+    </tr>`).join('');
+  const liefs = [s3.Lieferant, s3.Lieferant2, s3.Lieferant3, s3.Lieferant4].filter(Boolean).join(', ');
+  const preis = s3.GeschaetzterPreis != null ? new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(s3.GeschaetzterPreis) + ' €' : '–';
+  $id('multi-review-content').innerHTML = `
+    <div class="review-section">
+      <h3 class="review-section-title">Positionen (${multiPositions.length})</h3>
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:.875rem">
+          <thead><tr style="background:#f3f4f6;font-weight:600">
+            <th style="padding:6px 8px;text-align:left">#</th>
+            <th style="padding:6px 8px;text-align:left">ArtNr.</th>
+            <th style="padding:6px 8px;text-align:left">Bezeichnung</th>
+            <th style="padding:6px 8px;text-align:right">Menge</th>
+            <th style="padding:6px 8px;text-align:left">ME</th>
+          </tr></thead>
+          <tbody>${posRows}</tbody>
+        </table>
+      </div>
+    </div>
+    <div class="review-section" style="margin-top:16px">
+      <h3 class="review-section-title">Allgemein</h3>
+      <dl class="review-dl">
+        <dt>Warengruppe</dt><dd>${esc(s2.Warengruppe)}</dd>
+        <dt>Priorität</dt><dd>${esc(s2.Prioritaet)}</dd>
+        <dt>Beschreibung</dt><dd>${esc(s2.Beschreibung) || '–'}</dd>
+        <dt>Benötigt bis</dt><dd>${s2.Termin || '–'}</dd>
+      </dl>
+    </div>
+    <div class="review-section" style="margin-top:16px">
+      <h3 class="review-section-title">Beschaffung</h3>
+      <dl class="review-dl">
+        <dt>Beschaffungsart</dt><dd>${esc(s3.Beschaffungslogik)}</dd>
+        <dt>Lieferant(en)</dt><dd>${esc(liefs) || '–'}</dd>
+        <dt>Bestellvolumen</dt><dd>${preis}</dd>
+        <dt>Kostenstelle</dt><dd>${esc(s3.Kostenstelle) || '–'}</dd>
+      </dl>
+    </div>`;
+}
+
+async function submitMultiRequest() {
+  const btn = $id('btn-multi-submit');
+  btn.disabled = true;
+  btn.textContent = 'Wird eingereicht…';
+  try {
+    const s2 = multiWizardData.step2 || {};
+    const s3 = multiWizardData.step3 || {};
+    const first = multiPositions[0] || {};
+
+    // Auto-generate title from first position
+    const autoTitle = first.bezeichnung
+      ? (multiPositions.length > 1
+          ? `Sammelanfrage: ${first.bezeichnung} +${multiPositions.length - 1} weitere`
+          : `Sammelanfrage: ${first.bezeichnung}`)
+      : 'Sammelanfrage';
+
+    // Serialize all positions as JSON for the Positionen SP field
+    const posJson = JSON.stringify(multiPositions.map((p, i) => ({
+      Nr: i + 1,
+      Artikelnummer: p.artNr,
+      Bezeichnung: p.bezeichnung,
+      Menge: p.menge,
+      ME: p.me,
+    })));
+
+    const rawData = {
+      Title:             autoTitle,
+      Artikelnummer:     first.artNr || '',
+      Menge:             first.menge || '',
+      Mengeneinheit:     first.me || '',
+      Warengruppe:       s2.Warengruppe || '',
+      Prioritaet:        s2.Prioritaet || '',
+      Beschreibung:      s2.Beschreibung || '',
+      Termin:            s2.Termin || '',
+      Beschaffungslogik: s3.Beschaffungslogik || '',
+      Lieferant:         s3.Lieferant || '',
+      Lieferant2:        s3.Lieferant2 || '',
+      Lieferant3:        s3.Lieferant3 || '',
+      Lieferant4:        s3.Lieferant4 || '',
+      GeschaetzterPreis: s3.GeschaetzterPreis,
+      Kostenstelle:      s3.Kostenstelle || '',
+    };
+
+    const allFields = buildFields(rawData, FORM_FIELDS);
+
+    if (!siteId || !listId) await discoverSP();
+
+    const listPath = `/sites/${siteId}/lists/${listId}`;
+
+    btn.textContent = 'Anfrage wird angelegt…';
+    const newItem = await gPost(`${listPath}/items`, { fields: { Title: allFields['Title'] } });
+    const itemId  = newItem.id;
+
+    // Patch remaining fields + Positionen (JSON multi-line field)
+    const patchFields = { ...allFields };
+    delete patchFields['Title'];
+
+    // Add Positionen field if SP field exists
+    const posField = resolvedFields['Positionen'] || 'Positionen';
+    patchFields[posField] = posJson;
+
+    if (Object.keys(patchFields).length) {
+      btn.textContent = 'Felder werden gespeichert…';
+      try {
+        await patchRetry(`${listPath}/items/${itemId}/fields`, patchFields);
+      } catch(patchErr) {
+        console.warn('[submitMultiRequest] PATCH fehlgeschlagen:', patchErr.message);
+        toast('Anfrage erstellt, aber einige Felder konnten nicht gespeichert werden.', 'error');
+      }
+    }
+
+    toast(`Sammelanfrage mit ${multiPositions.length} Positionen eingereicht! Power Automate startet den Genehmigungsprozess.`, 'success');
+    await loadItems(false);
+    navigate('mine');
+  } catch(e) {
+    toast('Fehler: ' + e.message, 'error');
+    btn.disabled = false;
+    btn.textContent = '✓ Sammelanfrage einreichen';
   }
 }
 
