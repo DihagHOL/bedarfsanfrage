@@ -329,8 +329,7 @@ async function bootDone() {
     $id('hdr-av').textContent   = name.split(' ').map(p=>p[0]||'').join('').substring(0,2).toUpperCase();
     $id('hdr-name').textContent = name;
     $id('hdr-mail').textContent = account?.username || '';
-    const canDash = isAdmin() || getSettings((account?.username||'').toLowerCase()).canSeeDashboard;
-    navigate(canDash ? 'dashboard' : 'mine');
+    navigate('dashboard');
   } catch(e) {
     $id('boot-sub').textContent = 'Fehler beim Laden: ' + e.message;
     $id('boot-spinner').style.display = 'none';
@@ -594,9 +593,8 @@ function isAdmin() { return account?.username?.toLowerCase() === ADMIN_EMAIL; }
 function applyNavVisibility() {
   const email    = (account?.username || '').toLowerCase();
   const s        = getSettings(email);
-  const canDash  = isAdmin() || s.canSeeDashboard;
   const dashNav  = document.querySelector('.nav-item[data-view="dashboard"]');
-  if (dashNav) dashNav.style.display = canDash ? '' : 'none';
+  if (dashNav) dashNav.style.display = '';
 }
 // Alias kept for any remaining call-sites
 const applyDashboardVisibility = applyNavVisibility;
@@ -680,10 +678,7 @@ function renderStatusChips() {
   const el = $id('status-chips');
   if (!el) return;
 
-  // Admin and canSeeDashboard users see all items; others see only their own.
-  const _dEmail   = (account?.username||'').toLowerCase();
-  const _canDash  = isAdmin() || getSettings(_dEmail).canSeeDashboard;
-  const baseItems = _canDash ? allItems : myItems();
+  const baseItems = allItems;
 
   // Count per status
   const counts = {};
@@ -745,9 +740,7 @@ function setDashFilter(status) {
 
 function filterDashboard() {
   const search = ($id('search-dashboard')?.value || '').toLowerCase();
-  const _fEmail  = (account?.username||'').toLowerCase();
-  const _fCanAll = isAdmin() || getSettings(_fEmail).canSeeDashboard;
-  let items = _fCanAll ? [...allItems] : [...myItems()];
+  let items = [...allItems];
   if (search) items = items.filter(i =>
     (getField(i,'Title')||'').toLowerCase().includes(search) || String(i.id||'').includes(search)
   );
