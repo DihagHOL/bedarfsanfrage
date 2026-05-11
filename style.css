@@ -907,6 +907,41 @@ details#attach-extra-wrap[open] .attach-more-toggle { color:#374151; }
 .tid-miss    { color: #b45309; }
 
 /* ── Responsive ── */
+/* ── Field sub-label ── */
+.field-sub {
+  font-size: .72rem; font-weight: 400; color: #9ca3af;
+  margin-left: 4px; font-style: italic;
+}
+
+/* ── Tabellen-Importer ── */
+.imp-card {
+  background: #fff; border: 1px solid #e5e9ef; border-radius: 12px; padding: 18px 20px;
+}
+.imp-card-header {
+  display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 10px;
+}
+.imp-card-title { font-size: 1rem; font-weight: 700; color: #111827; }
+.imp-card-sub   { font-size: .8rem; color: #6b7280; margin-top: 3px; }
+.imp-badge-custom { background: #dbeafe; color: #1d4ed8; border-radius: 999px; padding: 1px 8px; font-size: .72rem; font-weight: 600; }
+.imp-badge-default { background: #f3f4f6; color: #6b7280; border-radius: 999px; padding: 1px 8px; font-size: .72rem; }
+.imp-format-hint {
+  font-size: .78rem; color: #6b7280; background: #f9fafb;
+  border: 1px solid #e5e9ef; border-radius: 7px;
+  padding: 8px 12px; margin-bottom: 12px; line-height: 1.5;
+}
+.imp-format-hint code {
+  background: #f3f4f6; padding: 1px 5px; border-radius: 4px;
+  font-family: monospace; font-size: .8rem; color: #374151;
+}
+.imp-drop-zone {
+  border: 2px dashed #d1d5db; border-radius: 9px;
+  padding: 20px; text-align: center; color: #6b7280;
+  font-size: .875rem; cursor: pointer; transition: border-color .15s, background .15s;
+  display: flex; align-items: center; justify-content: center; gap: 4px; flex-wrap: wrap;
+}
+.imp-drop-zone.drag-over { border-color: #1a56db; background: #eff6ff; color: #1d4ed8; }
+.imp-result { margin-top: 10px; font-size: .875rem; min-height: 20px; }
+
 /* ── Multi-position wizard ── */
 .multi-pos-row {
   display: flex; align-items: flex-start; gap: 10px;

@@ -15,25 +15,27 @@ const SP_BASE   = 'https://' + SP_SITE.split(':/')[0] + '/' + SP_SITE.split(':/'
 // step       = Wizard-Schritt (1-3)
 const FORM_FIELDS = [
   // Step 1: Bedarf
-  { key:'Title',             label:'Bezeichnung',                  step:1, required:true  },
-  { key:'Beschreibung',      label:'Beschreibung',                 step:1, alsoTry:['Description','Beschreibung_x002f_Begruendung','Grund'] },
-  { key:'Warengruppe',       label:'Warengruppe',                  step:1, required:true, alsoTry:['ProductCategory'] },
-  { key:'Prioritaet',        label:'Priorität',                    step:1, alsoTry:['Priority','Priorit_x00e4_t'] },
+  { key:'Title',                 label:'Bezeichnung',                    step:1, required:true  },
+  { key:'Beschreibung',          label:'Beschreibung',                   step:1, alsoTry:['Description','Beschreibung_x002f_Begruendung','Grund'] },
+  { key:'Warengruppe',           label:'Warengruppe',                    step:1, required:true, alsoTry:['ProductCategory'] },
+  { key:'Prioritaet',            label:'Priorität',                      step:1, alsoTry:['Priority','Priorit_x00e4_t'] },
   // Step 2: Menge
-  { key:'Menge',             label:'Menge',                        step:2, required:true, alsoTry:['Quantity','Amount'] },
-  { key:'Mengeneinheit',     label:'Mengeneinheit',                step:2, required:true, alsoTry:['Unit','UnitOfMeasure'] },
-  { key:'Mindestlagermenge', label:'Mindestlagermenge',            step:2, alsoTry:['MinStock','MinLager'] },
-  { key:'Termin',            label:'Benötigt bis',                 step:2, required:true, alsoTry:['Deadline','DueDate','Ben_x00f6_tigtBis','Ben_x00f6_tigtbis'] },
+  { key:'Menge',                 label:'Menge',                          step:2, required:true, alsoTry:['Quantity','Amount'] },
+  { key:'Mengeneinheit',         label:'Mengeneinheit',                  step:2, required:true, alsoTry:['Unit','UnitOfMeasure'] },
+  { key:'Mindestlagermenge',     label:'Mindestlagermenge',              step:2, alsoTry:['MinStock','MinLager'] },
+  { key:'Termin',                label:'Benötigt bis',                   step:2, required:true, alsoTry:['Deadline','DueDate','Ben_x00f6_tigtBis','Ben_x00f6_tigtbis'] },
   // Step 3: Beschaffung
-  { key:'Artikelnummer',     label:'Artikelnummer',                 step:1, alsoTry:['MaterialNumber','ItemNumber','Artikelnummer_x002f_Nummernangab'] },
-  { key:'Beschaffungslogik', label:'Beschaffungsart',              step:3, required:true, alsoTry:['Materialtyp','ProcurementType'] },
-  { key:'Lieferant',         label:'Lieferant 1',                  step:3, alsoTry:['Vendor','Supplier'] },
-  { key:'Lieferant2',        label:'Lieferant 2 (Alternative)',    step:3, alsoTry:['Vendor2','Supplier2','Lieferant_2'] },
-  { key:'Lieferant3',        label:'Lieferant 3 (Alternative)',    step:3, alsoTry:['Vendor3','Supplier3','Lieferant_3'] },
-  { key:'Lieferant4',        label:'Lieferant 4 (Alternative)',    step:3, alsoTry:['Vendor4','Supplier4','Lieferant_4'] },
-  { key:'GeschaetzterPreis',    label:'Bestellvolumen in €',          step:3, alsoTry:['EstimatedPrice','Preis','Price','Gesch_x00e4_tzterPreisnetto_x002'] },
-  { key:'Kostenstelle',         label:'Kostenstelle',                 step:3, alsoTry:['CostCenter'] },
-  { key:'LeadBuyerAbschluss',   label:'Lead-Buyer-Abschluss',         step:3, alsoTry:['LeadBuyer','LeadBuyerAbschlus'] },
+  { key:'Artikelnummer',         label:'Artikelnummer',                  step:1, alsoTry:['MaterialNumber','ItemNumber','Artikelnummer_x002f_Nummernangab'] },
+  { key:'ExterneArtikelnummer',  label:'Externe Artikelnummer',          step:1, alsoTry:['ExternalItemNumber','ExtArtikelNr','ExterneArtikelnr'] },
+  { key:'Beschaffungslogik',     label:'Beschaffungsart',                step:3, required:true, alsoTry:['Materialtyp','ProcurementType'] },
+  { key:'Lieferant',             label:'Lieferant 1',                    step:3, alsoTry:['Vendor','Supplier'] },
+  { key:'Lieferant2',            label:'Lieferant 2 (Alternative)',      step:3, alsoTry:['Vendor2','Supplier2','Lieferant_2'] },
+  { key:'Lieferant3',            label:'Lieferant 3 (Alternative)',      step:3, alsoTry:['Vendor3','Supplier3','Lieferant_3'] },
+  { key:'Lieferant4',            label:'Lieferant 4 (Alternative)',      step:3, alsoTry:['Vendor4','Supplier4','Lieferant_4'] },
+  { key:'GeschaetzterPreis',     label:'Bestellvolumen in €',            step:3, alsoTry:['EstimatedPrice','Preis','Price','Gesch_x00e4_tzterPreisnetto_x002'] },
+  { key:'Kostenstelle',          label:'Kostenstelle',                   step:3, alsoTry:['CostCenter'] },
+  { key:'LeadBuyerAbschluss',    label:'Lead-Buyer-Abschluss',           step:3, alsoTry:['LeadBuyer','LeadBuyerAbschlus'] },
+  { key:'Positionen',            label:'Positionen (JSON)',               step:1, alsoTry:['Positions'] },
 ];
 
 // Felder die Einkauf nach der Einreichung befüllt
@@ -78,6 +80,39 @@ const SYSTEM_FIELDS = new Set([
 const TID_MAP = {
 };
 
+
+// ── KOSTENSTELLEN-STAMMDATEN ────────────────────────────────────────────────
+// Format: { nr: "10011", label: "Fertigungsleitung" }
+// Overrideable via localStorage key DIHAG_KOSTENST
+const KOSTENST_DEFAULT = [
+];
+
+// Active lookup tables — reloaded from localStorage by reloadLookupData()
+let TID_MAP_ACTIVE = TID_MAP;         // may be replaced by imported data
+let TID_ENTRIES    = Object.entries(TID_MAP);
+let KOSTENST_DATA  = KOSTENST_DEFAULT; // may be replaced by imported data
+
+const LS_TID_KEY    = 'DIHAG_TID_DATA';
+const LS_KOSTENST_KEY = 'DIHAG_KOSTENST';
+
+function reloadLookupData() {
+  try {
+    const rawTid = localStorage.getItem(LS_TID_KEY);
+    if (rawTid) {
+      const obj = JSON.parse(rawTid);
+      TID_MAP_ACTIVE = Object.assign({}, TID_MAP, obj); // merge: imported wins over default for same keys
+      TID_ENTRIES = Object.entries(TID_MAP_ACTIVE);
+    } else {
+      TID_MAP_ACTIVE = TID_MAP;
+      TID_ENTRIES = Object.entries(TID_MAP);
+    }
+  } catch(e) { console.warn('reloadLookupData TID:', e); }
+  try {
+    const rawKst = localStorage.getItem(LS_KOSTENST_KEY);
+    if (rawKst) KOSTENST_DATA = JSON.parse(rawKst);
+    else        KOSTENST_DATA = KOSTENST_DEFAULT;
+  } catch(e) { console.warn('reloadLookupData KOSTENST:', e); }
+}
 
 // ── STATE ───────────────────────────────────────────────────────────────────
 let msalApp, account;
@@ -579,7 +614,7 @@ async function loadItems(showToast = true) {
 // ── ROUTING ──────────────────────────────────────────────────────────────────
 // Dashboard title differs by role: admins see "Dashboard (Alle)", others see "Meine Anfragen"
 function VIEW_TITLES(view) {
-  const map = { new:'Neue Bedarfsanfrage', multi:'Sammelanfrage', mine:'Meine Anfragen', all:'Alle Anfragen', detail:'Anfrage Details' };
+  const map = { new:'Neue Bedarfsanfrage', multi:'Sammelanfrage', mine:'Meine Anfragen', all:'Alle Anfragen', detail:'Anfrage Details', importer:'Tabellen-Importer' };
   if (view === 'dashboard') return isAdmin() ? 'Dashboard (Alle Anfragen)' : 'Meine Anfragen';
   return map[view] || view;
 }
@@ -627,6 +662,7 @@ function navigate(view, id) {
   else if (view === 'all')       renderList('all');
   else if (view === 'new')       initWizard();
   else if (view === 'multi')     initMultiWizard();
+  else if (view === 'importer')  initImporter();
   else if (view === 'detail' && id) renderDetail(id);
 }
 
@@ -644,7 +680,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Menu toggle
   $id('menu-toggle').addEventListener('click', () => $id('sidebar').classList.toggle('open'));
 
-  // Boot
+  // Boot — load persisted lookup table overrides (TID + Kostenstellen)
+  reloadLookupData();
+
   $id('boot-spinner').style.display = 'block';
   try {
     const loggedIn = await initAuth();
@@ -1498,8 +1536,7 @@ async function saveBeschData(itemId) {
 
 // ── ARTIKELNUMMER AUTOCOMPLETE ────────────────────────────────────────────────
 // Shared between wizard (lookupTID) and panel edit mode (initTidAutocomplete).
-// Searches TID_MAP by number prefix OR name substring.
-const TID_ENTRIES = Object.entries(TID_MAP); // pre-built for fast filtering
+// Searches TID_MAP_ACTIVE by number prefix OR name substring.
 
 function initTidAutocomplete(inputEl, getRelatedInput) {
   // Dropdown appended to <body> with position:fixed to escape panel overflow clipping
@@ -1548,7 +1585,7 @@ function initTidAutocomplete(inputEl, getRelatedInput) {
   }
 
   function selectItem(tid) {
-    const hit = TID_MAP[tid];
+    const hit = TID_MAP_ACTIVE[tid];
     if (!hit) return;
     inputEl.value = tid;
     const titleEl = getRelatedInput?.('Title');
@@ -1607,12 +1644,91 @@ function initTidAutocomplete(inputEl, getRelatedInput) {
   }).observe(document.body, { childList: true, subtree: true });
 }
 
+// ── KOSTENSTELLEN AUTOCOMPLETE ────────────────────────────────────────────────
+// Wraps an <input> with a dropdown showing matching Kostenstellen entries.
+// On select: fills input with "NUMMER – Bezeichnung"
+function initKostenstAuto(inputEl) {
+  if (!inputEl) return;
+  let dropdown = null;
+  let activeIdx = -1;
+
+  function getOrCreate() {
+    if (!dropdown) {
+      dropdown = document.createElement('div');
+      dropdown.className = 'tid-ac-dropdown';
+      dropdown.style.cssText = 'display:none;position:fixed;z-index:9999';
+      document.body.appendChild(dropdown);
+    }
+    return dropdown;
+  }
+  function reposition() {
+    if (!dropdown || dropdown.style.display === 'none') return;
+    const r = inputEl.getBoundingClientRect();
+    dropdown.style.left  = r.left + 'px';
+    dropdown.style.top   = (r.bottom + 2) + 'px';
+    dropdown.style.width = r.width + 'px';
+  }
+  function hide() { if (dropdown) dropdown.style.display = 'none'; activeIdx = -1; }
+  function show(items) {
+    if (!items.length) { hide(); return; }
+    activeIdx = -1;
+    const dd = getOrCreate();
+    dd.innerHTML = items.slice(0, 12).map((e, i) =>
+      `<div class="tid-ac-item" data-nr="${esc(e.nr)}" data-idx="${i}">
+        <span class="tid-ac-nr">${esc(e.nr)}</span>
+        <span class="tid-ac-name">${esc(e.label)}</span>
+      </div>`
+    ).join('');
+    dd.querySelectorAll('.tid-ac-item').forEach(el => {
+      el.addEventListener('mousedown', ev => { ev.preventDefault(); selectItem(el.dataset.nr); });
+    });
+    dd.style.display = 'block';
+    reposition();
+  }
+  function selectItem(nr) {
+    const entry = KOSTENST_DATA.find(e => e.nr === nr);
+    if (!entry) return;
+    inputEl.value = entry.nr + ' – ' + entry.label;
+    hide();
+  }
+  inputEl.addEventListener('input', () => {
+    const q = inputEl.value.trim().toLowerCase();
+    if (q.length < 1) { hide(); return; }
+    const matches = KOSTENST_DATA.filter(e =>
+      e.nr.includes(q) || e.label.toLowerCase().includes(q)
+    );
+    show(matches);
+  });
+  inputEl.addEventListener('keydown', e => {
+    if (!dropdown || dropdown.style.display === 'none') return;
+    const items = dropdown.querySelectorAll('.tid-ac-item');
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      activeIdx = Math.min(activeIdx + 1, items.length - 1);
+      items.forEach((el, i) => el.classList.toggle('tid-ac-active', i === activeIdx));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      activeIdx = Math.max(activeIdx - 1, 0);
+      items.forEach((el, i) => el.classList.toggle('tid-ac-active', i === activeIdx));
+    } else if (e.key === 'Enter' && activeIdx >= 0) {
+      e.preventDefault();
+      selectItem(items[activeIdx]?.dataset.nr);
+    } else if (e.key === 'Escape') { hide(); }
+  });
+  inputEl.addEventListener('blur', () => setTimeout(hide, 150));
+  window.addEventListener('scroll', reposition, true);
+  window.addEventListener('resize', reposition);
+  new MutationObserver(() => {
+    if (!document.contains(inputEl)) { hide(); if (dropdown) dropdown.remove(); dropdown = null; }
+  }).observe(document.body, { childList: true, subtree: true });
+}
+
 // ── WIZARD ────────────────────────────────────────────────────────────────────
 function lookupTID(val) {
   const tid = (val || '').trim().toUpperCase();
   const matchEl = $id('tid-match');
   // Normalize: user might type "4001-00010" or "400100010" — try exact then padded
-  const hit = TID_MAP[tid] || TID_MAP[tid.replace(/^(\d{4})(\d{5})$/, '$1-$2')] || null;
+  const hit = TID_MAP_ACTIVE[tid] || TID_MAP_ACTIVE[tid.replace(/^(\d{4})(\d{5})$/, '$1-$2')] || null;
   if (hit) {
     // Auto-fill Bezeichnung (Title) and Warengruppe
     const titleEl = $id('f-Title');
@@ -1647,9 +1763,10 @@ function lookupTID(val) {
 function initWizard() {
   wizardData = {};
   showStep(1);
-  // Artikelnummer autocomplete in wizard
+  // Artikelnummer + Kostenstelle autocomplete in wizard
   const wArtNr = $id('f-Artikelnummer');
   if (wArtNr) initTidAutocomplete(wArtNr, key => $id('f-' + key));
+  initKostenstAuto($id('f-Kostenstelle'));
   // Show field availability hints
   for (const fd of FORM_FIELDS) {
     const hint = $id('hint-' + fd.key);
@@ -1664,7 +1781,8 @@ function initWizard() {
   }
   // Reset fields
   ['Title','Beschreibung','Warengruppe','Mengeneinheit',
-   'Mindestlagermenge','Termin','Artikelnummer','Lieferant','Lieferant2','Lieferant3','Lieferant4',
+   'Mindestlagermenge','Termin','Artikelnummer','ExterneArtikelnummer',
+   'Lieferant','Lieferant2','Lieferant3','Lieferant4',
    'GeschaetzterPreis','Kostenstelle']
     .forEach(k => { const el = $id('f-'+k); if(el) el.value = ''; });
   const prioEl = $id('f-Prioritaet');
@@ -1730,11 +1848,12 @@ function wNext(step) {
     if (!title) { toast('Bitte Bezeichnung angeben.', 'error'); return; }
     if (!wg)    { toast('Bitte Warengruppe wählen.', 'error'); return; }
     wizardData.step1 = {
-      Title:        title,
-      Beschreibung: $id('f-Beschreibung').value.trim(),
-      Warengruppe:  wg,
-      Prioritaet:   $id('f-Prioritaet').value,
-      Artikelnummer: $id('f-Artikelnummer').value.trim(),
+      Title:                title,
+      Beschreibung:         $id('f-Beschreibung').value.trim(),
+      Warengruppe:          wg,
+      Prioritaet:           $id('f-Prioritaet').value,
+      Artikelnummer:        $id('f-Artikelnummer').value.trim(),
+      ExterneArtikelnummer: $id('f-ExterneArtikelnummer')?.value.trim() || '',
     };
   } else if (step === 2) {
     const menge  = $id('f-Menge').value;
@@ -2193,13 +2312,235 @@ async function submitRequest() {
   }
 }
 
+// ── TABELLEN-IMPORTER ────────────────────────────────────────────────────────
+
+function initImporter() {
+  renderImporter();
+}
+
+function renderImporter() {
+  const tidCount  = Object.keys(TID_MAP_ACTIVE).length;
+  const kstCount  = KOSTENST_DATA.length;
+  const tidIsCustom = !!localStorage.getItem(LS_TID_KEY);
+  const kstIsCustom = !!localStorage.getItem(LS_KOSTENST_KEY);
+
+  $id('view-importer').innerHTML = `
+    <div style="max-width:700px;margin:0 auto">
+      <p style="color:#6b7280;margin-bottom:20px;font-size:.9rem">
+        Laden Sie CSV- oder XLSX-Dateien hoch, um die Artikelnummer- und Kostenstellentabellen zu aktualisieren.
+        Die Daten werden lokal im Browser gespeichert.
+      </p>
+
+      <!-- Artikelnummern -->
+      <div class="imp-card">
+        <div class="imp-card-header">
+          <div>
+            <div class="imp-card-title">📦 Artikelnummern (TID-Tabelle)</div>
+            <div class="imp-card-sub">${tidCount} Einträge geladen${tidIsCustom ? ' <span class="imp-badge-custom">Angepasst</span>' : ' <span class="imp-badge-default">Standard</span>'}</div>
+          </div>
+          ${tidIsCustom ? `<button class="btn btn-sm btn-ghost" onclick="resetTable('tid')">↺ Zurücksetzen</button>` : ''}
+        </div>
+        <div class="imp-format-hint">
+          Format: CSV mit Semikolon <code>Artikelnummer;Bezeichnung;Warengruppe</code><br>
+          oder XLSX mit denselben Spalten in Zeile 1. Bestehende Daten werden durch Import <strong>ergänzt</strong> (gleiche Nr. wird überschrieben).
+        </div>
+        <div class="imp-drop-zone" id="imp-drop-tid"
+          ondragover="event.preventDefault();this.classList.add('drag-over')"
+          ondragleave="this.classList.remove('drag-over')"
+          ondrop="handleImpDrop(event,'tid')">
+          <span>📂 CSV oder XLSX hier ablegen oder</span>
+          <label class="btn btn-sm btn-outline" style="cursor:pointer;margin-left:6px">
+            Datei auswählen
+            <input type="file" accept=".csv,.xlsx" style="display:none" onchange="handleImpFile(this,'tid')">
+          </label>
+        </div>
+        <div id="imp-result-tid" class="imp-result"></div>
+      </div>
+
+      <!-- Kostenstellen -->
+      <div class="imp-card" style="margin-top:16px">
+        <div class="imp-card-header">
+          <div>
+            <div class="imp-card-title">🏢 Kostenstellen</div>
+            <div class="imp-card-sub">${kstCount} Einträge geladen${kstIsCustom ? ' <span class="imp-badge-custom">Angepasst</span>' : ' <span class="imp-badge-default">Standard</span>'}</div>
+          </div>
+          ${kstIsCustom ? `<button class="btn btn-sm btn-ghost" onclick="resetTable('kst')">↺ Zurücksetzen</button>` : ''}
+        </div>
+        <div class="imp-format-hint">
+          Format: CSV mit Semikolon <code>Kostenstelle;Bezeichnung</code> oder eine Spalte <code>10011 Fertigungsleitung</code><br>
+          oder XLSX mit denselben Spalten. Hochladen <strong>ersetzt</strong> die gesamte Tabelle.
+        </div>
+        <div class="imp-drop-zone" id="imp-drop-kst"
+          ondragover="event.preventDefault();this.classList.add('drag-over')"
+          ondragleave="this.classList.remove('drag-over')"
+          ondrop="handleImpDrop(event,'kst')">
+          <span>📂 CSV oder XLSX hier ablegen oder</span>
+          <label class="btn btn-sm btn-outline" style="cursor:pointer;margin-left:6px">
+            Datei auswählen
+            <input type="file" accept=".csv,.xlsx" style="display:none" onchange="handleImpFile(this,'kst')">
+          </label>
+        </div>
+        <div id="imp-result-kst" class="imp-result"></div>
+      </div>
+    </div>`;
+}
+
+function handleImpDrop(e, type) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  const file = e.dataTransfer?.files?.[0];
+  if (file) parseImportFile(file, type);
+}
+
+function handleImpFile(input, type) {
+  const file = input.files?.[0];
+  if (file) parseImportFile(file, type);
+  input.value = '';
+}
+
+async function parseImportFile(file, type) {
+  const resultEl = $id('imp-result-' + type);
+  resultEl.textContent = '⏳ Wird verarbeitet…';
+  try {
+    const ext = file.name.split('.').pop().toLowerCase();
+    let rows = []; // [{col0, col1, col2, ...}]
+
+    if (ext === 'csv') {
+      const text = await file.text();
+      const lines = text.split(/\r?\n/).filter(l => l.trim());
+      rows = lines.map(l => l.split(/;|\t/).map(c => c.trim().replace(/^"|"$/g, '')));
+    } else if (ext === 'xlsx') {
+      rows = await parseXlsxFile(file);
+    } else {
+      resultEl.innerHTML = '<span style="color:#ef4444">❌ Nur CSV oder XLSX-Dateien unterstützt.</span>';
+      return;
+    }
+
+    if (type === 'tid') applyTidImport(rows, resultEl);
+    else                applyKstImport(rows, resultEl);
+
+  } catch(e) {
+    resultEl.innerHTML = `<span style="color:#ef4444">❌ Fehler: ${esc(e.message)}</span>`;
+  }
+}
+
+// Parse XLSX in-browser using built-in zip (no external library needed for simple cases)
+async function parseXlsxFile(file) {
+  // Use SheetJS if available, else fallback to manual parse
+  if (typeof XLSX !== 'undefined') {
+    const buf = await file.arrayBuffer();
+    const wb  = XLSX.read(buf, { type: 'array' });
+    const ws  = wb.Sheets[wb.SheetNames[0]];
+    const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    return data.map(r => r.map(c => String(c ?? '').trim()));
+  }
+  // Fallback: manual zip parse (shared strings + sheet1)
+  const buf  = await file.arrayBuffer();
+  const u8   = new Uint8Array(buf);
+  // Minimal zip extractor
+  function readZipEntry(u8, name) {
+    const enc = new TextEncoder();
+    const nameBytes = enc.encode(name);
+    for (let i = 0; i < u8.length - 30; i++) {
+      if (u8[i] !== 0x50 || u8[i+1] !== 0x4B || u8[i+2] !== 0x03 || u8[i+3] !== 0x04) continue;
+      const fnLen = u8[i+26] | (u8[i+27] << 8);
+      const exLen = u8[i+28] | (u8[i+29] << 8);
+      const fn = new TextDecoder().decode(u8.slice(i+30, i+30+fnLen));
+      const dataStart = i + 30 + fnLen + exLen;
+      const compSize  = u8[i+18] | (u8[i+19]<<8) | (u8[i+20]<<16) | (u8[i+21]<<24);
+      const method    = u8[i+8] | (u8[i+9]<<8);
+      if (fn === name) {
+        if (method === 0) return new TextDecoder('utf-8').decode(u8.slice(dataStart, dataStart + compSize));
+        // deflate — skip; user should use SheetJS for compressed entries
+        return null;
+      }
+    }
+    return null;
+  }
+  const ssXml  = readZipEntry(u8, 'xl/sharedStrings.xml');
+  const shXml  = readZipEntry(u8, 'xl/worksheets/sheet1.xml');
+  if (!ssXml || !shXml) throw new Error('XLSX-Datei konnte nicht gelesen werden. Bitte als CSV exportieren.');
+  const parser = new DOMParser();
+  const ssDoc  = parser.parseFromString(ssXml, 'text/xml');
+  const shDoc  = parser.parseFromString(shXml, 'text/xml');
+  const ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+  const strings = [...ssDoc.getElementsByTagNameNS(ns, 'si')].map(si =>
+    [...si.getElementsByTagNameNS(ns, 't')].map(t => t.textContent || '').join('')
+  );
+  const result = [];
+  for (const row of shDoc.getElementsByTagNameNS(ns, 'row')) {
+    const cells = [];
+    for (const c of row.getElementsByTagNameNS(ns, 'c')) {
+      const t  = c.getAttribute('t');
+      const v  = c.getElementsByTagNameNS(ns, 'v')[0]?.textContent || '';
+      cells.push(t === 's' ? (strings[parseInt(v)] || '') : v);
+    }
+    result.push(cells);
+  }
+  return result;
+}
+
+function applyTidImport(rows, resultEl) {
+  // Detect header row: if first row looks like a header (non-numeric first cell)
+  let start = 0;
+  if (rows.length && !/^\d/.test(rows[0][0] || '')) start = 1;
+  const imported = {};
+  let count = 0;
+  for (const row of rows.slice(start)) {
+    const nr = String(row[0] || '').trim().toUpperCase();
+    const b  = String(row[1] || '').trim();
+    const w  = String(row[2] || '').trim();
+    if (!nr || !b) continue;
+    imported[nr] = { b, w: w || 'Sonstiges', g: w || 'Sonstiges' };
+    count++;
+  }
+  if (!count) { resultEl.innerHTML = '<span style="color:#ef4444">❌ Keine gültigen Zeilen gefunden. Prüfen Sie das Format.</span>'; return; }
+  const merged = Object.assign({}, TID_MAP, imported);
+  localStorage.setItem(LS_TID_KEY, JSON.stringify(imported)); // store only the delta
+  reloadLookupData();
+  resultEl.innerHTML = `<span style="color:#16a34a">✓ ${count} Artikelnummern importiert. Gesamt: ${Object.keys(TID_MAP_ACTIVE).length} Einträge.</span>`;
+  setTimeout(renderImporter, 800);
+}
+
+function applyKstImport(rows, resultEl) {
+  let start = 0;
+  const firstCell = String(rows[0]?.[0] || '').trim().toLowerCase();
+  if (!firstCell || /kostenstelle|nr|nummer/i.test(firstCell)) start = 1;
+  const result = [];
+  for (const row of rows.slice(start)) {
+    const col0 = String(row[0] || '').trim();
+    const col1 = String(row[1] || '').trim();
+    if (!col0) continue;
+    if (col1) {
+      // Two-column format: col0=nr, col1=label
+      result.push({ nr: col0, label: col1 });
+    } else {
+      // Single-column: "10011 Fertigungsleitung"
+      const m = col0.match(/^(\d+)\s+(.+)$/);
+      if (m) result.push({ nr: m[1], label: m[2].trim() });
+    }
+  }
+  if (!result.length) { resultEl.innerHTML = '<span style="color:#ef4444">❌ Keine gültigen Zeilen gefunden. Prüfen Sie das Format.</span>'; return; }
+  localStorage.setItem(LS_KOSTENST_KEY, JSON.stringify(result));
+  reloadLookupData();
+  resultEl.innerHTML = `<span style="color:#16a34a">✓ ${result.length} Kostenstellen importiert.</span>`;
+  setTimeout(renderImporter, 800);
+}
+
+function resetTable(type) {
+  if (type === 'tid')  localStorage.removeItem(LS_TID_KEY);
+  if (type === 'kst')  localStorage.removeItem(LS_KOSTENST_KEY);
+  reloadLookupData();
+  renderImporter();
+}
+
 // ── SAMMELANFRAGE (MULTI-POSITION WIZARD) ────────────────────────────────────
 
 let multiPositions = [];   // [{artNr, bezeichnung, menge, me}, ...]
 let multiWizardData = {};  // step2, step3
 
 function initMultiWizard() {
-  multiPositions = [{ artNr: '', bezeichnung: '', menge: '', me: '' }];
+  multiPositions = [{ artNr: '', extArtNr: '', bezeichnung: '', menge: '', me: '' }];
   multiWizardData = {};
   showMultiStep(1);
   // Reset Allgemein fields
@@ -2222,6 +2563,8 @@ function initMultiWizard() {
     const grp = $id('m-lieferant-extra-' + n);
     if (grp) grp.style.display = 'none';
   });
+  // Kostenstelle autocomplete
+  initKostenstAuto($id('mf-Kostenstelle'));
   // Reset submit button
   const sb = $id('btn-multi-submit');
   if (sb) { sb.disabled = false; sb.textContent = '✓ Sammelanfrage einreichen'; }
@@ -2243,7 +2586,7 @@ function showMultiStep(n) {
 function renderMultiPositions() {
   const container = $id('multi-positions-table');
   if (!container) return;
-  if (multiPositions.length === 0) multiPositions.push({ artNr: '', bezeichnung: '', menge: '', me: '' });
+  if (multiPositions.length === 0) multiPositions.push({ artNr: '', extArtNr: '', bezeichnung: '', menge: '', me: '' });
   const meOptions = ['','Lagereinheiten','kg','Stück','Anzahl','m','Paar','Liter'];
   const rows = multiPositions.map((pos, i) => `
     <div class="multi-pos-row" data-idx="${i}">
@@ -2258,6 +2601,14 @@ function renderMultiPositions() {
               oninput="multiPosChange(${i},'artNr',this.value)"
               autocomplete="off"/>
           </div>
+        </div>
+        <div class="multi-pos-field">
+          <label>Externe ArtNr. <span class="field-sub">Katalog</span></label>
+          <input type="text" class="mpos-extartnr" data-idx="${i}"
+            value="${esc(pos.extArtNr || '')}"
+            placeholder="Lieferanten-Nr."
+            oninput="multiPosChange(${i},'extArtNr',this.value)"
+            autocomplete="off"/>
         </div>
         <div class="multi-pos-field" style="flex:2">
           <label>Bezeichnung <span class="req">*</span></label>
@@ -2314,7 +2665,7 @@ function multiPosChange(idx, field, val) {
 }
 
 function addMultiPosition() {
-  multiPositions.push({ artNr: '', bezeichnung: '', menge: '', me: '' });
+  multiPositions.push({ artNr: '', extArtNr: '', bezeichnung: '', menge: '', me: '' });
   renderMultiPositions();
 }
 
@@ -2344,11 +2695,13 @@ function wMultiNext(step) {
       const bezEl   = document.querySelector(`.mpos-bez[data-idx="${i}"]`);
       const mengeEl = document.querySelector(`.mpos-menge[data-idx="${i}"]`);
       const meEl    = document.querySelector(`.mpos-me[data-idx="${i}"]`);
-      const artEl   = document.querySelector(`.mpos-artnr[data-idx="${i}"]`);
-      if (bezEl)   p.bezeichnung = bezEl.value.trim();
-      if (mengeEl) p.menge = mengeEl.value;
-      if (meEl)    p.me = meEl.value;
-      if (artEl)   p.artNr = artEl.value.trim();
+      const artEl    = document.querySelector(`.mpos-artnr[data-idx="${i}"]`);
+      const extArtEl = document.querySelector(`.mpos-extartnr[data-idx="${i}"]`);
+      if (bezEl)    p.bezeichnung = bezEl.value.trim();
+      if (mengeEl)  p.menge = mengeEl.value;
+      if (meEl)     p.me = meEl.value;
+      if (artEl)    p.artNr = artEl.value.trim();
+      if (extArtEl) p.extArtNr = extArtEl.value.trim();
       if (!p.bezeichnung) { toast(`Position ${i + 1}: Bitte Bezeichnung angeben.`, 'error'); return; }
       if (!p.menge || parseFloat(p.menge) <= 0) { toast(`Position ${i + 1}: Bitte gültige Menge eingeben.`, 'error'); return; }
       if (!p.me)   { toast(`Position ${i + 1}: Bitte Mengeneinheit wählen.`, 'error'); return; }
@@ -2397,6 +2750,7 @@ function buildMultiReview() {
     <tr>
       <td style="padding:4px 8px;color:#6b7280">${i + 1}</td>
       <td style="padding:4px 8px">${esc(p.artNr) || '–'}</td>
+      <td style="padding:4px 8px;color:#9ca3af">${esc(p.extArtNr) || '–'}</td>
       <td style="padding:4px 8px">${esc(p.bezeichnung)}</td>
       <td style="padding:4px 8px;text-align:right">${esc(p.menge)}</td>
       <td style="padding:4px 8px">${esc(p.me)}</td>
@@ -2411,6 +2765,7 @@ function buildMultiReview() {
           <thead><tr style="background:#f3f4f6;font-weight:600">
             <th style="padding:6px 8px;text-align:left">#</th>
             <th style="padding:6px 8px;text-align:left">ArtNr.</th>
+            <th style="padding:6px 8px;text-align:left">Ext. ArtNr.</th>
             <th style="padding:6px 8px;text-align:left">Bezeichnung</th>
             <th style="padding:6px 8px;text-align:right">Menge</th>
             <th style="padding:6px 8px;text-align:left">ME</th>
@@ -2459,6 +2814,7 @@ async function submitMultiRequest() {
     const posJson = JSON.stringify(multiPositions.map((p, i) => ({
       Nr: i + 1,
       Artikelnummer: p.artNr,
+      ExterneArtikelnummer: p.extArtNr || '',
       Bezeichnung: p.bezeichnung,
       Menge: p.menge,
       ME: p.me,
@@ -3005,7 +3361,7 @@ function renderPanel(item, editMode = false) {
         inp = `<textarea class="pf-input" data-key="${fd.key}" rows="2">${esc(String(raw))}</textarea>`;
       } else if (fd.key === 'Artikelnummer') {
         const val = esc(String(raw));
-        const hit = TID_MAP[String(raw).trim().toUpperCase()] || null;
+        const hit = TID_MAP_ACTIVE[String(raw).trim().toUpperCase()] || null;
         const hint = hit ? `<div class="tid-ac-confirm">✓ ${esc(hit.b)} · ${esc(hit.w)}</div>` : '';
         inp = `<div class="tid-ac-wrap">
           <input type="text" class="pf-input" data-key="Artikelnummer" data-ac="tid"
