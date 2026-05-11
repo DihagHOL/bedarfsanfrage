@@ -3039,15 +3039,20 @@ async function openPanel(itemId) {
   if (currentView !== 'mine') {
     const sv        = (getStatusVal(item) || '').trim();
     const statusCol = resolvedFields['Status'] || 'Status';
+    let   advanced  = false;
 
     // Auto-advance: Eingereicht → In Prüfung (Einkauf)
     if (/^eingereicht$/i.test(sv)) {
       const target = statusChoices.find(c => /pr[üu]fung/i.test(c) && /einkauf/i.test(c) && !/strategisch/i.test(c))
                   || 'In Prüfung (Einkauf)';
+      console.log('[openPanel] auto-advance Eingereicht →', target, '| statusCol:', statusCol);
       try {
         await gPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, { [statusCol]: target });
-        if (item.fields) item.fields[statusCol] = target;
-      } catch(e) { console.warn('[openPanel] auto-advance Eingereicht failed:', e.message); }
+        advanced = true;
+      } catch(e) {
+        console.error('[openPanel] auto-advance Eingereicht failed:', e.message);
+        toast('Status-Update fehlgeschlagen: ' + e.message, 'error');
+      }
     }
 
     // Auto-advance: Freigegeben → In Bestellung
@@ -3056,13 +3061,19 @@ async function openPanel(itemId) {
       if (inBestKey) {
         try {
           await gPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, { [statusCol]: inBestKey });
-          if (item.fields) item.fields[statusCol] = inBestKey;
+          advanced = true;
         } catch(e) { console.warn('[openPanel] auto-advance Freigegeben failed:', e.message); }
       }
     }
+
+    // Reload list so the panel renders with the fresh status from SP
+    if (advanced) await loadItems(false);
   }
 
-  $id(`panel-${currentView}-content`).innerHTML = renderPanel(item);
+  // Always use the freshest item from allItems after potential reload
+  const freshItem = allItems.find(i => String(i.id) === panelItemId) || item;
+
+  $id(`panel-${currentView}-content`).innerHTML = renderPanel(freshItem);
   $id(`panel-${currentView}`).classList.remove('hidden');
   $id(`split-${currentView}`).classList.add('has-panel');
 
