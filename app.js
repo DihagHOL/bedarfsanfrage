@@ -2254,9 +2254,10 @@ function bindPanelEvents(itemId) {
 
   function loadComments() {
     if (!commentsEl || !siteId || !listId) { if (commentsSection) commentsSection.style.display = ''; return; }
+    const spSiteGuid = siteId.split(',')[1] || siteId;
     return getSpToken()
       .then(tok => fetch(
-        `${SP_BASE}/_api/v2.1/sites/${siteId}/lists/${listId}/items/${itemId}/comments?$top=50&_=${Date.now()}`,
+        `${SP_BASE}/_api/v2.1/sites/${spSiteGuid}/lists/${listId}/items/${itemId}/comments?$top=50&_=${Date.now()}`,
         { headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json',
             'Cache-Control': 'no-cache', Pragma: 'no-cache' } }
       ))
@@ -2670,10 +2671,11 @@ function spFullUrl(relUrl) {
 
 async function postSpComment(itemId, text) {
   if (!text?.trim() || !siteId || !listId) return false;
+  const spSiteGuid = siteId.split(',')[1] || siteId;
   try {
     const tok = await getSpToken();
     const r = await fetch(
-      `${SP_BASE}/_api/v2.1/sites/${siteId}/lists/${listId}/items/${itemId}/comments`,
+      `${SP_BASE}/_api/v2.1/sites/${spSiteGuid}/lists/${listId}/items/${itemId}/comments`,
       { method: 'POST',
         headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json',
           Accept: 'application/json', 'Cache-Control': 'no-cache' },
