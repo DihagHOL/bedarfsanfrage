@@ -3084,6 +3084,21 @@ function bindPanelEvents(itemId) {
   });
   pq('#panel-edit')?.addEventListener('click', () => startEditMode(itemId));
   pq('#panel-order')?.addEventListener('click', () => openOrderModal(itemId));
+
+  // Genehmigungsaktion-Buttons
+  pq('#btn-approve')?.addEventListener('click', () => doApprove(itemId));
+  pq('#btn-reject')?.addEventListener('click', () => {
+    pq('#aab-reject-form').style.display = '';
+    pq('#btn-approve').style.display = 'none';
+    pq('#btn-reject').style.display  = 'none';
+  });
+  pq('#btn-reject-cancel')?.addEventListener('click', () => {
+    pq('#aab-reject-form').style.display = 'none';
+    pq('#btn-approve').style.display = '';
+    pq('#btn-reject').style.display  = '';
+  });
+  pq('#btn-reject-confirm')?.addEventListener('click', () =>
+    doReject(itemId, pq('#aab-reject-comment')?.value?.trim() || ''));
   pq('#panel-save')?.addEventListener('click', () => savePanelEdits(itemId, panelRoot));
   pq('#panel-cancel')?.addEventListener('click', async () => {
     await releaseLock(itemId);
@@ -3331,6 +3346,98 @@ async function saveEdits(itemId) {
 }
 
 // Build the inner HTML for the "Status & Genehmigung" approval section.
+// ── GENEHMIGUNG IM DASHBOARD ─────────────────────────────────────────────────
+
+async function doApprove(itemId) {
+  const banner = document.querySelector('#approval-action-banner');
+  if (banner) banner.innerHTML = '<div class="aab-hint">⏳ Wird gespeichert…</div>';
+
+  const statusCol   = resolvedFields['Status']               || 'Status';
+  const approverCol = resolvedFields['Entscheider_x002a_in'] || 'Entscheider_x002a_in';
+  const commentCol  = resolvedFields['Genehmigungskommentar']|| 'Genehmigungskommentar';
+
+  const approverName = account?.name || account?.username || '';
+  const genehmigt    = 'Genehmigt (Einkauf)';
+
+  // Find the exact SP choice string (case-sensitive)
+  const choiceMatch = statusChoices.find(c => /^genehmigt.*einkauf/i.test(c.trim())) || genehmigt;
+
+  try {
+    await gPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, {
+      [statusCol]:   choiceMatch,
+      [approverCol]: approverName,
+    });
+
+    // Update local cache
+    const item = allItems.find(i => String(i.id) === String(itemId));
+    if (item?.fields) {
+      item.fields[statusCol]   = choiceMatch;
+      item.fields[approverCol] = approverName;
+    }
+
+    toast('✅ Genehmigung erteilt.', 'success');
+    await loadItems(false);
+    // Re-render panel with updated item
+    const updated = allItems.find(i => String(i.id) === String(itemId));
+    if (updated) {
+      const panelRoot = $id(`panel-${currentView}-content`);
+      if (panelRoot) { panelRoot.innerHTML = renderPanel(updated); bindPanelEvents(itemId); }
+    }
+  } catch(e) {
+    toast('Fehler beim Genehmigen: ' + e.message, 'error');
+    // Restore banner
+    const item = allItems.find(i => String(i.id) === String(itemId));
+    if (item) {
+      const panelRoot = $id(`panel-${currentView}-content`);
+      if (panelRoot) { panelRoot.innerHTML = renderPanel(item); bindPanelEvents(itemId); }
+    }
+  }
+}
+
+async function doReject(itemId, comment) {
+  const banner = document.querySelector('#approval-action-banner');
+  if (banner) banner.innerHTML = '<div class="aab-hint">⏳ Wird gespeichert…</div>';
+
+  const statusCol   = resolvedFields['Status']               || 'Status';
+  const approverCol = resolvedFields['Entscheider_x002a_in'] || 'Entscheider_x002a_in';
+  const commentCol  = resolvedFields['Genehmigungskommentar']|| 'Genehmigungskommentar';
+
+  const approverName = account?.name || account?.username || '';
+  const abgelehnt    = statusChoices.find(c => /^abgelehnt$/i.test(c.trim())) || 'Abgelehnt';
+
+  const patch = {
+    [statusCol]:   abgelehnt,
+    [approverCol]: approverName,
+  };
+  if (comment && commentCol) patch[commentCol] = comment;
+
+  try {
+    await gPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, patch);
+
+    const item = allItems.find(i => String(i.id) === String(itemId));
+    if (item?.fields) {
+      item.fields[statusCol]   = abgelehnt;
+      item.fields[approverCol] = approverName;
+      if (comment) item.fields[commentCol] = comment;
+    }
+
+    toast('❌ Anfrage abgelehnt.', 'success');
+    await loadItems(false);
+    const updated = allItems.find(i => String(i.id) === String(itemId));
+    if (updated) {
+      const panelRoot = $id(`panel-${currentView}-content`);
+      if (panelRoot) { panelRoot.innerHTML = renderPanel(updated); bindPanelEvents(itemId); }
+    }
+  } catch(e) {
+    toast('Fehler beim Ablehnen: ' + e.message, 'error');
+    const item = allItems.find(i => String(i.id) === String(itemId));
+    if (item) {
+      const panelRoot = $id(`panel-${currentView}-content`);
+      if (panelRoot) { panelRoot.innerHTML = renderPanel(item); bindPanelEvents(itemId); }
+    }
+  }
+}
+
 // Extracted so it can be called both from renderPanel and from the async
 // loadApproverHistory refresh without re-rendering the whole panel.
 function buildApprovalInner(item, statusVal) {
@@ -3438,6 +3545,28 @@ function renderPanel(item, editMode = false) {
 
   const approvalInner = buildApprovalInner(item, statusVal);
 
+  // Genehmigungsaktion-Banner: nur sichtbar wenn Status = "In Prüfung (Einkauf)"
+  // und nicht in der eigenen Ansicht (Einkauf-Sicht)
+  const needsApproval = !isMineView && !editMode
+    && /pr[üu]fung/i.test(statusVal) && /einkauf/i.test(statusVal) && !/strategisch/i.test(statusVal);
+  const approvalActionBanner = needsApproval ? `
+    <div class="approval-action-banner" id="approval-action-banner">
+      <div class="aab-title">⏳ Genehmigung ausstehend – Einkauf</div>
+      <div class="aab-hint">Bitte prüfen Sie die Anfrage und erteilen Sie Ihre Entscheidung:</div>
+      <div class="aab-buttons">
+        <button class="btn btn-success btn-sm" id="btn-approve">✅ Genehmigen</button>
+        <button class="btn btn-danger  btn-sm" id="btn-reject">❌ Ablehnen</button>
+      </div>
+      <div class="aab-reject-form" id="aab-reject-form" style="display:none">
+        <textarea id="aab-reject-comment" class="pf-comment-textarea" rows="2"
+          placeholder="Ablehnungsgrund (optional)…"></textarea>
+        <div class="aab-buttons" style="margin-top:6px">
+          <button class="btn btn-danger btn-sm" id="btn-reject-confirm">❌ Ablehnung bestätigen</button>
+          <button class="btn btn-ghost  btn-sm" id="btn-reject-cancel">Abbrechen</button>
+        </div>
+      </div>
+    </div>` : '';
+
   return `
     <div class="panel-hdr">
       <div class="panel-hdr-top">
@@ -3454,6 +3583,7 @@ function renderPanel(item, editMode = false) {
       <div class="panel-actions">${buttons}</div>
     </div>
 
+    ${approvalActionBanner}
     <div class="panel-body">
       <div class="pf-section">
         <div class="pf-sec-title">Bedarf</div>
