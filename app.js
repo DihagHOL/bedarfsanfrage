@@ -3041,15 +3041,19 @@ async function openPanel(itemId) {
     const sv        = (getStatusVal(item) || '').trim();
     const statusCol = resolvedFields['Status'] || 'Status';
     let   advanced  = false;
+    console.log('[auto-advance] sv=', JSON.stringify(sv), '| statusCol=', statusCol, '| statusChoices=', statusChoices);
 
     // Eingereicht → In Prüfung (Verkauf)
     if (/^eingereicht$/i.test(sv)) {
       const target = statusChoices.find(c => /pr[üu]fung/i.test(c) && /verkauf/i.test(c))
                   || 'In Prüfung (Verkauf)';
+      console.log('[auto-advance] Eingereicht gefunden → target=', JSON.stringify(target));
       try {
         await gPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, { [statusCol]: target });
         advanced = true;
+        console.log('[auto-advance] PATCH erfolgreich');
       } catch(e) {
+        console.error('[auto-advance] PATCH fehlgeschlagen:', e.message);
         toast('Status-Update fehlgeschlagen: ' + e.message, 'error');
       }
     }
