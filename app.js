@@ -3038,15 +3038,14 @@ async function openPanel(itemId) {
 
   // Auto-advance: läuft unabhängig von View und Rolle für jeden Nutzer
   {
-    const sv        = (getStatusVal(item) || '').trim();
+    const sv        = (getStatusVal(item) || 'Eingereicht').trim(); // leeres Feld = Eingereicht
     const statusCol = resolvedFields['Status'] || 'Status';
     let   advanced  = false;
-    console.log('[auto-advance] sv=', JSON.stringify(sv), '| statusCol=', statusCol, '| statusChoices=', statusChoices);
 
-    // Eingereicht → In Prüfung (Verkauf)
+    // Eingereicht → In Prüfung (Einkauf)
     if (/^eingereicht$/i.test(sv)) {
-      const target = statusChoices.find(c => /pr[üu]fung/i.test(c) && /verkauf/i.test(c))
-                  || 'In Prüfung (Verkauf)';
+      const target = statusChoices.find(c => /pr[üu]fung/i.test(c) && /einkauf/i.test(c) && !/strategisch/i.test(c))
+                  || 'In Prüfung (Einkauf)';
       console.log('[auto-advance] sv=', JSON.stringify(sv), 'statusCol=', statusCol, 'target=', target, 'choices=', statusChoices);
       try {
         await gPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, { [statusCol]: target });
