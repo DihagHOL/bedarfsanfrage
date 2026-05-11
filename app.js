@@ -1060,72 +1060,57 @@ const STAGE_MAP = [
   { label: 'Geschäftsführung',           re: /\bgf\b|geschäftsführ|geschaeftsfuehr/i },
 ];
 
-// Fixed semantic stage order for the timeline (independent of SP choice order).
-// smIdx maps to STAGE_MAP entry for approval-column lookup; -1 = no approval col.
+// Timeline stages with direct SP field mappings (from Power Automate workflow).
+// approverField / commentField are read directly from the list item — no version
+// history needed.  A stage is "visible" if its approverField is non-empty
+// (meaning that stage was actually reached) or it is the current status.
 const TIMELINE_STAGES = [
-  { label: 'Eingereicht',                         smIdx: -1, test: v => /^eingereicht$/i.test(v) },
-  { label: 'In Prüfung (Einkauf)',                smIdx:  0, test: v => /pr[üu]fung/i.test(v) && /einkauf/i.test(v) && !/strategisch/i.test(v) },
-  { label: 'In Prüfung (Werkleitung)',            smIdx:  1, test: v => /werkleitung/i.test(v) },
-  { label: 'In Prüfung (strategischer Einkauf)', smIdx:  2, test: v => /strategisch/i.test(v) },
-  { label: 'In Prüfung (Controlling)',            smIdx:  3, test: v => /controlling/i.test(v) },
-  { label: 'Freigegeben',                         smIdx: -1, test: v => /^freigegeben$/i.test(v) },
-  { label: 'Bestellt',                            smIdx: -1, test: v => /^bestellt$/i.test(v) },
+  { label: 'Eingereicht',
+    test: v => /^eingereicht$/i.test(v),
+    approverField: null, commentField: null },
+  { label: 'In Prüfung (Einkauf)',
+    test: v => /pr[üu]fung/i.test(v) && /einkauf/i.test(v) && !/strategisch/i.test(v),
+    approverField: 'Entscheider_x002a_in', commentField: 'Genehmigungskommentar' },
+  { label: 'Genehmigt (Einkauf)',
+    test: v => /genehmigt/i.test(v) && /einkauf/i.test(v),
+    approverField: 'Entscheider_x002a_in', commentField: 'Genehmigungskommentar' },
+  { label: 'In Prüfung (Werkleitung)',
+    test: v => /werkleitung/i.test(v),
+    approverField: 'Genehmiger3', commentField: 'Genehmigungskommentar3' },
+  { label: 'In Prüfung (Controlling)',
+    test: v => /controlling/i.test(v),
+    approverField: 'Genehmiger2', commentField: 'Genehmigungskommentar2' },
+  { label: 'In Prüfung (strategischer Einkauf)',
+    test: v => /strategisch/i.test(v),
+    approverField: 'Genehmiger4', commentField: 'Genehmigungskommentar4' },
+  { label: 'Freigegeben',
+    test: v => /^freigegeben$/i.test(v),
+    approverField: null, commentField: null },
+  { label: 'In Bestellung',
+    test: v => /bestellung|bestellt/i.test(v),
+    approverField: null, commentField: null },
+  { label: 'Abgelehnt',
+    test: v => /^abgelehnt$/i.test(v),
+    approverField: null, commentField: null },
 ];
 
-// Approver-history cache built from item version history.
-// { itemId: { 'In Prüfung (Einkauf)': 'Max Mustermann', … } }
-const _approverHistory = {};
-
-// Extract approver name directly from a raw fields object (used for version scanning).
-function getApproverFromFields(fields) {
-  if (!fields) return null;
-  function extractStr(raw) {
-    if (raw == null) return null;
+// Resolve a person/lookup field from item.fields to a display name string.
+function resolvePersonField(fields, fieldName) {
+  if (!fieldName || !fields) return null;
+  function tryExtract(raw) {
+    if (raw == null || raw === '') return null;
     if (typeof raw === 'object') {
       const n = raw.displayName || raw.LookupValue || raw.Title || raw.title;
       return (n && n !== '[object Object]') ? String(n).trim() || null : null;
     }
     const s = String(raw).trim();
-    return (s && s !== '[object Object]') ? s : null;
+    if (!s || s === '[object Object]') return null;
+    if (/^\d+$/.test(s)) return spUserMap[s] || null; // numeric LookupId
+    return s;
   }
-  for (const k of APPROVER_DIRECT_KEYS) {
-    const v = extractStr(fields[k]);
-    if (v) return v;
-    const lid = fields[k + 'LookupId'];
-    if (lid != null) { const n = spUserMap[String(lid)]; if (n) return n; }
-  }
-  return null;
-}
-
-// Load version history for an item and record which approver was set at each timeline stage.
-// Result is cached in _approverHistory[itemId].  Returns the cache entry.
-async function loadApproverHistory(itemId) {
-  if (_approverHistory[itemId]) return _approverHistory[itemId];
-  const history  = {};
-  const visited  = new Set(); // which stages were actually reached
-  try {
-    const data = await gGet(
-      `/sites/${siteId}/lists/${listId}/items/${itemId}/versions?$expand=fields($select=*)&$top=100`
-    );
-    // Sort oldest → newest so later versions overwrite earlier ones for the same stage
-    const vers = (data.value || []).sort((a, b) => new Date(a.lastModifiedDateTime) - new Date(b.lastModifiedDateTime));
-    for (const v of vers) {
-      const statusKey = resolvedFields['Status'] || 'Stauts';
-      const sv       = (v.fields?.[statusKey] || v.fields?.Status || v.fields?.Stauts || '').trim();
-      const approver = getApproverFromFields(v.fields);
-      for (const d of TIMELINE_STAGES) {
-        if (d.test(sv)) {
-          visited.add(d.label);
-          if (approver) history[d.label] = approver;
-          break;
-        }
-      }
-    }
-  } catch(e) {
-    console.warn('[loadApproverHistory]', e.message);
-  }
-  _approverHistory[itemId] = { ...history, _visited: visited };
-  return _approverHistory[itemId];
+  return tryExtract(fields[fieldName])
+      || tryExtract(spUserMap[String(fields[fieldName + 'LookupId'] ?? '')])
+      || null;
 }
 
 // Workflow-Reihenfolge für die Status-Zeitleiste (wird in discoverSP() aus SP-Spalte befüllt)
@@ -1153,114 +1138,51 @@ function statusColorFor(val) {
 }
 
 // Data-driven status timeline.
-// Only renders stages that have already been reached (past ✓ or current ●).
-// Future stages are hidden.  When rejected, shows completed stages + Abgelehnt row.
-// Past approvers are read from _approverHistory[item.id] (populated async by loadApproverHistory).
+// Reads approver/comment directly from item.fields — no version history needed.
+// A stage is visible if: it IS the current status, OR its approverField is filled
+// (meaning Power Automate put someone there, i.e. the stage was actually reached).
+// "Eingereicht" is always shown.
 function statusTimeline(statusVal, item) {
-  const sv    = (statusVal || '').trim();
-  const isRej = /abgelehnt/i.test(sv);
+  const sv     = (statusVal || '').trim();
+  const fields = item?.fields || item || {};
+  const isRej  = /^abgelehnt$/i.test(sv);
+  const TERMINAL_OK = /^(freigegeben|in bestellung|bestellt)$/i;
 
-  // Collect all approval-related columns that have a value on this item.
-  const approvalCols = item
-    ? Object.entries(colByKey)
-        .filter(([k, c]) => APPROVAL_RE.test(c.displayName || k) && !SYSTEM_FIELDS.has(k))
-        .map(([k, c]) => ({ key: k, label: c.displayName || k, val: getField(item, k) }))
-        .filter(c => c.val != null && c.val !== '')
-    : [];
+  const rows = TIMELINE_STAGES.map(d => {
+    const isCurrent = d.test(sv);
+    const approver  = resolvePersonField(fields, d.approverField);
+    const comment   = d.commentField ? String(fields[d.commentField] || '').trim() : '';
 
-  // Return the formal decision value for a STAGE_MAP stage.
-  function getDecision(smIdx) {
-    if (smIdx < 0 || smIdx >= STAGE_MAP.length) return null;
-    const sm = STAGE_MAP[smIdx];
-    const isEinkauf = smIdx === 0;
-    const cols = approvalCols.filter(c => {
-      if (!(sm.re.test(c.label) || sm.re.test(c.key))) return false;
-      if (isEinkauf && /strategisch/i.test(c.label + c.key)) return false;
-      return /genehmig|entscheid|freigab|ablehn/i.test(c.label);
-    });
-    return cols.length ? cols[0].val : null;
-  }
+    // ── Visibility ────────────────────────────────────────────────────────
+    const visible = d.label === 'Eingereicht' // always
+      || isCurrent                            // active step
+      || approver != null;                    // field filled → stage was reached
+    if (!visible) return null;
 
-  const currentIdx      = TIMELINE_STAGES.findIndex(d => d.test(sv));
-  const approverByStage = item ? (_approverHistory[item.id] || {}) : {};
-  const visitedStages   = approverByStage._visited || null; // Set or null if not loaded yet
-
-  // Terminal "success" stage labels – always render as ✓ green, never ●
-  const TERMINAL_OK = /^(freigegeben|bestellt)$/i;
-
-  const rows = TIMELINE_STAGES.map((d, i) => {
-    const isCurrent  = d.test(sv);
-    const isPast     = currentIdx >= 0 && i < currentIdx;
-    // Show the single next stage after "Freigegeben" as a pending ● preview
-    const isNextStep = currentIdx >= 0 && i === currentIdx + 1 && TERMINAL_OK.test(sv);
-    const decision   = getDecision(d.smIdx);
-
-    // ── Visibility: only show reached stages ──────────────────────────────
-    if (!isCurrent && !isPast && !isNextStep) {
-      if (isRej && (decision != null || approverByStage[d.label] || i === 0)) {
-        /* show in rejection audit trail */
-      } else {
-        return null; // future or skipped stage → hide
-      }
-    }
-
-    // Past stage: only show if someone actually approved it (recorded in version history).
-    // This filters out stages skipped or only briefly touched by automation.
-    // "Eingereicht" (i === 0) is always shown as the starting point.
-    if (isPast && i > 0 && !approverByStage[d.label]) {
-      return null;
-    }
-
-    // ── Dot / colour ──────────────────────────────────────────────────────
+    // ── Dot / class ───────────────────────────────────────────────────────
     let dot, cls;
-    if (decision != null) {
-      const dL = String(decision).toLowerCase();
-      if (/freigegeben|genehmigt|approved|ja\b/.test(dL)) { dot = '✓'; cls = 'ap-ok';      }
-      else if (/abgelehnt|rejected|nein\b/.test(dL))       { dot = '✗'; cls = 'ap-no';      }
-      else                                                  { dot = '●'; cls = 'ap-pending'; }
-    } else if (isCurrent) {
-      // Terminal success states (Freigegeben, Bestellt) are always green ✓
-      if (TERMINAL_OK.test(d.label)) { dot = '✓'; cls = 'ap-ok'; }
-      else                           { dot = '●'; cls = 'ap-pending'; }
-    } else if (isNextStep) {
-      dot = '●'; cls = 'ap-pending'; // next expected step
+    if (isCurrent) {
+      if      (TERMINAL_OK.test(d.label)) { dot = '✓'; cls = 'ap-ok';      }
+      else if (isRej)                     { dot = '✗'; cls = 'ap-no';      }
+      else                                { dot = '●'; cls = 'ap-pending'; }
     } else {
-      dot = '✓'; cls = 'ap-ok';  // passed through
+      dot = '✓'; cls = 'ap-ok'; // past stage with approver present
     }
 
-    // ── Approver line ─────────────────────────────────────────────────────
-    // Approver belongs to the completed stage they acted on, NOT the current pending stage.
+    // ── Approver + comment ────────────────────────────────────────────────
     let approverHtml = '';
-    const histApprover = approverByStage[d.label];
-    if (isPast && histApprover) {
-      // Attach comment to the most recently completed stage (last past stage before current)
-      let commentHtml = '';
-      const isLastCompleted = currentIdx >= 0 && i === currentIdx - 1;
-      if (isLastCompleted) {
-        const commentCols = approvalCols.filter(c => /kommentar/i.test(c.label || c.key));
-        if (commentCols.length) {
-          commentHtml = commentCols.map(c =>
-            `<div class="ap-inline-comment">💬 ${esc(String(c.val))}</div>`
-          ).join('');
-        }
-      }
-      approverHtml = `<div class="ap-approver ap-approver-past">👤 ${esc(histApprover)}${commentHtml}</div>`;
+    if (approver) {
+      const commentHtml = comment
+        ? `<div class="ap-inline-comment">💬 ${esc(comment)}</div>` : '';
+      const pastCls = isCurrent ? '' : ' ap-approver-past';
+      approverHtml = `<div class="ap-approver${pastCls}">👤 ${esc(approver)}${commentHtml}</div>`;
     }
 
-    const bold = (isCurrent && !TERMINAL_OK.test(d.label)) ? ' style="font-weight:600"' : '';
+    const bold = (isCurrent && !TERMINAL_OK.test(d.label) && !isRej)
+      ? ' style="font-weight:600"' : '';
     return `<div class="approval-stage"><div class="ap-dot ${cls}">${dot}</div>`
          + `<div class="ap-body"><div class="ap-stage-label"${bold}>${esc(d.label)}</div>${approverHtml}</div></div>`;
   }).filter(Boolean);
-
-  // Rejection terminal row
-  if (isRej) {
-    rows.push(
-      `<div class="approval-stage">` +
-      `<div class="ap-dot ap-no">✗</div>` +
-      `<div class="ap-body"><div class="ap-stage-label" style="color:#b91c1c;font-weight:600">Abgelehnt</div></div>` +
-      `</div>`
-    );
-  }
 
   return rows.join('');
 }
@@ -2266,14 +2188,7 @@ function bindPanelEvents(itemId) {
   pq('#panel-order')?.addEventListener('click', () => openOrderModal(itemId));
   pq('#panel-besch')?.addEventListener('click', () => openBeschModal(itemId));
 
-  // Async: load approver history, then refresh the approval section in THIS panel.
-  loadApproverHistory(itemId).then(() => {
-    const el = pq('#panel-approval-body');
-    if (!el) return;
-    const item = allItems.find(x => String(x.id) === String(itemId));
-    if (!item) return;
-    el.innerHTML = buildApprovalInner(item, getStatusVal(item) || 'Eingereicht');
-  });
+  // Approvers are read directly from item.fields — no async history load needed.
 
   // Load attachments — scoped to this panel
   const attachEl = pq('#panel-attach-body');
