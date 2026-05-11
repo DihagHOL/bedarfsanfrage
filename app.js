@@ -1161,39 +1161,42 @@ function statusTimeline(statusVal, item) {
   const sv     = (statusVal || '').trim();
   const fields = item?.fields || item || {};
 
-  // Source: real SP choices, or fallback to hardcoded labels
-  const source = statusChoices.length
-    ? statusChoices
-    : TIMELINE_STAGES.map(d => d.label);
+  // Source: ONLY real SP choices. If not loaded yet, show just the current status —
+  // never fall back to the hardcoded TIMELINE_STAGES labels (they contain invented
+  // stages like "Genehmigt (Einkauf)" that may not exist in the SP list).
+  const source = statusChoices.length ? statusChoices : [sv];
 
-  const svLow         = sv.toLowerCase();
-  const currentIdx    = source.findIndex(c => c.trim().toLowerCase() === svLow);
-  const isRej         = /^abgelehnt$/i.test(sv);
-  const isBestelltNow = /^bestellt$/i.test(sv);
+  const svLow            = sv.toLowerCase();
+  const currentIdx       = source.findIndex(c => c.trim().toLowerCase() === svLow);
+  const isRej            = /^abgelehnt$/i.test(sv);
+  const isBestelltNow    = /^bestellt$/i.test(sv);
   const isFreigegebenNow = /^freigegeben$/i.test(sv);
-  const TERMINAL_OK   = /^(freigegeben|bestellt)$/i;
-  const IN_BESTELLG   = /^in bestellung$/i;
+  const TERMINAL_OK      = /^(freigegeben|bestellt)$/i;
+  const IN_BESTELLG      = /^in bestellung$/i;
 
   const rows = source.map((choiceVal, idx) => {
     const cv        = choiceVal.trim();
     const isCurrent = cv.toLowerCase() === svLow;
-    // Past = before current in SP order (not for rejected items — rejection can happen mid-flow)
-    const isPast    = !isRej && currentIdx >= 0 && idx < currentIdx;
+    // Past = any stage whose index comes before the current one in SP's defined order.
+    // Works for all statuses including "Abgelehnt" — no special-casing needed.
+    const isPast    = currentIdx >= 0 && idx < currentIdx;
 
     // Use TIMELINE_STAGES only to look up approver/comment field names for this choice
-    const tsd     = TIMELINE_STAGES.find(d => d.test(cv));
+    const tsd      = TIMELINE_STAGES.find(d => d.test(cv));
     const approver = resolvePersonField(fields, tsd?.approverField);
     const comment  = tsd?.commentField ? String(fields[tsd.commentField] || '').trim() : '';
 
     const isInBestellungFuture = IN_BESTELLG.test(cv) && isFreigegebenNow;
     const isInBestellungPast   = IN_BESTELLG.test(cv) && isBestelltNow;
 
+    // Visible if: current, before current in SP order, always Eingereicht,
+    // or "In Bestellung" special cases. Never use approverField to infer visibility —
+    // multiple stages can share the same approverField and would all appear spuriously.
     const visible = isCurrent
       || isPast
-      || /^eingereicht$/i.test(cv)          // always show first step
-      || isInBestellungFuture               // ○ upcoming after Freigegeben
-      || isInBestellungPast                 // ✓ passed when Bestellt
-      || (isRej && approver != null);       // show stages actually reached before rejection
+      || /^eingereicht$/i.test(cv)
+      || isInBestellungFuture
+      || isInBestellungPast;
 
     if (!visible) return null;
 
