@@ -2261,7 +2261,7 @@ function bindPanelEvents(itemId) {
     const spSiteGuid = siteId.split(',')[1] || siteId;
     return getSpToken()
       .then(tok => fetch(
-        `${SP_BASE}/_api/v2.1/sites/${spSiteGuid}/lists/${listId}/items/${itemId}/comments?$top=50&_=${Date.now()}`,
+        `${SP_BASE}/_api/v2.1/sites('${spSiteGuid}')/lists('${listId}')/items(${itemId})/comments?$top=50&_=${Date.now()}`,
         { headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json',
             'Cache-Control': 'no-cache', Pragma: 'no-cache' } }
       ))
@@ -2468,36 +2468,9 @@ async function saveEdits(itemId) {
 // loadApproverHistory refresh without re-rendering the whole panel.
 function buildApprovalInner(item, statusVal) {
   const sv = statusVal || getStatusVal(item) || 'Eingereicht';
-  const found = Object.entries(colByKey)
-    .filter(([k,c]) => APPROVAL_RE.test(c.displayName||k) && !SYSTEM_FIELDS.has(k))
-    .map(([k,c]) => ({ key:k, label:c.displayName||k, val:getField(item,k) }))
-    .filter(c => c.val !== null && c.val !== undefined && c.val !== '');
-  if (!found.length) return `<div class="approval-stages">${statusTimeline(sv, item)}</div>`;
-  const stages = STAGE_MAP.map(s => ({ label:s.label, cols:found.filter(c=>s.re.test(c.label)||s.re.test(c.key)) })).filter(s=>s.cols.length);
-  const assigned = new Set(stages.flatMap(s=>s.cols.map(c=>c.key)));
-  const extra = found.filter(c=>!assigned.has(c.key));
-  const mkStage = s => {
-    const dec = s.cols.find(c=>/genehmig|entscheid|freigab|ablehn/i.test(c.label));
-    const others = s.cols.filter(c=>c!==dec);
-    const st = dec ? approvalStyle(dec.val) : {bg:'#f3f4f6',color:'#6b7280',dot:'○',cls:'ap-neutral'};
-    return `<div class="approval-stage"><div class="ap-dot ${st.cls}">${st.dot}</div><div class="ap-body">
-      <div class="ap-stage-label">${esc(s.label)}</div>
-      ${dec?`<span class="ap-badge" style="background:${st.bg};color:${st.color}">${esc(String(dec.val))}</span>`:''}
-      ${others.map(c=>`<div class="ap-meta">${esc(c.label)}: ${esc(String(c.val))}</div>`).join('')}
-    </div></div>`;
-  };
-  const mkExtra = c => {
-    const st = approvalStyle(c.val);
-    if (/kommentar|ablehn|grund/i.test(c.label)) return `<div class="ap-comment-box"><strong>${esc(c.label)}:</strong> ${esc(String(c.val))}</div>`;
-    return `<div class="approval-stage"><div class="ap-dot ${st.cls}">${st.dot}</div><div class="ap-body"><div class="ap-stage-label">${esc(c.label)}</div><span class="ap-badge" style="background:${st.bg};color:${st.color}">${esc(String(c.val))}</span></div></div>`;
-  };
-  const mainHtml = stages.length ? stages.map(mkStage).join('') : statusTimeline(sv, item);
-  // When falling back to statusTimeline, comments are already rendered inline under the
-  // completed stage – skip the separate ap-comment-box to avoid duplicates.
-  const extraFiltered = stages.length
-    ? extra
-    : extra.filter(c => !/kommentar/i.test(c.label || c.key));
-  return `<div class="approval-stages">${mainHtml}${extraFiltered.map(mkExtra).join('')}</div>`;
+  // statusTimeline reads all approver/comment fields directly from item.fields —
+  // it handles all stages including "In Bestellung" upcoming/past logic.
+  return `<div class="approval-stages">${statusTimeline(sv, item)}</div>`;
 }
 
 function renderPanel(item, editMode = false) {
@@ -2679,7 +2652,7 @@ async function postSpComment(itemId, text) {
   try {
     const tok = await getSpToken();
     const r = await fetch(
-      `${SP_BASE}/_api/v2.1/sites/${spSiteGuid}/lists/${listId}/items/${itemId}/comments`,
+      `${SP_BASE}/_api/v2.1/sites('${spSiteGuid}')/lists('${listId}')/items(${itemId})/comments`,
       { method: 'POST',
         headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json',
           Accept: 'application/json', 'Cache-Control': 'no-cache' },
