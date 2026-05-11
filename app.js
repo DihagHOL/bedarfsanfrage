@@ -1643,7 +1643,18 @@ function initWizard() {
    'Mindestlagermenge','Termin','Artikelnummer','Lieferant','Lieferant2','Lieferant3','Lieferant4',
    'GeschaetzterPreis','Kostenstelle']
     .forEach(k => { const el = $id('f-'+k); if(el) el.value = ''; });
-  const prioEl = $id('f-Prioritaet'); if (prioEl) prioEl.value = 'Normal'; // Standardwert
+  const prioEl = $id('f-Prioritaet');
+  if (prioEl) {
+    // SP populate-code may have replaced HTML options with SP choice values (e.g. "HIGH").
+    // Find a "Normal"-like option case-insensitively; if not found, pick first non-empty option.
+    const prioOpts = [...prioEl.options];
+    const normalOpt = prioOpts.find(o => /^(normal|standard)$/i.test(o.value.trim()));
+    if (normalOpt) prioEl.value = normalOpt.value;
+    else {
+      const first = prioOpts.find(o => o.value !== '');
+      prioEl.value = first ? first.value : '';
+    }
+  }
   const mengeEl = $id('f-Menge'); if (mengeEl) mengeEl.value = '1'; // Standardwert
   // Reset submit button in case previous submission left it in a loading state
   const submitBtn = $id('btn-submit');
@@ -2168,6 +2179,9 @@ function beschlShort(v) {
 }
 
 function getApprovalSummary(item) {
+  // Overall item status is the primary source of truth
+  const sv = (getStatusVal(item) || '').trim();
+  if (/^abgelehnt$/i.test(sv)) return `<span class="ica-no">✗ Abgelehnt</span>`;
   const vals = Object.entries(colByKey)
     .filter(([k,c]) => APPROVAL_RE.test(c.displayName || k) && !SYSTEM_FIELDS.has(k))
     .map(([k]) => getField(item, k)).filter(Boolean);
@@ -2220,6 +2234,11 @@ function itemCard(item) {
 }
 
 function renderApprovalHighlight(item) {
+  // If the overall status is "Abgelehnt", show that regardless of field values
+  const sv = (getStatusVal(item) || '').trim();
+  if (/^abgelehnt$/i.test(sv)) {
+    return `<div class="cr-appr cr-appr-no"><span class="cr-appr-icon">✗</span><div><strong>Abgelehnt</strong></div></div>`;
+  }
   const found = Object.entries(colByKey)
     .filter(([k,c]) => APPROVAL_RE.test(c.displayName||k) && !SYSTEM_FIELDS.has(k))
     .map(([k,c]) => ({ label: c.displayName||k, val: getField(item,k) }))
