@@ -1177,9 +1177,10 @@ function statusTimeline(statusVal, item) {
   const rows = source.map((choiceVal, idx) => {
     const cv        = choiceVal.trim();
     const isCurrent = cv.toLowerCase() === svLow;
-    // Past = any stage whose index comes before the current one in SP's defined order.
-    // Works for all statuses including "Abgelehnt" — no special-casing needed.
-    const isPast    = currentIdx >= 0 && idx < currentIdx;
+    // For normal flow: past = before current in SP order.
+    // For rejected items: DON'T use index — "Abgelehnt" sits at the end of the SP
+    // choice list so index-based "past" would mark Freigegeben etc. as reached.
+    const isPast = !isRej && currentIdx >= 0 && idx < currentIdx;
 
     // Use TIMELINE_STAGES only to look up approver/comment field names for this choice
     const tsd      = TIMELINE_STAGES.find(d => d.test(cv));
@@ -1189,14 +1190,16 @@ function statusTimeline(statusVal, item) {
     const isInBestellungFuture = IN_BESTELLG.test(cv) && isFreigegebenNow;
     const isInBestellungPast   = IN_BESTELLG.test(cv) && isBestelltNow;
 
-    // Visible if: current, before current in SP order, always Eingereicht,
-    // or "In Bestellung" special cases. Never use approverField to infer visibility —
-    // multiple stages can share the same approverField and would all appear spuriously.
+    // For rejected items use approverField presence instead of index order —
+    // only stages whose approver field was actually filled by the workflow are shown.
+    // This is safe: source = real SP choices, so no invented stage like
+    // "Genehmigt (Einkauf)" can sneak in via a shared approverField.
     const visible = isCurrent
       || isPast
       || /^eingereicht$/i.test(cv)
       || isInBestellungFuture
-      || isInBestellungPast;
+      || isInBestellungPast
+      || (isRej && approver != null);
 
     if (!visible) return null;
 
