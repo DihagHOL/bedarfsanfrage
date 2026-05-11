@@ -86,6 +86,7 @@ let allItems = [];
 let colByKey   = {};  // internal name → column definition (from SP)
 let spUserMap  = {};  // SP user id (string) → display name (for Person-column LookupId resolution)
 let resolvedFields = {};  // FORM_FIELDS key → actual SP internal name (null if not found)
+let statusChoices = []; // All SP Status column choices in order (populated in discoverSP)
 let currentView = 'dashboard';
 let prevView    = 'dashboard';
 let wizardData  = {};
@@ -474,6 +475,7 @@ async function discoverSP() {
 
   if (statusCol?.choice?.choices?.length) {
     const choices = statusCol.choice.choices;
+    statusChoices = choices; // store all choices (incl. end states) for the timeline
     // Rebuild STATUS_STYLES
     for (const v of choices) {
       const key = v.toLowerCase().trim();
@@ -1146,48 +1148,61 @@ function statusColorFor(val) {
 }
 
 // Data-driven status timeline.
-// Reads approver/comment directly from item.fields — no version history needed.
-// A stage is visible if: it IS the current status, OR its approverField is filled
-// (meaning Power Automate put someone there, i.e. the stage was actually reached).
-// "Eingereicht" is always shown.
+// Iterates ONLY the real SP Status column choices (statusChoices, populated from SP).
+// TIMELINE_STAGES is used purely as a lookup for approverField/commentField names.
+// Falls back to TIMELINE_STAGES labels if SP choices haven't loaded yet.
 function statusTimeline(statusVal, item) {
   const sv     = (statusVal || '').trim();
   const fields = item?.fields || item || {};
-  const isRej       = /^abgelehnt$/i.test(sv);
+
+  // Source: real SP choices, or fallback to hardcoded labels
+  const source = statusChoices.length
+    ? statusChoices
+    : TIMELINE_STAGES.map(d => d.label);
+
+  const svLow         = sv.toLowerCase();
+  const currentIdx    = source.findIndex(c => c.trim().toLowerCase() === svLow);
+  const isRej         = /^abgelehnt$/i.test(sv);
   const isBestelltNow = /^bestellt$/i.test(sv);
-  const TERMINAL_OK = /^(freigegeben|bestellt)$/i;
-  const IN_BESTELLG = /^in bestellung$/i;
+  const isFreigegebenNow = /^freigegeben$/i.test(sv);
+  const TERMINAL_OK   = /^(freigegeben|bestellt)$/i;
+  const IN_BESTELLG   = /^in bestellung$/i;
 
-  const rows = TIMELINE_STAGES.map(d => {
-    const isCurrent = d.test(sv);
-    const approver  = resolvePersonField(fields, d.approverField);
-    const comment   = d.commentField ? String(fields[d.commentField] || '').trim() : '';
+  const rows = source.map((choiceVal, idx) => {
+    const cv        = choiceVal.trim();
+    const isCurrent = cv.toLowerCase() === svLow;
+    // Past = before current in SP order (not for rejected items — rejection can happen mid-flow)
+    const isPast    = !isRej && currentIdx >= 0 && idx < currentIdx;
 
-    // ── Visibility ────────────────────────────────────────────────────────
-    const isFreigegebenNow     = /^freigegeben$/i.test(sv);
-    const isInBestellungFuture = d.label === 'In Bestellung' && isFreigegebenNow;
-    const isInBestellungPast   = d.label === 'In Bestellung' && isBestelltNow;
-    const visible = d.label === 'Eingereicht'  // always
-      || isCurrent                             // active step
-      || approver != null                      // field filled → stage was reached
-      || isInBestellungPast                    // passed when now "Bestellt"
-      || isInBestellungFuture;                 // upcoming when now "Freigegeben"
+    // Use TIMELINE_STAGES only to look up approver/comment field names for this choice
+    const tsd     = TIMELINE_STAGES.find(d => d.test(cv));
+    const approver = resolvePersonField(fields, tsd?.approverField);
+    const comment  = tsd?.commentField ? String(fields[tsd.commentField] || '').trim() : '';
+
+    const isInBestellungFuture = IN_BESTELLG.test(cv) && isFreigegebenNow;
+    const isInBestellungPast   = IN_BESTELLG.test(cv) && isBestelltNow;
+
+    const visible = isCurrent
+      || isPast
+      || /^eingereicht$/i.test(cv)          // always show first step
+      || isInBestellungFuture               // ○ upcoming after Freigegeben
+      || isInBestellungPast                 // ✓ passed when Bestellt
+      || (isRej && approver != null);       // show stages actually reached before rejection
+
     if (!visible) return null;
 
-    // ── Dot / class ───────────────────────────────────────────────────────
     let dot, cls;
     if (isCurrent) {
-      if      (TERMINAL_OK.test(d.label)) { dot = '✓'; cls = 'ap-ok';      }
-      else if (IN_BESTELLG.test(d.label)) { dot = '○'; cls = 'ap-circle';  }
-      else if (isRej)                     { dot = '✗'; cls = 'ap-no';      }
-      else                                { dot = '●'; cls = 'ap-pending'; }
+      if      (TERMINAL_OK.test(cv))  { dot = '✓'; cls = 'ap-ok';     }
+      else if (IN_BESTELLG.test(cv))  { dot = '○'; cls = 'ap-circle'; }
+      else if (isRej)                 { dot = '✗'; cls = 'ap-no';     }
+      else                            { dot = '●'; cls = 'ap-pending';}
     } else if (isInBestellungFuture) {
-      dot = '○'; cls = 'ap-circle-future';    // upcoming, not yet reached
+      dot = '○'; cls = 'ap-circle-future';
     } else {
-      dot = '✓'; cls = 'ap-ok';               // past stage
+      dot = '✓'; cls = 'ap-ok'; // past stage
     }
 
-    // ── Approver + comment ────────────────────────────────────────────────
     let approverHtml = '';
     if (approver) {
       const commentHtml = comment
@@ -1196,10 +1211,10 @@ function statusTimeline(statusVal, item) {
       approverHtml = `<div class="ap-approver${pastCls}">👤 ${esc(approver)}${commentHtml}</div>`;
     }
 
-    const isActive = isCurrent && !TERMINAL_OK.test(d.label) && !IN_BESTELLG.test(d.label) && !isRej;
+    const isActive = isCurrent && !TERMINAL_OK.test(cv) && !IN_BESTELLG.test(cv) && !isRej;
     const bold = isActive ? ' style="font-weight:600"' : '';
     return `<div class="approval-stage"><div class="ap-dot ${cls}">${dot}</div>`
-         + `<div class="ap-body"><div class="ap-stage-label"${bold}>${esc(d.label)}</div>${approverHtml}</div></div>`;
+         + `<div class="ap-body"><div class="ap-stage-label"${bold}>${esc(cv)}</div>${approverHtml}</div></div>`;
   }).filter(Boolean);
 
   return rows.join('');
