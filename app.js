@@ -3036,26 +3036,25 @@ async function openPanel(itemId) {
   const item  = allItems.find(i => String(i.id) === panelItemId);
   if (!item) return;
 
-  if (currentView !== 'mine') {
+  // Auto-advance: läuft unabhängig von View und Rolle für jeden Nutzer
+  {
     const sv        = (getStatusVal(item) || '').trim();
     const statusCol = resolvedFields['Status'] || 'Status';
     let   advanced  = false;
 
-    // Auto-advance: Eingereicht → In Prüfung (Einkauf)
+    // Eingereicht → In Prüfung (Verkauf)
     if (/^eingereicht$/i.test(sv)) {
-      const target = statusChoices.find(c => /pr[üu]fung/i.test(c) && /einkauf/i.test(c) && !/strategisch/i.test(c))
-                  || 'In Prüfung (Einkauf)';
-      console.log('[openPanel] auto-advance Eingereicht →', target, '| statusCol:', statusCol);
+      const target = statusChoices.find(c => /pr[üu]fung/i.test(c) && /verkauf/i.test(c))
+                  || 'In Prüfung (Verkauf)';
       try {
         await gPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, { [statusCol]: target });
         advanced = true;
       } catch(e) {
-        console.error('[openPanel] auto-advance Eingereicht failed:', e.message);
         toast('Status-Update fehlgeschlagen: ' + e.message, 'error');
       }
     }
 
-    // Auto-advance: Freigegeben → In Bestellung
+    // Freigegeben → In Bestellung
     if (/^freigegeben$/i.test(sv)) {
       const inBestKey = statusChoices.find(c => /^in bestellung$/i.test(c.trim()));
       if (inBestKey) {
@@ -3066,7 +3065,6 @@ async function openPanel(itemId) {
       }
     }
 
-    // Reload list so the panel renders with the fresh status from SP
     if (advanced) await loadItems(false);
   }
 
@@ -3568,9 +3566,8 @@ function renderPanel(item, editMode = false) {
 
   const approvalInner = buildApprovalInner(item, statusVal);
 
-  // Genehmigungsaktion-Banner: nur sichtbar wenn Status = "In Prüfung (Einkauf)"
-  // und nicht in der eigenen Ansicht (Einkauf-Sicht)
-  const needsApproval = !isMineView && !editMode
+  // Genehmigungsaktion-Banner: nur sichtbar wenn Status = "In Prüfung (Einkauf)" und Admin
+  const needsApproval = !editMode && isAdmin()
     && /pr[üu]fung/i.test(statusVal) && /einkauf/i.test(statusVal) && !/strategisch/i.test(statusVal);
   const approvalActionBanner = needsApproval ? `
     <div class="approval-action-banner" id="approval-action-banner">
