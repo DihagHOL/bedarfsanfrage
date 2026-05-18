@@ -3574,8 +3574,8 @@ function renderPanel(item, editMode = false) {
 
   const approvalInner = buildApprovalInner(item, statusVal);
 
-  // Genehmigungsaktion-Banner: nur sichtbar wenn Status = "In Prüfung (Einkauf)" und Admin
-  const needsApproval = !editMode && isAdmin()
+  // Genehmigungsaktion-Banner: sichtbar für alle im Dashboard/All-View (nicht in eigener Mine-Ansicht)
+  const needsApproval = !editMode && !isMineView
     && /pr[üu]fung/i.test(statusVal) && /einkauf/i.test(statusVal) && !/strategisch/i.test(statusVal);
   const approvalActionBanner = needsApproval ? `
     <div class="approval-action-banner" id="approval-action-banner">
