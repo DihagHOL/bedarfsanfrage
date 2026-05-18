@@ -445,7 +445,7 @@
           <!-- Step 3: Beschaffung -->
           <div class="wizard-body hidden" id="mwstep-3">
             <h2>Beschaffungsdetails</h2>
-            <p class="step-hint">Art des Materials, Lieferant und Kostenstelle.</p>
+            <p class="step-hint">Art des Materials und Lieferant für die gesamte Anfrage.</p>
             <div class="form-grid">
               <div class="form-group full">
                 <label>Beschaffungsart <span class="req">*</span></label>
@@ -500,12 +500,6 @@
               <div class="form-group">
                 <label>Bestellvolumen gesamt in € <span class="field-sub">wird aus Positionen berechnet</span></label>
                 <input type="number" id="mf-GeschaetzterPreis" min="0" step="0.01" placeholder="0,00" readonly/>
-              </div>
-              <div class="form-group">
-                <label>Kostenstelle</label>
-                <div class="tid-ac-wrap">
-                  <input type="text" id="mf-Kostenstelle" placeholder="Nr. oder Bezeichnung…" autocomplete="off"/>
-                </div>
               </div>
             </div>
             <div class="wizard-footer">

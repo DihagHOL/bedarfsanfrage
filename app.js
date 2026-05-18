@@ -2616,7 +2616,7 @@ function initMultiWizard() {
   const beschEl = $id('mf-Beschreibung'); if (beschEl) beschEl.value = '';
   const terminEl = $id('mf-Termin'); if (terminEl) terminEl.value = '';
   // Reset Beschaffung fields
-  ['mf-Lieferant','mf-Lieferant2','mf-Lieferant3','mf-Lieferant4','mf-GeschaetzterPreis','mf-Kostenstelle']
+  ['mf-Lieferant','mf-Lieferant2','mf-Lieferant3','mf-Lieferant4','mf-GeschaetzterPreis']
     .forEach(k => { const el = $id(k); if (el) el.value = ''; });
   const firstRadio = document.querySelector('input[name=mBeschaffungslogik]');
   if (firstRadio) firstRadio.checked = true;
@@ -2626,7 +2626,6 @@ function initMultiWizard() {
     if (grp) grp.style.display = 'none';
   });
   // Kostenstelle autocomplete
-  initKostenstAuto($id('mf-Kostenstelle'));
   // Reset submit button
   const sb = $id('btn-multi-submit');
   if (sb) { sb.disabled = false; sb.textContent = '✓ Sammelanfrage einreichen'; }
@@ -2838,7 +2837,6 @@ function wMultiNext(step) {
       Lieferant3:        $id('mf-Lieferant3').value.trim(),
       Lieferant4:        $id('mf-Lieferant4').value.trim(),
       GeschaetzterPreis: $id('mf-GeschaetzterPreis').value ? parseFloat($id('mf-GeschaetzterPreis').value) : null,
-      Kostenstelle:      $id('mf-Kostenstelle').value.trim(),
     };
     buildMultiReview();
   }
@@ -2900,7 +2898,6 @@ function buildMultiReview() {
         <dt>Beschaffungsart</dt><dd>${esc(s3.Beschaffungslogik)}</dd>
         <dt>Lieferant(en)</dt><dd>${esc(liefs) || '–'}</dd>
         <dt>Bestellvolumen</dt><dd>${preis}</dd>
-        <dt>Kostenstelle</dt><dd>${esc(s3.Kostenstelle) || '–'}</dd>
       </dl>
     </div>`;
 }
@@ -2951,7 +2948,6 @@ async function submitMultiRequest() {
       Lieferant3:        s3.Lieferant3 || '',
       Lieferant4:        s3.Lieferant4 || '',
       GeschaetzterPreis: totalPreis > 0 ? totalPreis : (s3.GeschaetzterPreis || null),
-      Kostenstelle:      s3.Kostenstelle || '',
     };
 
     const allFields = buildFields(rawData, FORM_FIELDS);
