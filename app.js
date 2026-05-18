@@ -702,6 +702,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 // ── DASHBOARD ─────────────────────────────────────────────────────────────────
 let dashStatusFilter = '';
 let dashSortOrder   = 'date-desc';
+let dashWGFilter = '';
+let dashMAFilter = '';
 
 function renderDashboard() {
   renderStatusChips();
@@ -769,11 +771,58 @@ function renderStatusChips() {
 
   const vol = `<span class="sc-volume">${fmtEuro(volume)}<small>Volumen</small></span>`;
   el.innerHTML = allChip + statusChips + vol;
+  renderExtraFilters();
 }
 
 function setDashFilter(status) {
   dashStatusFilter = (dashStatusFilter === status) ? '' : status;
   renderStatusChips();
+  filterDashboard();
+}
+
+function renderExtraFilters() {
+  const el = $id('dash-extra-filters');
+  if (!el) return;
+
+  // Unique WG values
+  const wgField = resolvedFields['Warengruppe'] || 'Warengruppe';
+  const wgSet = new Set();
+  for (const i of allItems) {
+    const v = getField(i, wgField) || '';
+    if (v) wgSet.add(v);
+  }
+  const wgOpts = [...wgSet].sort().map(v =>
+    `<option value="${esc(v)}"${dashWGFilter === v ? ' selected' : ''}>${esc(v)}</option>`
+  ).join('');
+
+  // Unique Mitarbeiter values
+  const maSet = new Set();
+  for (const i of allItems) {
+    const v = i.createdBy?.user?.displayName || i.createdBy?.user?.email || '';
+    if (v) maSet.add(v);
+  }
+  const maOpts = [...maSet].sort().map(v =>
+    `<option value="${esc(v)}"${dashMAFilter === v ? ' selected' : ''}>${esc(v)}</option>`
+  ).join('');
+
+  el.innerHTML = `
+    <select class="dash-filter-select" onchange="setDashWGFilter(this.value)">
+      <option value="">Alle Warengruppen</option>
+      ${wgOpts}
+    </select>
+    <select class="dash-filter-select" onchange="setDashMAFilter(this.value)">
+      <option value="">Alle Mitarbeiter</option>
+      ${maOpts}
+    </select>`;
+}
+
+function setDashWGFilter(val) {
+  dashWGFilter = val;
+  filterDashboard();
+}
+
+function setDashMAFilter(val) {
+  dashMAFilter = val;
   filterDashboard();
 }
 
@@ -784,6 +833,11 @@ function filterDashboard() {
     (getField(i,'Title')||'').toLowerCase().includes(search) || String(i.id||'').includes(search)
   );
   if (dashStatusFilter !== '') items = items.filter(i => (getStatusVal(i)||'') === dashStatusFilter);
+  if (dashWGFilter) items = items.filter(i => (getField(i, resolvedFields['Warengruppe']||'Warengruppe')||'') === dashWGFilter);
+  if (dashMAFilter) items = items.filter(i => {
+    const creator = i.createdBy?.user?.displayName || i.createdBy?.user?.email || '';
+    return creator === dashMAFilter;
+  });
 
   const priceKey = resolvedFields['GeschaetzterPreis'] || 'GeschaetzterPreis';
   switch (dashSortOrder) {
@@ -2544,11 +2598,11 @@ function resetTable(type) {
 
 // ── SAMMELANFRAGE (MULTI-POSITION WIZARD) ────────────────────────────────────
 
-let multiPositions = [];   // [{artNr, bezeichnung, menge, me}, ...]
+let multiPositions = [];   // [{artNr, extArtNr, bezeichnung, menge, me, termin, kostenstelle, preis}, ...]
 let multiWizardData = {};  // step2, step3
 
 function initMultiWizard() {
-  multiPositions = [{ artNr: '', extArtNr: '', bezeichnung: '', menge: '', me: '' }];
+  multiPositions = [{ artNr: '', extArtNr: '', bezeichnung: '', menge: '', me: '', termin: '', kostenstelle: '', preis: '' }];
   multiWizardData = {};
   showMultiStep(1);
   // Reset Allgemein fields
@@ -2594,7 +2648,7 @@ function showMultiStep(n) {
 function renderMultiPositions() {
   const container = $id('multi-positions-table');
   if (!container) return;
-  if (multiPositions.length === 0) multiPositions.push({ artNr: '', extArtNr: '', bezeichnung: '', menge: '', me: '' });
+  if (multiPositions.length === 0) multiPositions.push({ artNr: '', extArtNr: '', bezeichnung: '', menge: '', me: '', termin: '', kostenstelle: '', preis: '' });
   const meOptions = ['','Lagereinheiten','kg','Stück','Anzahl','m','Paar','Liter'];
   const rows = multiPositions.map((pos, i) => `
     <div class="multi-pos-row" data-idx="${i}">
@@ -2638,6 +2692,29 @@ function renderMultiPositions() {
             ${meOptions.map(o => `<option value="${o}"${pos.me === o ? ' selected' : ''}>${o || '– wählen –'}</option>`).join('')}
           </select>
         </div>
+        <div class="multi-pos-field" style="flex:0 0 110px">
+          <label>Preis (€)</label>
+          <input type="number" class="mpos-preis" data-idx="${i}"
+            value="${esc(String(pos.preis || ''))}"
+            placeholder="0.00" min="0" step="0.01"
+            oninput="multiPosChange(${i},'preis',this.value); updateMultiTotal()"/>
+        </div>
+        <div class="multi-pos-field" style="flex:0 0 140px">
+          <label>Benötigt bis</label>
+          <input type="date" class="mpos-termin" data-idx="${i}"
+            value="${esc(String(pos.termin || ''))}"
+            oninput="multiPosChange(${i},'termin',this.value)"/>
+        </div>
+        <div class="multi-pos-field" style="flex:0 0 160px">
+          <label>Kostenstelle</label>
+          <div class="tid-ac-wrap">
+            <input type="text" class="mpos-kostenstelle" data-idx="${i}"
+              value="${esc(String(pos.kostenstelle || ''))}"
+              placeholder="Nr. oder Bezeichnung…"
+              oninput="multiPosChange(${i},'kostenstelle',this.value)"
+              autocomplete="off"/>
+          </div>
+        </div>
       </div>
       ${multiPositions.length > 1
         ? `<button type="button" class="multi-pos-del" title="Position entfernen" onclick="removeMultiPosition(${i})">✕</button>`
@@ -2669,6 +2746,21 @@ function renderMultiPositions() {
       return null;
     });
   });
+  // Init Kostenstelle autocomplete for each row
+  container.querySelectorAll('.mpos-kostenstelle').forEach(inp => {
+    const idx = parseInt(inp.dataset.idx, 10);
+    initKostenstAuto(inp);
+    inp.addEventListener('change', e => { multiPosChange(idx, 'kostenstelle', e.target.value); });
+  });
+  updateMultiTotal();
+}
+
+function updateMultiTotal() {
+  const total = multiPositions.reduce((s, p) => s + (parseFloat(p.preis) || 0), 0);
+  const el = $id('mf-GeschaetzterPreis');
+  if (el) el.value = total > 0 ? total.toFixed(2) : '';
+  const displayEl = $id('mf-total-display');
+  if (displayEl) displayEl.textContent = total > 0 ? fmtEuro(total) : '–';
 }
 
 function multiPosChange(idx, field, val) {
@@ -2676,13 +2768,13 @@ function multiPosChange(idx, field, val) {
 }
 
 function addMultiPosition() {
-  multiPositions.push({ artNr: '', extArtNr: '', bezeichnung: '', menge: '', me: '' });
+  multiPositions.push({ artNr: '', extArtNr: '', bezeichnung: '', menge: '', me: '', termin: '', kostenstelle: '', preis: '' });
   renderMultiPositions();
 }
 
 function removeMultiPosition(idx) {
   multiPositions.splice(idx, 1);
-  if (multiPositions.length === 0) multiPositions.push({ artNr: '', bezeichnung: '', menge: '', me: '' });
+  if (multiPositions.length === 0) multiPositions.push({ artNr: '', extArtNr: '', bezeichnung: '', menge: '', me: '', termin: '', kostenstelle: '', preis: '' });
   renderMultiPositions();
 }
 
@@ -2713,20 +2805,23 @@ function wMultiNext(step) {
       if (meEl)     p.me = meEl.value;
       if (artEl)    p.artNr = artEl.value.trim();
       if (extArtEl) p.extArtNr = extArtEl.value.trim();
+      const terminEl = document.querySelector(`.mpos-termin[data-idx="${i}"]`);
+      const kstEl    = document.querySelector(`.mpos-kostenstelle[data-idx="${i}"]`);
+      const preisEl  = document.querySelector(`.mpos-preis[data-idx="${i}"]`);
+      if (terminEl) p.termin      = terminEl.value;
+      if (kstEl)    p.kostenstelle = kstEl.value.trim();
+      if (preisEl)  p.preis       = preisEl.value;
       if (!p.bezeichnung) { toast(`Position ${i + 1}: Bitte Bezeichnung angeben.`, 'error'); return; }
       if (!p.menge || parseFloat(p.menge) <= 0) { toast(`Position ${i + 1}: Bitte gültige Menge eingeben.`, 'error'); return; }
       if (!p.me)   { toast(`Position ${i + 1}: Bitte Mengeneinheit wählen.`, 'error'); return; }
     }
   } else if (step === 2) {
-    const wg     = $id('mf-Warengruppe').value;
-    const termin = $id('mf-Termin').value;
-    if (!wg)     { toast('Bitte Warengruppe wählen.', 'error'); return; }
-    if (!termin) { toast('Bitte Benötigt-bis-Datum angeben.', 'error'); return; }
+    const wg = $id('mf-Warengruppe').value;
+    if (!wg) { toast('Bitte Warengruppe wählen.', 'error'); return; }
     multiWizardData.step2 = {
       Warengruppe:  wg,
       Prioritaet:   $id('mf-Prioritaet').value,
       Beschreibung: $id('mf-Beschreibung').value.trim(),
-      Termin:       termin,
     };
   } else if (step === 3) {
     const lieferant = $id('mf-Lieferant').value.trim();
@@ -2765,6 +2860,9 @@ function buildMultiReview() {
       <td style="padding:4px 8px">${esc(p.bezeichnung)}</td>
       <td style="padding:4px 8px;text-align:right">${esc(p.menge)}</td>
       <td style="padding:4px 8px">${esc(p.me)}</td>
+      <td style="padding:4px 8px;text-align:right">${p.preis ? fmtEuro(p.preis) : '–'}</td>
+      <td style="padding:4px 8px">${p.termin || '–'}</td>
+      <td style="padding:4px 8px">${esc(p.kostenstelle) || '–'}</td>
     </tr>`).join('');
   const liefs = [s3.Lieferant, s3.Lieferant2, s3.Lieferant3, s3.Lieferant4].filter(Boolean).join(', ');
   const preis = s3.GeschaetzterPreis != null ? new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(s3.GeschaetzterPreis) + ' €' : '–';
@@ -2780,6 +2878,9 @@ function buildMultiReview() {
             <th style="padding:6px 8px;text-align:left">Bezeichnung</th>
             <th style="padding:6px 8px;text-align:right">Menge</th>
             <th style="padding:6px 8px;text-align:left">ME</th>
+            <th style="padding:6px 8px;text-align:right">Preis (€)</th>
+            <th style="padding:6px 8px;text-align:left">Termin</th>
+            <th style="padding:6px 8px;text-align:left">KST</th>
           </tr></thead>
           <tbody>${posRows}</tbody>
         </table>
@@ -2791,7 +2892,6 @@ function buildMultiReview() {
         <dt>Warengruppe</dt><dd>${esc(s2.Warengruppe)}</dd>
         <dt>Priorität</dt><dd>${esc(s2.Prioritaet)}</dd>
         <dt>Beschreibung</dt><dd>${esc(s2.Beschreibung) || '–'}</dd>
-        <dt>Benötigt bis</dt><dd>${s2.Termin || '–'}</dd>
       </dl>
     </div>
     <div class="review-section" style="margin-top:16px">
@@ -2829,7 +2929,12 @@ async function submitMultiRequest() {
       Bezeichnung: p.bezeichnung,
       Menge: p.menge,
       ME: p.me,
+      Preis: p.preis ? parseFloat(p.preis) : null,
+      Termin: p.termin || '',
+      Kostenstelle: p.kostenstelle || '',
     })));
+
+    const totalPreis = multiPositions.reduce((s,p) => s + (parseFloat(p.preis)||0), 0);
 
     const rawData = {
       Title:             autoTitle,
@@ -2839,13 +2944,13 @@ async function submitMultiRequest() {
       Warengruppe:       s2.Warengruppe || '',
       Prioritaet:        s2.Prioritaet || '',
       Beschreibung:      s2.Beschreibung || '',
-      Termin:            s2.Termin || '',
+      Termin:            '',
       Beschaffungslogik: s3.Beschaffungslogik || '',
       Lieferant:         s3.Lieferant || '',
       Lieferant2:        s3.Lieferant2 || '',
       Lieferant3:        s3.Lieferant3 || '',
       Lieferant4:        s3.Lieferant4 || '',
-      GeschaetzterPreis: s3.GeschaetzterPreis,
+      GeschaetzterPreis: totalPreis > 0 ? totalPreis : (s3.GeschaetzterPreis || null),
       Kostenstelle:      s3.Kostenstelle || '',
     };
 
@@ -3476,6 +3581,74 @@ function buildApprovalInner(item, statusVal) {
   return `<div class="approval-stages">${statusTimeline(sv, item)}</div>`;
 }
 
+// Panel-positions in-place editing
+let _panelPosData = []; // working copy while editing
+function _syncPanelPosFromDOM() {
+  const tbody = $id('pos-edit-tbody');
+  if (!tbody) return;
+  tbody.querySelectorAll('input.pos-edit-input, select.pos-edit-input').forEach(el => {
+    const idx = parseInt(el.dataset.idx, 10);
+    const field = el.dataset.field;
+    if (_panelPosData[idx] !== undefined) _panelPosData[idx][field] = el.value;
+  });
+}
+function panelPosAdd() {
+  _syncPanelPosFromDOM();
+  _panelPosData.push({ Nr: _panelPosData.length + 1, Artikelnummer:'', ExterneArtikelnummer:'', Bezeichnung:'', Menge:'', ME:'', Preis:'', Termin:'', Kostenstelle:'' });
+  _rebuildPosEditTable();
+}
+function panelPosDelete(idx) {
+  _syncPanelPosFromDOM();
+  _panelPosData.splice(idx, 1);
+  _panelPosData.forEach((p,i) => p.Nr = i + 1);
+  _rebuildPosEditTable();
+}
+function _rebuildPosEditTable() {
+  const tbody = $id('pos-edit-tbody');
+  if (!tbody) return;
+  const meOpts = ['Lagereinheiten','kg','Stück','Anzahl','m','Paar','Liter'];
+  tbody.innerHTML = _panelPosData.map((p, idx) => {
+    const meSelOpts = meOpts.map(o => `<option value="${o}"${(p.ME||'')=== o?' selected':''}>${o}</option>`).join('');
+    return `<tr class="pos-edit-row" data-pos-idx="${idx}">
+      <td class="pos-td pos-nr">${p.Nr}</td>
+      <td class="pos-td"><input class="pos-edit-input" data-idx="${idx}" data-field="Artikelnummer" value="${esc(String(p.Artikelnummer||''))}" placeholder="ArtNr."/></td>
+      <td class="pos-td"><input class="pos-edit-input" data-idx="${idx}" data-field="ExterneArtikelnummer" value="${esc(String(p.ExterneArtikelnummer||''))}" placeholder="Ext.ArtNr."/></td>
+      <td class="pos-td pos-bez"><input class="pos-edit-input" data-idx="${idx}" data-field="Bezeichnung" value="${esc(String(p.Bezeichnung||''))}" placeholder="Bezeichnung"/></td>
+      <td class="pos-td pos-right"><input class="pos-edit-input pos-edit-num" type="number" data-idx="${idx}" data-field="Menge" value="${esc(String(p.Menge||''))}" placeholder="1" min="0.001" step="any"/></td>
+      <td class="pos-td"><select class="pos-edit-input pos-edit-me" data-idx="${idx}" data-field="ME"><option value="">–</option>${meSelOpts}</select></td>
+      <td class="pos-td pos-right"><input class="pos-edit-input pos-edit-num" type="number" data-idx="${idx}" data-field="Preis" value="${esc(String(p.Preis||''))}" placeholder="0,00" min="0" step="0.01"/></td>
+      <td class="pos-td"><input class="pos-edit-input" type="date" data-idx="${idx}" data-field="Termin" value="${esc(String(p.Termin||''))}"/></td>
+      <td class="pos-td"><input class="pos-edit-input" data-idx="${idx}" data-field="Kostenstelle" value="${esc(String(p.Kostenstelle||''))}" placeholder="KST"/></td>
+      <td class="pos-td"><button type="button" class="pos-del-btn" onclick="panelPosDelete(${idx})" title="Entfernen">✕</button></td>
+    </tr>`;
+  }).join('');
+  // Update count header
+  const title = document.querySelector('#pf-pos-section .pf-sec-title');
+  if (title) title.textContent = `Positionen (${_panelPosData.length})`;
+}
+async function panelPosSave(itemId) {
+  _syncPanelPosFromDOM();
+  const posField = resolvedFields['Positionen'] || 'Positionen';
+  const priceField = resolvedFields['GeschaetzterPreis'] || 'GeschaetzterPreis';
+  const totalPrice = _panelPosData.reduce((s,p) => s + (parseFloat(p.Preis)||0), 0);
+  try {
+    await gPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, {
+      [posField]: JSON.stringify(_panelPosData),
+      [priceField]: totalPrice || null,
+    });
+    // Update allItems optimistically
+    const cached = allItems.find(i => String(i.id) === String(itemId));
+    if (cached?.fields) {
+      cached.fields[posField] = JSON.stringify(_panelPosData);
+      if (totalPrice) cached.fields[priceField] = totalPrice;
+    }
+    toast('Positionen gespeichert ✓', 'success');
+    await loadItems(false);
+  } catch(e) {
+    toast('Speichern fehlgeschlagen: ' + e.message, 'error');
+  }
+}
+
 function renderPanel(item, editMode = false) {
   const isMineView = currentView === 'mine';
   const statusVal  = getStatusVal(item) || 'Eingereicht';
@@ -3643,20 +3816,50 @@ function renderPanel(item, editMode = false) {
         let positions;
         try { positions = JSON.parse(posRaw); } catch { return ''; }
         if (!Array.isArray(positions) || positions.length === 0) return '';
-        const rows = positions.map(p => `
-          <tr>
-            <td class="pos-td pos-nr">${p.Nr ?? ''}</td>
-            <td class="pos-td">${esc(String(p.Artikelnummer || '–'))}</td>
-            <td class="pos-td">${esc(String(p.ExterneArtikelnummer || '–'))}</td>
-            <td class="pos-td pos-bez">${esc(String(p.Bezeichnung || '–'))}</td>
-            <td class="pos-td pos-right">${esc(String(p.Menge || '–'))}</td>
-            <td class="pos-td">${esc(String(p.ME || '–'))}</td>
-          </tr>`).join('');
+
+        _panelPosData = positions.map(p => ({...p}));
+
+        const canEditPos = !editMode && !isMineView && /pr[üu]fung/i.test(statusVal) && /einkauf/i.test(statusVal) && !/strategisch/i.test(statusVal);
+        const meOpts = ['Lagereinheiten','kg','Stück','Anzahl','m','Paar','Liter'];
+
+        const rows = positions.map((p, idx) => {
+          if (canEditPos) {
+            const meSelOpts = meOpts.map(o => `<option value="${o}"${(p.ME||p.me||'')=== o?' selected':''}>${o}</option>`).join('');
+            return `<tr class="pos-edit-row" data-pos-idx="${idx}">
+              <td class="pos-td pos-nr">${p.Nr ?? idx+1}</td>
+              <td class="pos-td"><input class="pos-edit-input" data-idx="${idx}" data-field="Artikelnummer" value="${esc(String(p.Artikelnummer||''))}" placeholder="ArtNr."/></td>
+              <td class="pos-td"><input class="pos-edit-input" data-idx="${idx}" data-field="ExterneArtikelnummer" value="${esc(String(p.ExterneArtikelnummer||''))}" placeholder="Ext.ArtNr."/></td>
+              <td class="pos-td pos-bez"><input class="pos-edit-input" data-idx="${idx}" data-field="Bezeichnung" value="${esc(String(p.Bezeichnung||''))}" placeholder="Bezeichnung"/></td>
+              <td class="pos-td pos-right"><input class="pos-edit-input pos-edit-num" type="number" data-idx="${idx}" data-field="Menge" value="${esc(String(p.Menge||''))}" placeholder="1" min="0.001" step="any"/></td>
+              <td class="pos-td"><select class="pos-edit-input pos-edit-me" data-idx="${idx}" data-field="ME"><option value="">–</option>${meSelOpts}</select></td>
+              <td class="pos-td pos-right"><input class="pos-edit-input pos-edit-num" type="number" data-idx="${idx}" data-field="Preis" value="${esc(String(p.Preis||''))}" placeholder="0,00" min="0" step="0.01"/></td>
+              <td class="pos-td"><input class="pos-edit-input" type="date" data-idx="${idx}" data-field="Termin" value="${esc(String(p.Termin||''))}"/></td>
+              <td class="pos-td"><input class="pos-edit-input" data-idx="${idx}" data-field="Kostenstelle" value="${esc(String(p.Kostenstelle||''))}" placeholder="KST"/></td>
+              <td class="pos-td"><button type="button" class="pos-del-btn" onclick="panelPosDelete(${idx})" title="Entfernen">✕</button></td>
+            </tr>`;
+          } else {
+            return `<tr>
+              <td class="pos-td pos-nr">${p.Nr ?? ''}</td>
+              <td class="pos-td">${esc(String(p.Artikelnummer||'–'))}</td>
+              <td class="pos-td">${esc(String(p.ExterneArtikelnummer||'–'))}</td>
+              <td class="pos-td pos-bez">${esc(String(p.Bezeichnung||'–'))}</td>
+              <td class="pos-td pos-right">${esc(String(p.Menge||'–'))}</td>
+              <td class="pos-td">${esc(String(p.ME||p.me||'–'))}</td>
+              <td class="pos-td pos-right">${p.Preis ? fmtEuro(p.Preis) : '–'}</td>
+              <td class="pos-td">${p.Termin ? fmtDate(p.Termin) : '–'}</td>
+              <td class="pos-td">${esc(String(p.Kostenstelle||'–'))}</td>
+            </tr>`;
+          }
+        }).join('');
+
+        const addBtn = canEditPos ? `<button type="button" class="btn btn-ghost btn-sm" style="margin-top:6px" onclick="panelPosAdd()">+ Position hinzufügen</button>` : '';
+        const saveBtn = canEditPos ? `<div style="margin-top:8px;display:flex;gap:8px"><button class="btn btn-primary btn-sm" onclick="panelPosSave('${item.id}')">💾 Positionen speichern</button></div>` : '';
+
         return `
-        <div class="pf-section">
+        <div class="pf-section" id="pf-pos-section">
           <div class="pf-sec-title">Positionen (${positions.length})</div>
           <div class="pos-table-wrap">
-            <table class="pos-table">
+            <table class="pos-table" id="pos-edit-table">
               <thead><tr>
                 <th class="pos-th pos-nr">#</th>
                 <th class="pos-th">Artikel-Nr.</th>
@@ -3664,10 +3867,16 @@ function renderPanel(item, editMode = false) {
                 <th class="pos-th pos-bez">Bezeichnung</th>
                 <th class="pos-th pos-right">Menge</th>
                 <th class="pos-th">ME</th>
+                <th class="pos-th pos-right">Preis (€)</th>
+                <th class="pos-th">Benötigt bis</th>
+                <th class="pos-th">Kostenstelle</th>
+                ${canEditPos ? '<th class="pos-th"></th>' : ''}
               </tr></thead>
-              <tbody>${rows}</tbody>
+              <tbody id="pos-edit-tbody">${rows}</tbody>
             </table>
           </div>
+          ${addBtn}
+          ${saveBtn}
         </div>`;
       })()}
       <div class="pf-section">
