@@ -641,6 +641,13 @@ function navigate(view, id) {
   prevView = currentView;
   currentView = view;
 
+  // Pause auto-refresh while filling in a form; resume when leaving
+  if (view === 'new' || view === 'multi') {
+    arPaused = true; updateARBtn();
+  } else {
+    if (arPaused) { arPaused = false; if (!autoRefreshTimer) startAutoRefresh(); updateARBtn(); }
+  }
+
   if      (view === 'dashboard') renderDashboard();
   else if (view === 'mine')      renderList('mine');
   else if (view === 'all')       renderList('all');
