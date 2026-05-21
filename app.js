@@ -143,8 +143,8 @@ const ADMIN_EMAIL  = 'administrator@dihag.com';
 function getSettings(email) {
   const all = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
   return Object.assign({
-    autoRefresh:        false,
-    autoRefreshGranted: false,
+    autoRefresh:        true,
+    autoRefreshGranted: true,
     pageSize:           100,
     compactView:        false,   // dense single-line cards in list views
     hideCompleted:      false,   // hide bestellt/erledigt/abgelehnt in Meine Anfragen
@@ -198,14 +198,13 @@ let arPaused = false;   // user can pause without admin losing the feature-enabl
 function startAutoRefresh() {
   stopAutoRefresh();
   if (!account) return;
-  if (!getSettings(account.username).autoRefresh) { updateARBtn(); return; }
-  arCountdown = 30;
+  arCountdown = 20;
   arPaused    = false;
   autoRefreshTimer = setInterval(() => {
     if (arPaused) return;
     arCountdown--;
     if (arCountdown <= 0) {
-      arCountdown = 30;
+      arCountdown = 20;
       loadItems(false);
     }
     updateARBtn();
@@ -219,10 +218,6 @@ function stopAutoRefresh() {
 function updateARBtn() {
   const btn = $id('btn-autorefresh');
   if (!btn) return;
-  // Feature visibility: only show button when admin has enabled autoRefresh for this user
-  const featureOn = !!(account && getSettings(account.username).autoRefresh);
-  btn.style.display = featureOn ? '' : 'none';
-  if (!featureOn) return;
   const running = !!autoRefreshTimer && !arPaused;
   btn.classList.toggle('ar-on', running);
   if (running) {
@@ -234,9 +229,7 @@ function updateARBtn() {
   }
 }
 function toggleAutoRefresh() {
-  // Toggle pause/resume only — does NOT change the admin-controlled autoRefresh setting
   if (!account) return;
-  if (!getSettings(account.username).autoRefresh) return;
   if (!autoRefreshTimer) { startAutoRefresh(); return; }
   arPaused = !arPaused;
   updateARBtn();
@@ -347,15 +340,6 @@ async function bootDone() {
       const _em = (account.username || '').toLowerCase();
       const _s  = getSettings(_em);
       console.log('[bootDone] User:', _em, '| canSeeDashboard:', _s.canSeeDashboard, '| autoRefresh:', _s.autoRefresh);
-    }
-    // Auto-refresh is admin-controlled. Clear any self-set value from old localStorage
-    // if admin hasn't explicitly granted the feature (autoRefreshGranted flag).
-    if (account) {
-      const em = account.username.toLowerCase();
-      const s  = getSettings(em);
-      if (em !== ADMIN_EMAIL && s.autoRefresh && !s.autoRefreshGranted) {
-        saveUserSettings(em, { autoRefresh: false }, true); // _skipSP: already synced
-      }
     }
     startAutoRefresh();
     applyDashboardVisibility();
@@ -1935,6 +1919,8 @@ function wNext(step) {
     if (!lieferant) { toast('Bitte mindestens Lieferant 1 angeben.', 'error'); return; }
     const extraSelected = document.querySelector('#beschaffungslogik-extra-cards .check-card.selected');
     if (!extraSelected) { toast('Bitte unter „Zusätzlich kombinierbar" eine Option auswählen.', 'error'); return; }
+    const preisVal = $id('f-GeschaetzterPreis').value;
+    if (!preisVal || parseFloat(preisVal) <= 0) { toast('Bitte Bestellvolumen in € angeben.', 'error'); return; }
     wizardData.step3 = {
       Beschaffungslogik: [
         document.querySelector('input[name=Beschaffungslogik]:checked')?.value || '',
@@ -2380,6 +2366,39 @@ function initImporter() {
   renderImporter();
 }
 
+function downloadCSV(csvText, filename) {
+  const bom  = '﻿'; // UTF-8 BOM for Excel
+  const blob = new Blob([bom + csvText], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = Object.assign(document.createElement('a'), { href: url, download: filename });
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+
+function exportTidCSV() {
+  const rows = ['Artikelnummer;Bezeichnung;Warengruppe'];
+  for (const [nr, h] of Object.entries(TID_MAP_ACTIVE)) {
+    rows.push(`${nr};${(h.b||'').replace(/;/g,'')};${(h.w||'').replace(/;/g,'')}`);
+  }
+  downloadCSV(rows.join('\r\n'), 'Artikelnummern_Export.csv');
+}
+
+function exportKstCSV() {
+  const rows = ['Kostenstelle;Bezeichnung'];
+  for (const e of KOSTENST_DATA) {
+    rows.push(`${e.nr};${(e.label||'').replace(/;/g,'')}`);
+  }
+  downloadCSV(rows.join('\r\n'), 'Kostenstellen_Export.csv');
+}
+
+function downloadTidTemplate() {
+  downloadCSV('Artikelnummer;Bezeichnung;Warengruppe\r\n1234-00001;Beispielartikel;Ersatzteile', 'Artikelnummern_Vorlage.csv');
+}
+
+function downloadKstTemplate() {
+  downloadCSV('Kostenstelle;Bezeichnung\r\n10011;Fertigungsleitung', 'Kostenstellen_Vorlage.csv');
+}
+
 function renderImporter() {
   const tidCount  = Object.keys(TID_MAP_ACTIVE).length;
   const kstCount  = KOSTENST_DATA.length;
@@ -2400,7 +2419,11 @@ function renderImporter() {
             <div class="imp-card-title">📦 Artikelnummern (TID-Tabelle)</div>
             <div class="imp-card-sub">${tidCount} Einträge geladen${tidIsCustom ? ' <span class="imp-badge-custom">Angepasst</span>' : ' <span class="imp-badge-default">Standard</span>'}</div>
           </div>
-          ${tidIsCustom ? `<button class="btn btn-sm btn-ghost" onclick="resetTable('tid')">↺ Zurücksetzen</button>` : ''}
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn btn-sm btn-outline" onclick="exportTidCSV()" title="Aktuelle Tabelle als CSV herunterladen">⬇ Export</button>
+            <button class="btn btn-sm btn-ghost" onclick="downloadTidTemplate()" title="Leere Vorlage herunterladen">📄 Vorlage</button>
+            ${tidIsCustom ? `<button class="btn btn-sm btn-ghost" onclick="resetTable('tid')">↺ Zurücksetzen</button>` : ''}
+          </div>
         </div>
         <div class="imp-format-hint">
           Format: CSV mit Semikolon <code>Artikelnummer;Bezeichnung;Warengruppe</code><br>
@@ -2426,7 +2449,11 @@ function renderImporter() {
             <div class="imp-card-title">🏢 Kostenstellen</div>
             <div class="imp-card-sub">${kstCount} Einträge geladen${kstIsCustom ? ' <span class="imp-badge-custom">Angepasst</span>' : ' <span class="imp-badge-default">Standard</span>'}</div>
           </div>
-          ${kstIsCustom ? `<button class="btn btn-sm btn-ghost" onclick="resetTable('kst')">↺ Zurücksetzen</button>` : ''}
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn btn-sm btn-outline" onclick="exportKstCSV()" title="Aktuelle Tabelle als CSV herunterladen">⬇ Export</button>
+            <button class="btn btn-sm btn-ghost" onclick="downloadKstTemplate()" title="Leere Vorlage herunterladen">📄 Vorlage</button>
+            ${kstIsCustom ? `<button class="btn btn-sm btn-ghost" onclick="resetTable('kst')">↺ Zurücksetzen</button>` : ''}
+          </div>
         </div>
         <div class="imp-format-hint">
           Format: CSV mit Semikolon <code>Kostenstelle;Bezeichnung</code> oder eine Spalte <code>10011 Fertigungsleitung</code><br>
