@@ -345,6 +345,8 @@ async function bootDone() {
     // Must happen before migration so granted flags are already in localStorage.
     await loadSpSettings();
     await loadItems(false);
+    // Wiedervorlagen aus SharePoint laden (nicht blockierend für den Start)
+    initFavorites().catch(() => {});
     $id('boot').style.display = 'none';
     $id('app').style.display  = 'flex';
     applyNavVisibility(); // re-apply after SP settings loaded (grants may have changed)
@@ -451,6 +453,15 @@ async function gPatch(path, body) {
   if (r.status === 204) return {};
   if (!r.ok) throw new Error(`Graph PATCH ${r.status}: ${await r.text().catch(()=>'')}`);
   return r.json().catch(()=>({}));
+}
+
+async function gDelete(path) {
+  const tok = await getToken();
+  const r   = await fetch(API + path, {
+    method:'DELETE', headers:{ Authorization:'Bearer '+tok }
+  });
+  if (!r.ok && r.status !== 404) throw new Error(`Graph DELETE ${r.status}: ${await r.text().catch(()=>'')}`);
+  return {};
 }
 
 // ── SP DISCOVERY ─────────────────────────────────────────────────────────────
@@ -1869,10 +1880,84 @@ function lookupTID(val) {
 }
 
 // ── WIEDERVORLAGE / FAVORITEN ────────────────────────────────────────────────
-const LS_FAVORITES = 'DIHAG_FAVORITES';
+// Primär in einer SharePoint-Liste gespeichert (geräteübergreifend); fällt bei
+// fehlender Liste/Berechtigung automatisch auf localStorage zurück.
+const LS_FAVORITES   = 'DIHAG_FAVORITES';
+const FAV_LIST_NAME  = 'BANF_Favoriten';
 let pendingPrefill = null; // {type, data, positions} – wird beim nächsten Wizard-Init angewendet
+let favUseSP   = false;    // true, sobald die SP-Liste verfügbar ist
+let favListId  = null;
+let favCache   = [];       // In-Memory-Spiegel der SP-Favoriten des aktuellen Nutzers
 
+function _favOwner() { return (account?.username || '').trim().toLowerCase(); }
+
+// Beim Start aufrufen (nach discoverSP). Niemals werfen – Fallback ist localStorage.
+async function initFavorites() {
+  favUseSP = false; favListId = null; favCache = [];
+  try {
+    if (!siteId) return;
+    // 1) Liste suchen
+    try {
+      const res = await gGet(`/sites/${siteId}/lists?$filter=displayName eq '${FAV_LIST_NAME}'&$select=id,displayName`);
+      if (res.value && res.value.length) favListId = res.value[0].id;
+    } catch { /* Filter evtl. nicht unterstützt – unten ohne Filter versuchen */ }
+    if (!favListId) {
+      try {
+        const all = await gGet(`/sites/${siteId}/lists?$select=id,displayName&$top=200`);
+        favListId = (all.value || []).find(l => l.displayName === FAV_LIST_NAME)?.id || null;
+      } catch {}
+    }
+    // 2) Liste anlegen, falls nicht vorhanden
+    if (!favListId) {
+      try {
+        const created = await gPost(`/sites/${siteId}/lists`, {
+          displayName: FAV_LIST_NAME,
+          list: { template: 'genericList' },
+          columns: [
+            { name: 'FavOwner',     text: {} },
+            { name: 'FavType',      text: {} },
+            { name: 'FavData',      text: { allowMultipleLines: true } },
+            { name: 'FavPositions', text: { allowMultipleLines: true } },
+          ],
+        });
+        favListId = created.id;
+      } catch (createErr) {
+        // Evtl. hat parallel jemand anderes die Liste angelegt → erneut suchen
+        const all = await gGet(`/sites/${siteId}/lists?$select=id,displayName&$top=200`);
+        favListId = (all.value || []).find(l => l.displayName === FAV_LIST_NAME)?.id || null;
+        if (!favListId) throw createErr; // wirklich nicht anlegbar → Fallback localStorage
+      }
+    }
+    favUseSP = !!favListId;
+    if (favUseSP) { await loadFavoritesSP(); _refreshFavBars(); }
+  } catch (e) {
+    console.warn('[Favoriten] SP nicht verfügbar, nutze localStorage:', e.message);
+    favUseSP = false;
+  }
+}
+
+async function loadFavoritesSP() {
+  if (!favUseSP) return;
+  const owner = _favOwner();
+  const res = await gGet(`/sites/${siteId}/lists/${favListId}/items?$expand=fields&$top=500`);
+  favCache = (res.value || [])
+    .filter(it => (it.fields?.FavOwner || '').trim().toLowerCase() === owner)
+    .map(it => {
+      let data = {}, positions = null;
+      try { data = JSON.parse(it.fields?.FavData || '{}'); } catch {}
+      try { const p = JSON.parse(it.fields?.FavPositions || 'null'); if (Array.isArray(p) && p.length) positions = p; } catch {}
+      return {
+        id: String(it.id),
+        name: it.fields?.Title || data.Title || 'Anfrage',
+        type: it.fields?.FavType || (positions ? 'multi' : 'single'),
+        data, positions,
+      };
+    });
+}
+
+// Liefert Favoriten synchron (SP-Cache oder localStorage)
 function getFavorites() {
+  if (favUseSP) return favCache.slice();
   try { return JSON.parse(localStorage.getItem(LS_FAVORITES) || '[]'); }
   catch { return []; }
 }
@@ -1880,7 +1965,12 @@ function saveFavorites(arr) {
   localStorage.setItem(LS_FAVORITES, JSON.stringify(arr));
 }
 
-function saveItemAsFavorite(itemId) {
+function _refreshFavBars() {
+  if (currentView === 'new')   renderFavBar('single');
+  if (currentView === 'multi') renderFavBar('multi');
+}
+
+async function saveItemAsFavorite(itemId) {
   const item = allItems.find(i => String(i.id) === String(itemId));
   if (!item) return;
   let positions = null;
@@ -1894,17 +1984,46 @@ function saveItemAsFavorite(itemId) {
    'Lieferant','Lieferant2','Lieferant3','Lieferant4','GeschaetzterPreis','Kostenstelle']
     .forEach(k => { data[k] = k === 'Title' ? title : _rf(item, k); });
 
+  if (favUseSP) {
+    try {
+      const created = await gPost(`/sites/${siteId}/lists/${favListId}/items`, {
+        fields: {
+          Title: title, FavOwner: _favOwner(), FavType: type,
+          FavData: JSON.stringify(data),
+          FavPositions: positions ? JSON.stringify(positions) : '',
+        },
+      });
+      favCache.unshift({ id: String(created.id), name: title, type, data, positions });
+      toast('Als Wiedervorlage gespeichert ⭐', 'success');
+      _refreshFavBars();
+      return;
+    } catch (e) {
+      toast('Speichern in SharePoint fehlgeschlagen, lokal gesichert.', 'info');
+      // Fallback unten
+    }
+  }
   const favs = getFavorites();
   favs.unshift({ id: 'fav_' + Date.now(), name: title, type, data, positions, savedAt: new Date().toISOString() });
   saveFavorites(favs);
   toast('Als Wiedervorlage gespeichert ⭐', 'success');
+  _refreshFavBars();
 }
 
-function deleteFavorite(favId, ev) {
+async function deleteFavorite(favId, ev) {
   if (ev) ev.stopPropagation();
+  if (favUseSP && !String(favId).startsWith('fav_')) {
+    try {
+      await gDelete(`/sites/${siteId}/lists/${favListId}/items/${favId}`);
+      favCache = favCache.filter(f => f.id !== favId);
+      _refreshFavBars();
+      return;
+    } catch (e) {
+      toast('Löschen fehlgeschlagen: ' + e.message, 'error');
+      return;
+    }
+  }
   saveFavorites(getFavorites().filter(f => f.id !== favId));
-  if (currentView === 'new')   renderFavBar('single');
-  if (currentView === 'multi') renderFavBar('multi');
+  _refreshFavBars();
 }
 
 function useFavorite(favId) {
