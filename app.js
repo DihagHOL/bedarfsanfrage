@@ -211,6 +211,7 @@ function startAutoRefresh() {
     if (arCountdown <= 0) {
       arCountdown = 20;
       loadItems(false);
+      refreshAccessConfig(); // Zugriffsfreigaben automatisch übernehmen (~20s)
     }
     updateARBtn();
   }, 1000);
@@ -225,6 +226,7 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden && autoRefreshTimer && !arPaused && !panelEditMode) {
     arCountdown = 20;
     loadItems(false);
+    refreshAccessConfig(); // Freigaben beim Zurückkehren sofort übernehmen
     updateARBtn();
   }
 });
@@ -690,6 +692,30 @@ async function loadAccessConfig() {
   } catch (e) {
     console.warn('[Zugriff] Konfiguration konnte nicht geladen werden:', e.message);
   }
+}
+
+// Leichte periodische Aktualisierung (an Auto-Refresh gekoppelt): liest die
+// Konfiguration neu und wendet Änderungen ohne manuelles Neuladen an. Nutzt die
+// gecachte Listen-ID; bei fehlendem Lesezugriff still wirkungslos.
+async function refreshAccessConfig() {
+  if (!account || isAdmin()) return; // Admin sieht ohnehin alles
+  try {
+    const listId = await _findConfigList();
+    if (!listId) return;
+    const res  = await gGet(`/sites/${siteId}/lists/${listId}/items?$expand=fields&$top=200`);
+    const item = (res.value || []).find(it => (it.fields?.Title || '') === ACCESS_ITEM_TITLE);
+    let next = {};
+    if (item) {
+      accessConfigItemId = item.id;
+      try { next = JSON.parse(_decodeSpText(item.fields?.ConfigValue) || '{}').users || {}; } catch {}
+    }
+    if (JSON.stringify(next) !== JSON.stringify(accessUsers)) {
+      accessUsers = next;
+      applyNavVisibility();
+      // Aktueller Bereich nicht mehr erlaubt → auf „Meine Anfragen" umleiten
+      if (GATED_FEATURES.includes(currentView) && !canAccess(currentView)) navigate('mine');
+    }
+  } catch { /* still: kein Lesezugriff o. Ä. */ }
 }
 async function saveAccessConfig() {
   if (!isAdmin()) { console.warn('[Zugriff] Speichern abgelehnt – kein Admin.'); return; }
