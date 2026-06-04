@@ -323,6 +323,8 @@ async function bootDone() {
     await loadAccessConfig();
     // Wiedervorlagen aus SharePoint laden (nicht blockierend für den Start)
     initFavorites().catch(() => {});
+    // Fällige automatische Entwürfe anlegen (nur Admin; nicht blockierend)
+    processAutoDrafts().catch(() => {});
     $id('boot').style.display = 'none';
     $id('app').style.display  = 'flex';
     applyNavVisibility(); // Nav-Sichtbarkeit nach geladener Zugriffskonfiguration setzen
@@ -640,6 +642,68 @@ function _autoRefreshData() {
   else                      refreshItemsIncremental();
 }
 
+// ── AUTOMATISCHE ENTWÜRFE (Erinnerung) ───────────────────────────────────────
+// Erstellt zu fälligen „Datum zur automatischen Bedarfsanfrage" eine Kopie als
+// Entwurf (Status „Automatisch erstellter Entwurf"). Läuft NUR als Admin → eine
+// Sitzung, keine Doppelanlage. Die Quelle wird nach dem Auslösen geleert, damit
+// sie nicht erneut feuert.
+function _buildAutoDraftFields(src) {
+  const out = {};
+  for (const fd of FORM_FIELDS) {
+    if (fd.key === 'AutoBedarfDatum') continue;          // Erinnerungsdatum nicht kopieren
+    const col = resolvedFields[fd.key];
+    if (!col) continue;
+    const v = getField(src, col);
+    if (v == null || v === '' || typeof v === 'object') continue; // Personen/Arrays/Objekte überspringen
+    out[col] = v;
+  }
+  const srcTitle = cleanTitle(getField(src,'Title') || '') || 'Bedarfsanfrage';
+  out['Title'] = 'Auto-Entwurf: ' + srcTitle;
+  return out;
+}
+
+async function processAutoDrafts() {
+  if (!isAdmin()) return;                                // nur Admin erzeugt Auto-Entwürfe
+  const dateCol = resolvedFields['AutoBedarfDatum'];
+  if (!dateCol) return;                                  // Spalte fehlt → nichts zu tun
+  const statusCol = resolvedFields['Status'] || 'Status';
+  const draftStatus = statusChoices.find(c => /automatisch erstellt/i.test(c))
+                   || statusChoices.find(c => /entwurf/i.test(c))
+                   || 'Automatisch erstellter Entwurf';
+  const todayEnd = new Date(); todayEnd.setHours(23,59,59,999);
+  const due = allItems.filter(i => {
+    const d = getField(i, dateCol);
+    if (!d) return false;
+    const dd = new Date(d);
+    if (isNaN(dd.getTime()) || dd > todayEnd) return false;
+    const st = (getStatusVal(i) || '').toLowerCase();
+    return !/entwurf|automatisch erstellt/.test(st);     // Entwürfe nicht erneut kopieren
+  });
+  if (!due.length) return;
+
+  const listPath = `/sites/${siteId}/lists/${listId}`;
+  let created = 0;
+  for (const src of due) {
+    try {
+      // 1) Quelle: Erinnerungsdatum leeren (verhindert erneutes Auslösen)
+      await gPatch(`${listPath}/items/${src.id}/fields`, { [dateCol]: null });
+      const sc = allItems.find(i => String(i.id) === String(src.id));
+      if (sc?.fields) sc.fields[dateCol] = null;
+      // 2) Entwurf als Kopie anlegen (robust: unbekannte Felder werden verworfen)
+      const fields  = _buildAutoDraftFields(src);
+      const newItem = await gPost(`${listPath}/items`, { fields: { Title: fields.Title } });
+      const rest    = { ...fields }; delete rest.Title;
+      rest[statusCol] = draftStatus;
+      await patchRetry(`${listPath}/items/${newItem.id}/fields`, rest);
+      created++;
+    } catch(e) { console.warn('[AutoDraft] #' + src.id + ' fehlgeschlagen:', e.message); }
+  }
+  if (created) {
+    toast(`${created} automatische${created === 1 ? 'r' : ''} Entwurf${created === 1 ? '' : 'e'} erstellt.`, 'success');
+    await loadItems(false);
+  }
+}
+
 // ── ROUTING ──────────────────────────────────────────────────────────────────
 // Dashboard title differs by role: admins see "Dashboard (Alle)", others see "Meine Anfragen"
 function VIEW_TITLES(view) {
@@ -672,6 +736,9 @@ function canAccess(feature) {
   return !!(u && u[feature]);
 }
 function canSeeDashboard() { return canAccess('dashboard'); }
+// Einkäufer: darf beim Öffnen den Status auf „In Prüfung (Einkauf)" setzen und
+// Anfragen genehmigen/ablehnen. Admin immer; sonst per Zugriffsverwaltung (einkauf).
+function canApprove() { return isAdmin() || canAccess('einkauf'); }
 
 // Rich-Text-Spalten liefern HTML zurück → Tags entfernen + Entities dekodieren,
 // damit das JSON unabhängig vom Spaltentyp (einfacher Text / Rich-Text) parsebar ist.
@@ -758,7 +825,7 @@ async function saveAccessConfig() {
 function setAccess(upn, feature, on) {
   upn = (upn || '').trim().toLowerCase();
   if (!upn) return;
-  if (!accessUsers[upn]) accessUsers[upn] = { dashboard: false, reports: false, importer: false };
+  if (!accessUsers[upn]) accessUsers[upn] = { dashboard: false, reports: false, importer: false, einkauf: false };
   accessUsers[upn][feature] = !!on;
   saveAccessConfig();
   applyNavVisibility();
@@ -767,7 +834,7 @@ function addAccessUser() {
   const inp = $id('access-new-upn');
   const upn = (inp?.value || '').trim().toLowerCase();
   if (!upn || !/@/.test(upn)) { toast('Bitte gültige UPN/E-Mail angeben.', 'error'); return; }
-  if (!accessUsers[upn]) accessUsers[upn] = { dashboard: true, reports: false, importer: false };
+  if (!accessUsers[upn]) accessUsers[upn] = { dashboard: true, reports: false, importer: false, einkauf: true };
   saveAccessConfig();
   openSettings();
 }
@@ -4316,7 +4383,8 @@ async function openPanel(itemId) {
   const creatorEmail = (item.createdBy?.user?.email || '').trim().toLowerCase();
   const myEmail      = (account?.username || '').trim().toLowerCase();
   const viewerIsCreator = !!myEmail && myEmail === creatorEmail;
-  if (!viewerIsCreator) {
+  // Nur definierte Einkäufer (oder Admin) lösen den Statuswechsel aus – nicht der Ersteller.
+  if (!viewerIsCreator && canApprove()) {
     const sv        = (getStatusVal(item) || 'Eingereicht').trim(); // leeres Feld = Eingereicht
     const statusCol = resolvedFields['Status'] || 'Status';
     let   advanced  = false;
@@ -4658,6 +4726,7 @@ async function saveEdits(itemId) {
 // ── GENEHMIGUNG IM DASHBOARD ─────────────────────────────────────────────────
 
 async function doApprove(itemId) {
+  if (!canApprove()) { toast('Keine Berechtigung zum Genehmigen.', 'error'); return; }
   const banner = document.querySelector('#approval-action-banner');
   if (banner) banner.innerHTML = '<div class="aab-hint">⏳ Wird gespeichert…</div>';
 
@@ -4704,6 +4773,7 @@ async function doApprove(itemId) {
 }
 
 async function doReject(itemId, comment) {
+  if (!canApprove()) { toast('Keine Berechtigung zum Ablehnen.', 'error'); return; }
   const banner = document.querySelector('#approval-action-banner');
   if (banner) banner.innerHTML = '<div class="aab-hint">⏳ Wird gespeichert…</div>';
 
@@ -4925,7 +4995,7 @@ function renderPanel(item, editMode = false) {
   const approvalInner = buildApprovalInner(item, statusVal);
 
   // Genehmigungsaktion-Banner: sichtbar für alle im Dashboard/All-View (nicht in eigener Mine-Ansicht)
-  const needsApproval = !editMode && !isMineView
+  const needsApproval = !editMode && !isMineView && canApprove()
     && /pr[üu]fung/i.test(statusVal) && /einkauf/i.test(statusVal) && !/strategisch/i.test(statusVal);
   const approvalActionBanner = needsApproval ? `
     <div class="approval-action-banner" id="approval-action-banner">
@@ -5316,14 +5386,18 @@ function openSettings() {
       <label class="tgl-wrap" title="Tabellen-Importer">
         <input type="checkbox" ${p.importer ? 'checked' : ''}
           onchange="setAccess('${esc(upn)}','importer',this.checked)"><span class="tgl"></span></label>
+      <label class="tgl-wrap" title="Einkauf: Status setzen + genehmigen/ablehnen">
+        <input type="checkbox" ${p.einkauf ? 'checked' : ''}
+          onchange="setAccess('${esc(upn)}','einkauf',this.checked)"><span class="tgl"></span></label>
       <button class="su-del" title="UPN entfernen" onclick="removeAccessUser('${esc(upn)}')">✕</button>
     </div>`;
 
   const adminSection = adminMode ? `
     <hr class="modal-hr">
     <div class="settings-section-title">🔐 Zugriffsverwaltung (UPN)</div>
-    <p class="su-hint">Lege fest, wer <b>Dashboard</b>, <b>Reports</b> und <b>Tabellen-Importer</b> sehen darf.
-       Als Administrator siehst du immer alle Bereiche. Einstellungen gelten zentral für alle Geräte.</p>
+    <p class="su-hint">Lege fest, wer <b>Dashboard</b>, <b>Reports</b>, <b>Tabellen-Importer</b> sehen darf und wer
+       als <b>Einkäufer</b> beim Öffnen den Status auf „In Prüfung (Einkauf)" setzen sowie
+       genehmigen/ablehnen darf. Als Administrator hast du immer alle Rechte. Gilt zentral für alle Geräte.</p>
     <div class="su-add">
       <input type="email" id="access-new-upn" placeholder="einkauf@dihag.com" class="su-input">
       <button class="btn btn-sm btn-primary" onclick="addAccessUser()">+ Hinzufügen</button>
@@ -5333,6 +5407,7 @@ function openSettings() {
       <span class="su-col-lbl" title="Dashboard">📊</span>
       <span class="su-col-lbl" title="Reports">📈</span>
       <span class="su-col-lbl" title="Tabellen-Importer">🗂</span>
+      <span class="su-col-lbl" title="Einkauf (genehmigen)">🛒</span>
       <span style="width:22px"></span>
     </div>
     <div id="access-list">${
@@ -5361,7 +5436,8 @@ function openSettings() {
   const featLabel = { dashboard:'Dashboard', reports:'Reports', importer:'Tabellen-Importer' };
   const myAreas = isAdmin()
     ? 'Alle Bereiche (Administrator)'
-    : (GATED_FEATURES.filter(f => canAccess(f)).map(f => featLabel[f]).join(', ') || '— (Standardansicht)');
+    : ([...GATED_FEATURES.filter(f => canAccess(f)).map(f => featLabel[f]),
+        ...(canApprove() ? ['Einkauf (genehmigen)'] : [])].join(', ') || '— (Standardansicht)');
   const allRow = `<div class="settings-row">
       <span class="settings-label">🔐 Meine Bereiche</span>
       <span class="settings-val-ro">${esc(myAreas)}</span>
