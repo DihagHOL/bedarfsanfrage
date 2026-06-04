@@ -634,11 +634,16 @@ function isAdmin() { return account?.username?.toLowerCase() === ADMIN_EMAIL; }
 // ── ZENTRALE ZUGRIFFSSTEUERUNG (nur vom Admin pflegbar, in SharePoint) ─────────
 // Gated-Bereiche: Dashboard, Reports, Tabellen-Importer. Standard: nur Admin sieht
 // sie; der Admin gibt einzelne UPNs (z. B. Einkauf) zentral frei.
-const ACCESS_LIST_NAME = 'BANF_Konfiguration';
-const GATED_FEATURES   = ['dashboard', 'reports', 'importer'];
-let accessListId       = null;
-let accessConfigItemId = null;
-let accessUsers        = {}; // { 'upn@dihag.com': { dashboard:true, reports:true, importer:false } }
+// Speicherung: dedizierte SP-Liste 'BANF_Konfiguration'. Ein Element identifiziert
+// über Title='access' hält die gesamte Konfiguration als JSON in der Spalte
+// 'ConfigValue' (mehrzeiliger Text). Die Liste wird manuell angelegt (Listen-
+// erstellung per Graph ist im Tenant gesperrt) – die App findet sie nur.
+const ACCESS_LIST_NAME  = 'BANF_Konfiguration';
+const ACCESS_ITEM_TITLE = 'access';
+const GATED_FEATURES    = ['dashboard', 'reports', 'importer'];
+let accessListId        = null;
+let accessConfigItemId  = null;
+let accessUsers         = {}; // { 'upn@dihag.com': { dashboard:true, reports:true, importer:false } }
 
 function myUPN() { return (account?.username || '').trim().toLowerCase(); }
 
@@ -650,44 +655,24 @@ function canAccess(feature) {
 function canSeeDashboard() { return canAccess('dashboard'); }
 
 async function _findConfigList() {
+  if (accessListId) return accessListId;
   try {
     const all = await gGet(`/sites/${siteId}/lists?$select=id,displayName&$top=500`);
-    return (all.value || []).find(l =>
+    accessListId = (all.value || []).find(l =>
       (l.displayName || '').trim().toLowerCase() === ACCESS_LIST_NAME.toLowerCase())?.id || null;
-  } catch { return null; }
+  } catch { accessListId = null; }
+  return accessListId;
 }
-async function _createConfigList() {
-  try {
-    const tok = await getToken();
-    const r = await fetch(API + `/sites/${siteId}/lists`, {
-      method: 'POST',
-      headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        displayName: ACCESS_LIST_NAME,
-        list: { template: 'genericList' },
-        columns: [
-          { name: 'ConfigKey',   text: {} },
-          { name: 'ConfigValue', text: { allowMultipleLines: true } },
-        ],
-      }),
-    });
-    if (r.ok) return (await r.json()).id;
-    console.info(`[Zugriff] Konfig-Liste nicht anlegbar (HTTP ${r.status}).`);
-    return null;
-  } catch { return null; }
-}
+
 // Beim Start aufrufen (nach discoverSP). Niemals werfen.
 async function loadAccessConfig() {
   accessUsers = {}; accessConfigItemId = null; accessListId = null;
   try {
     if (!siteId) return;
-    accessListId = await _findConfigList();
-    if (!accessListId && isAdmin()) {       // nur Admin darf die Liste anlegen
-      accessListId = await _createConfigList() || await _findConfigList();
-    }
-    if (!accessListId) return;              // kein zentraler Speicher → nur Admin sieht gated
-    const res  = await gGet(`/sites/${siteId}/lists/${accessListId}/items?$expand=fields&$top=50`);
-    const item = (res.value || []).find(it => (it.fields?.ConfigKey || '') === 'access');
+    const listId = await _findConfigList();
+    if (!listId) return; // Liste fehlt → nur Admin sieht gated Bereiche
+    const res  = await gGet(`/sites/${siteId}/lists/${listId}/items?$expand=fields&$top=200`);
+    const item = (res.value || []).find(it => (it.fields?.Title || '') === ACCESS_ITEM_TITLE);
     if (item) {
       accessConfigItemId = item.id;
       try { accessUsers = JSON.parse(item.fields?.ConfigValue || '{}').users || {}; } catch {}
@@ -699,13 +684,13 @@ async function loadAccessConfig() {
 async function saveAccessConfig() {
   if (!isAdmin()) return;
   try {
-    if (!accessListId) accessListId = await _findConfigList() || await _createConfigList();
-    if (!accessListId) { toast('Zugriffsliste nicht verfügbar (Berechtigung?).', 'error'); return; }
-    const fields = { ConfigKey: 'access', ConfigValue: JSON.stringify({ users: accessUsers }) };
+    const listId = await _findConfigList();
+    if (!listId) { toast("Liste 'BANF_Konfiguration' nicht gefunden.", 'error'); return; }
+    const fields = { Title: ACCESS_ITEM_TITLE, ConfigValue: JSON.stringify({ users: accessUsers }) };
     if (accessConfigItemId) {
-      await gPatch(`/sites/${siteId}/lists/${accessListId}/items/${accessConfigItemId}/fields`, fields);
+      await gPatch(`/sites/${siteId}/lists/${listId}/items/${accessConfigItemId}/fields`, fields);
     } else {
-      const created = await gPost(`/sites/${siteId}/lists/${accessListId}/items`, { fields });
+      const created = await gPost(`/sites/${siteId}/lists/${listId}/items`, { fields });
       accessConfigItemId = created.id;
     }
   } catch (e) {
