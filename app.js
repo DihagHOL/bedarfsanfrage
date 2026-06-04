@@ -654,6 +654,16 @@ function canAccess(feature) {
 }
 function canSeeDashboard() { return canAccess('dashboard'); }
 
+// Rich-Text-Spalten liefern HTML zurück → Tags entfernen + Entities dekodieren,
+// damit das JSON unabhängig vom Spaltentyp (einfacher Text / Rich-Text) parsebar ist.
+function _decodeSpText(s) {
+  if (s == null) return '';
+  const noTags = String(s).replace(/<[^>]*>/g, '');
+  const ta = document.createElement('textarea');
+  ta.innerHTML = noTags;
+  return ta.value;
+}
+
 async function _findConfigList() {
   if (accessListId) return accessListId;
   try {
@@ -675,7 +685,7 @@ async function loadAccessConfig() {
     const item = (res.value || []).find(it => (it.fields?.Title || '') === ACCESS_ITEM_TITLE);
     if (item) {
       accessConfigItemId = item.id;
-      try { accessUsers = JSON.parse(item.fields?.ConfigValue || '{}').users || {}; } catch {}
+      try { accessUsers = JSON.parse(_decodeSpText(item.fields?.ConfigValue) || '{}').users || {}; } catch {}
     }
   } catch (e) {
     console.warn('[Zugriff] Konfiguration konnte nicht geladen werden:', e.message);
