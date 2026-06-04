@@ -670,7 +670,13 @@ async function _findConfigList() {
     const all = await gGet(`/sites/${siteId}/lists?$select=id,displayName&$top=500`);
     accessListId = (all.value || []).find(l =>
       (l.displayName || '').trim().toLowerCase() === ACCESS_LIST_NAME.toLowerCase())?.id || null;
-  } catch { accessListId = null; }
+    if (!accessListId) {
+      const names = (all.value || []).map(l => l.displayName).filter(Boolean);
+      console.warn(`[Zugriff] Liste '${ACCESS_LIST_NAME}' nicht gefunden. Vorhandene Listen:`, names);
+    } else {
+      console.log(`[Zugriff] Liste '${ACCESS_LIST_NAME}' gefunden:`, accessListId);
+    }
+  } catch (e) { accessListId = null; console.warn('[Zugriff] Listensuche fehlgeschlagen:', e.message); }
   return accessListId;
 }
 
@@ -687,24 +693,32 @@ async function loadAccessConfig() {
       accessConfigItemId = item.id;
       try { accessUsers = JSON.parse(_decodeSpText(item.fields?.ConfigValue) || '{}').users || {}; } catch {}
     }
+    console.log('[Zugriff] Konfiguration geladen. Item gefunden:', !!item, '| Nutzer:', Object.keys(accessUsers));
   } catch (e) {
     console.warn('[Zugriff] Konfiguration konnte nicht geladen werden:', e.message);
   }
 }
 async function saveAccessConfig() {
-  if (!isAdmin()) return;
+  if (!isAdmin()) { console.warn('[Zugriff] Speichern abgelehnt – kein Admin.'); return; }
   try {
     const listId = await _findConfigList();
-    if (!listId) { toast("Liste 'BANF_Konfiguration' nicht gefunden.", 'error'); return; }
+    if (!listId) { toast("Liste 'BANF_Konfiguration' nicht gefunden – siehe Konsole.", 'error'); return; }
     const fields = { Title: ACCESS_ITEM_TITLE, ConfigValue: JSON.stringify({ users: accessUsers }) };
+    console.log('[Zugriff] Speichere…', accessConfigItemId ? `PATCH item ${accessConfigItemId}` : 'POST neues Element', fields);
     if (accessConfigItemId) {
       await gPatch(`/sites/${siteId}/lists/${listId}/items/${accessConfigItemId}/fields`, fields);
     } else {
       const created = await gPost(`/sites/${siteId}/lists/${listId}/items`, { fields });
       accessConfigItemId = created.id;
     }
+    console.log('[Zugriff] Gespeichert ✓ itemId=', accessConfigItemId);
+    toast('Zugriffsrechte gespeichert ✓', 'success');
   } catch (e) {
-    toast('Speichern der Zugriffsrechte fehlgeschlagen: ' + e.message, 'error');
+    console.error('[Zugriff] Speichern fehlgeschlagen:', e.message);
+    const hint = /ConfigValue/i.test(e.message)
+      ? " – Spalte 'ConfigValue' (Mehrere Textzeilen) in der Liste anlegen."
+      : '';
+    toast('Speichern der Zugriffsrechte fehlgeschlagen: ' + e.message + hint, 'error');
   }
 }
 // Admin-UI-Helfer
