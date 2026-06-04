@@ -613,6 +613,12 @@ details#attach-extra-wrap[open] .attach-more-toggle { color:#374151; }
 .su-del:hover { background: #fee2e2; color: #dc2626; }
 .su-token-btn { font-size: .72rem !important; padding: 2px 7px !important; white-space: nowrap; }
 
+/* Zugriffsverwaltung (zentral) */
+.su-hint { font-size: .78rem; color: #6b7280; line-height: 1.45; margin: -2px 0 10px; }
+.access-row { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid #f3f4f6; }
+.access-header { border-bottom: 2px solid #e5e7eb; margin-bottom: 2px; padding: 4px 0 2px; }
+.access-row .tgl-wrap { min-width: 38px; display: flex; justify-content: center; }
+
 /* ── Panel comments section ── */
 .pf-comment-row { padding: 8px 0; border-bottom: 1px solid #f1f5f9; }
 .pf-comment-row:last-child { border-bottom: none; }

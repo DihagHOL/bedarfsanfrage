@@ -345,6 +345,8 @@ async function bootDone() {
     // Must happen before migration so granted flags are already in localStorage.
     await loadSpSettings();
     await loadItems(false);
+    // Zentrale Zugriffssteuerung laden (bestimmt Sichtbarkeit von Dashboard/Reports/Importer)
+    await loadAccessConfig();
     // Wiedervorlagen aus SharePoint laden (nicht blockierend für den Start)
     initFavorites().catch(() => {});
     $id('boot').style.display = 'none';
@@ -623,27 +625,132 @@ async function loadItems(showToast = true) {
 // Dashboard title differs by role: admins see "Dashboard (Alle)", others see "Meine Anfragen"
 function VIEW_TITLES(view) {
   const map = { new:'Neue Bedarfsanfrage', multi:'Sammelanfrage', mine:'Meine Anfragen', all:'Alle Anfragen', detail:'Anfrage Details', importer:'Tabellen-Importer', reports:'Reports & Auswertungen', schulung:'Schulung (Beta)' };
-  if (view === 'dashboard') return isAdmin() ? 'Dashboard (Alle Anfragen)' : 'Meine Anfragen';
+  if (view === 'dashboard') return canAccess('dashboard') ? 'Dashboard (Alle Anfragen)' : 'Meine Anfragen';
   return map[view] || view;
 }
 
-// Dashboard is visible to all logged-in users.
-// Non-admins see only their own items; admins see all items.
-function canSeeDashboard() { return !!account; }
 function isAdmin() { return account?.username?.toLowerCase() === ADMIN_EMAIL; }
 
-// Show/hide nav items based on role and admin-granted permissions.
+// ── ZENTRALE ZUGRIFFSSTEUERUNG (nur vom Admin pflegbar, in SharePoint) ─────────
+// Gated-Bereiche: Dashboard, Reports, Tabellen-Importer. Standard: nur Admin sieht
+// sie; der Admin gibt einzelne UPNs (z. B. Einkauf) zentral frei.
+const ACCESS_LIST_NAME = 'BANF_Konfiguration';
+const GATED_FEATURES   = ['dashboard', 'reports', 'importer'];
+let accessListId       = null;
+let accessConfigItemId = null;
+let accessUsers        = {}; // { 'upn@dihag.com': { dashboard:true, reports:true, importer:false } }
+
+function myUPN() { return (account?.username || '').trim().toLowerCase(); }
+
+function canAccess(feature) {
+  if (isAdmin()) return true;
+  const u = accessUsers[myUPN()];
+  return !!(u && u[feature]);
+}
+function canSeeDashboard() { return canAccess('dashboard'); }
+
+async function _findConfigList() {
+  try {
+    const all = await gGet(`/sites/${siteId}/lists?$select=id,displayName&$top=500`);
+    return (all.value || []).find(l =>
+      (l.displayName || '').trim().toLowerCase() === ACCESS_LIST_NAME.toLowerCase())?.id || null;
+  } catch { return null; }
+}
+async function _createConfigList() {
+  try {
+    const tok = await getToken();
+    const r = await fetch(API + `/sites/${siteId}/lists`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        displayName: ACCESS_LIST_NAME,
+        list: { template: 'genericList' },
+        columns: [
+          { name: 'ConfigKey',   text: {} },
+          { name: 'ConfigValue', text: { allowMultipleLines: true } },
+        ],
+      }),
+    });
+    if (r.ok) return (await r.json()).id;
+    console.info(`[Zugriff] Konfig-Liste nicht anlegbar (HTTP ${r.status}).`);
+    return null;
+  } catch { return null; }
+}
+// Beim Start aufrufen (nach discoverSP). Niemals werfen.
+async function loadAccessConfig() {
+  accessUsers = {}; accessConfigItemId = null; accessListId = null;
+  try {
+    if (!siteId) return;
+    accessListId = await _findConfigList();
+    if (!accessListId && isAdmin()) {       // nur Admin darf die Liste anlegen
+      accessListId = await _createConfigList() || await _findConfigList();
+    }
+    if (!accessListId) return;              // kein zentraler Speicher → nur Admin sieht gated
+    const res  = await gGet(`/sites/${siteId}/lists/${accessListId}/items?$expand=fields&$top=50`);
+    const item = (res.value || []).find(it => (it.fields?.ConfigKey || '') === 'access');
+    if (item) {
+      accessConfigItemId = item.id;
+      try { accessUsers = JSON.parse(item.fields?.ConfigValue || '{}').users || {}; } catch {}
+    }
+  } catch (e) {
+    console.warn('[Zugriff] Konfiguration konnte nicht geladen werden:', e.message);
+  }
+}
+async function saveAccessConfig() {
+  if (!isAdmin()) return;
+  try {
+    if (!accessListId) accessListId = await _findConfigList() || await _createConfigList();
+    if (!accessListId) { toast('Zugriffsliste nicht verfügbar (Berechtigung?).', 'error'); return; }
+    const fields = { ConfigKey: 'access', ConfigValue: JSON.stringify({ users: accessUsers }) };
+    if (accessConfigItemId) {
+      await gPatch(`/sites/${siteId}/lists/${accessListId}/items/${accessConfigItemId}/fields`, fields);
+    } else {
+      const created = await gPost(`/sites/${siteId}/lists/${accessListId}/items`, { fields });
+      accessConfigItemId = created.id;
+    }
+  } catch (e) {
+    toast('Speichern der Zugriffsrechte fehlgeschlagen: ' + e.message, 'error');
+  }
+}
+// Admin-UI-Helfer
+function setAccess(upn, feature, on) {
+  upn = (upn || '').trim().toLowerCase();
+  if (!upn) return;
+  if (!accessUsers[upn]) accessUsers[upn] = { dashboard: false, reports: false, importer: false };
+  accessUsers[upn][feature] = !!on;
+  saveAccessConfig();
+  applyNavVisibility();
+}
+function addAccessUser() {
+  const inp = $id('access-new-upn');
+  const upn = (inp?.value || '').trim().toLowerCase();
+  if (!upn || !/@/.test(upn)) { toast('Bitte gültige UPN/E-Mail angeben.', 'error'); return; }
+  if (!accessUsers[upn]) accessUsers[upn] = { dashboard: true, reports: false, importer: false };
+  saveAccessConfig();
+  openSettings();
+}
+function removeAccessUser(upn) {
+  delete accessUsers[(upn || '').trim().toLowerCase()];
+  saveAccessConfig();
+  applyNavVisibility();
+  openSettings();
+}
+
+// Nav-Items nach zentraler Zugriffssteuerung ein-/ausblenden.
 function applyNavVisibility() {
-  const email    = (account?.username || '').toLowerCase();
-  const s        = getSettings(email);
-  const dashNav  = document.querySelector('.nav-item[data-view="dashboard"]');
-  if (dashNav) dashNav.style.display = '';
+  const setVis = (view, vis) => {
+    const el = document.querySelector(`.nav-item[data-view="${view}"]`);
+    if (el) el.style.display = vis ? '' : 'none';
+  };
+  GATED_FEATURES.forEach(f => setVis(f, canAccess(f)));
+  // new, multi, mine, schulung sind für alle sichtbar
 }
 // Alias kept for any remaining call-sites
 const applyDashboardVisibility = applyNavVisibility;
 
 function navigate(view, id) {
-  if (!canSeeDashboard() && view === 'dashboard') view = 'mine'; // should never happen now
+  // Gated-Bereiche nur mit Zugriff betreten; sonst auf „Meine Anfragen" umleiten
+  if (GATED_FEATURES.includes(view) && !canAccess(view)) view = 'mine';
   // Always close panels of all split views when navigating
   ['mine','all','dashboard'].forEach(v => {
     $id('panel-' + v)?.classList.add('hidden');
@@ -5027,48 +5134,42 @@ function openSettings() {
   const s        = getSettings(email);
   const adminMode = email === ADMIN_EMAIL;
 
-  // ── Admin: per-user row ───────────────────────────────────────────────────
-  const userRow = (em, us) => `
-    <div class="su-row" id="su-row-${btoa(em).replace(/=/g,'')}">
-      <span class="su-email" title="${esc(em)}">${esc(em)}</span>
-      <label class="tgl-wrap" title="Auto-Refresh">
-        <input type="checkbox" ${us.autoRefresh && us.autoRefreshGranted ? 'checked' : ''}
-          onchange="saveUserSettings('${esc(em)}',{autoRefresh:this.checked,autoRefreshGranted:this.checked})">
-        <span class="tgl"></span>
-      </label>
-      <label class="tgl-wrap" title="Dashboard-Zugriff (alle Anfragen)">
-        <input type="checkbox" ${us.canSeeDashboard ? 'checked' : ''}
-          onchange="saveUserSettings('${esc(em)}',{canSeeDashboard:this.checked})">
-        <span class="tgl"></span>
-      </label>
-      <input type="number" value="${us.pageSize||100}" min="10" max="500" step="10"
-        class="su-num" title="Max. Elemente"
-        onchange="saveUserSettings('${esc(em)}',{pageSize:parseInt(this.value)||100})">
-      <button class="btn btn-sm btn-outline su-token-btn" title="Grant-Token kopieren und an Benutzer senden"
-        onclick="copyGrantToken('${esc(em)}')">📋 Token</button>
-      <button class="su-del" title="Benutzer entfernen"
-        onclick="deleteUserSetting('${esc(em)}')">✕</button>
+  // ── Admin: Zugriffsverwaltung (zentral in SharePoint) ─────────────────────
+  const accessRow = (upn, p) => `
+    <div class="access-row">
+      <span class="su-email" title="${esc(upn)}">${esc(upn)}</span>
+      <label class="tgl-wrap" title="Dashboard">
+        <input type="checkbox" ${p.dashboard ? 'checked' : ''}
+          onchange="setAccess('${esc(upn)}','dashboard',this.checked)"><span class="tgl"></span></label>
+      <label class="tgl-wrap" title="Reports">
+        <input type="checkbox" ${p.reports ? 'checked' : ''}
+          onchange="setAccess('${esc(upn)}','reports',this.checked)"><span class="tgl"></span></label>
+      <label class="tgl-wrap" title="Tabellen-Importer">
+        <input type="checkbox" ${p.importer ? 'checked' : ''}
+          onchange="setAccess('${esc(upn)}','importer',this.checked)"><span class="tgl"></span></label>
+      <button class="su-del" title="UPN entfernen" onclick="removeAccessUser('${esc(upn)}')">✕</button>
     </div>`;
 
   const adminSection = adminMode ? `
     <hr class="modal-hr">
-    <div class="settings-section-title">👥 Benutzer verwalten</div>
+    <div class="settings-section-title">🔐 Zugriffsverwaltung (UPN)</div>
+    <p class="su-hint">Lege fest, wer <b>Dashboard</b>, <b>Reports</b> und <b>Tabellen-Importer</b> sehen darf.
+       Als Administrator siehst du immer alle Bereiche. Einstellungen gelten zentral für alle Geräte.</p>
     <div class="su-add">
-      <input type="email" id="su-new-email" placeholder="user@dihag.com" class="su-input">
-      <button class="btn btn-sm btn-primary" onclick="addUserSetting()">+ Hinzufügen</button>
+      <input type="email" id="access-new-upn" placeholder="einkauf@dihag.com" class="su-input">
+      <button class="btn btn-sm btn-primary" onclick="addAccessUser()">+ Hinzufügen</button>
     </div>
-    <div class="su-header-row">
-      <span class="su-email" style="font-size:.7rem;color:#6b7280">E-Mail</span>
-      <span class="su-col-lbl" title="Auto-Refresh (30s)">⏱</span>
-      <span class="su-col-lbl" title="Dashboard-Zugriff">📊</span>
-      <span class="su-col-lbl" title="Max. Elemente">Elem.</span>
+    <div class="access-row access-header">
+      <span class="su-email" style="font-size:.7rem;color:#6b7280">UPN / E-Mail</span>
+      <span class="su-col-lbl" title="Dashboard">📊</span>
+      <span class="su-col-lbl" title="Reports">📈</span>
+      <span class="su-col-lbl" title="Tabellen-Importer">🗂</span>
       <span style="width:22px"></span>
     </div>
-    <div id="su-list">${
-      Object.entries(getAllUserSettings())
-        .filter(([k]) => k !== email)
-        .map(([k, v]) => userRow(k, v)).join('') ||
-      '<p class="su-empty">Noch keine weiteren Benutzer konfiguriert.</p>'
+    <div id="access-list">${
+      Object.entries(accessUsers).sort((a,b)=>a[0].localeCompare(b[0]))
+        .map(([u, p]) => accessRow(u, p)).join('') ||
+      '<p class="su-empty">Noch keine UPNs freigegeben – nur der Administrator sieht diese Bereiche.</p>'
     }</div>` : '';
 
   // ── "Meine Einstellungen" sections ────────────────────────────────────────
@@ -5087,27 +5188,18 @@ function openSettings() {
     : `<div class="settings-row"><span class="settings-label">⏱ Auto-Aktualisierung</span>
         ${roVal(s.autoRefresh && s.autoRefreshGranted, 'Aktiviert')}</div>`;
 
-  // canSeeDashboard: admin can toggle for self; others see read-only
-  const allRow = adminMode
-    ? `<div class="settings-row">
-        <span class="settings-label">📊 Dashboard-Zugriff</span>
-        <label class="tgl-wrap">
-          <input type="checkbox" ${s.canSeeDashboard ? 'checked' : ''}
-            onchange="saveUserSettings('${esc(email)}',{canSeeDashboard:this.checked});applyNavVisibility()">
-          <span class="tgl"></span>
-        </label>
-       </div>`
-    : `<div class="settings-row"><span class="settings-label">📊 Dashboard-Zugriff</span>
-        ${roVal(s.canSeeDashboard, 'Freigegeben')}</div>`;
+  // Zugriffs-Übersicht für den aktuellen Nutzer (zentral gesteuert, nur lesbar)
+  const featLabel = { dashboard:'Dashboard', reports:'Reports', importer:'Tabellen-Importer' };
+  const myAreas = isAdmin()
+    ? 'Alle Bereiche (Administrator)'
+    : (GATED_FEATURES.filter(f => canAccess(f)).map(f => featLabel[f]).join(', ') || '— (Standardansicht)');
+  const allRow = `<div class="settings-row">
+      <span class="settings-label">🔐 Meine Bereiche</span>
+      <span class="settings-val-ro">${esc(myAreas)}</span>
+    </div>`;
 
-  // Token-import row for non-admin (admin generates token, sends it, user pastes here)
-  const syncBtn = !adminMode ? `
-    <div class="settings-row" style="margin-top:6px;gap:6px;flex-wrap:wrap;align-items:center">
-      <span class="settings-label" style="font-size:.78rem;color:#6b7280">Grant-Token vom Admin:</span>
-      <input id="grant-token-input" type="text" placeholder="Token hier einfügen…"
-        class="su-input" style="flex:1;min-width:160px;font-size:.78rem">
-      <button class="btn btn-sm btn-primary" onclick="applyGrantToken()">✅ Anwenden</button>
-    </div>` : '';
+  // Token-System entfällt – Zugriff wird zentral über die Zugriffsverwaltung gesteuert
+  const syncBtn = '';
 
   $id('settings-body').innerHTML = `
     <div class="settings-section-title">⚙️ Meine Einstellungen</div>
