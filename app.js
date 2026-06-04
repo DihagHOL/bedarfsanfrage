@@ -1240,94 +1240,97 @@ function statusColorFor(val) {
   return { bg:'#f0f9ff', color:'#0369a1' };
 }
 
-// Data-driven status timeline.
-// Iterates ONLY the real SP Status column choices (statusChoices, populated from SP).
-// TIMELINE_STAGES is used purely as a lookup for approverField/commentField names.
-// Falls back to TIMELINE_STAGES labels if SP choices haven't loaded yet.
+// Prädiktive Status-Zeitleiste.
+// Zeigt NUR die Stufen, die für DIESE Anfrage laut Power-Automate-Freigabeprozess
+// tatsächlich getriggert werden (abhängig von Beschaffungsart, Preisschwellen,
+// Lead-Buyer) — vergangene, aktuelle und kommende. Nicht zutreffende Verzweigungen
+// (z. B. Controlling bei Nicht-Dienstleistung) werden nie angezeigt.
+//
+// Genehmigungslogik beginnt in der APP (Eingereicht → In Prüfung (Einkauf) →
+// Genehmigt (Einkauf)); danach übernimmt Power Automate die weiteren Stufen.
 function statusTimeline(statusVal, item) {
   const sv     = (statusVal || '').trim();
   const fields = item?.fields || item || {};
 
-  // Source: real SP choices only, deduplicated (SP list sometimes has duplicate entries).
-  // Fallback to [sv] if not yet loaded — never use hardcoded TIMELINE_STAGES labels.
-  const seen   = new Set();
-  const source = (statusChoices.length ? statusChoices : [sv])
-    .filter(c => { const k = c.trim().toLowerCase(); return k && !seen.has(k) && seen.add(k); });
+  // Attribute dieser Anfrage → welche Stufen werden überhaupt durchlaufen?
+  const beschaffung = String(getField(item, resolvedFields['Beschaffungslogik'] || 'Beschaffungslogik') || '');
+  const preis       = parseFloat(getField(item, resolvedFields['GeschaetzterPreis'] || 'GeschaetzterPreis')) || 0;
+  const lbRaw       = getField(item, resolvedFields['LeadBuyerAbschluss'] || 'LeadBuyerAbschluss');
+  const leadBuyer   = lbRaw === true || /^(true|ja|yes|1)$/i.test(String(lbRaw || ''));
+  const isDienstleistung = /dienstleistung/i.test(beschaffung);
+  const needsWerkleitung = preis >= 1500;
+  const needsStrategisch = preis >= 10000 && !leadBuyer;
 
-  const svLow            = sv.toLowerCase();
-  const isRej            = /^abgelehnt$/i.test(sv);
-  const isBestelltNow    = /^bestellt$/i.test(sv);
-  const isFreigegebenNow = /^freigegeben$/i.test(sv);
-  const TERMINAL_OK      = /^(freigegeben|bestellt)$/i;
-  const IN_BESTELLG      = /^in bestellung$/i;
-
-  // Sort source by logical workflow order (TIMELINE_STAGES index), not SP choice order.
-  // Stages not found in TIMELINE_STAGES (unknown/custom) go at the end.
-  const stageIndex = cv => {
-    const idx = TIMELINE_STAGES.findIndex(d => d.test(cv.trim()));
-    return idx === -1 ? 999 : idx;
+  // Anwendbare Stufen in Workflow-Reihenfolge (nur tatsächlich getriggerte)
+  const applies = st => {
+    if (/in bestellung/i.test(st.label)) return false;
+    if (/^abgelehnt$/i.test(st.label))   return false;
+    if (/controlling/i.test(st.label))   return isDienstleistung;
+    if (/werkleitung/i.test(st.label))   return needsWerkleitung;
+    if (/strategisch/i.test(st.label))   return needsStrategisch;
+    return true; // Eingereicht, In Prüfung (Einkauf), Genehmigt (Einkauf), Freigegeben, Bestellt
   };
-  const sortedSource = [...source].sort((a, b) => stageIndex(a) - stageIndex(b));
+  const stages = TIMELINE_STAGES.filter(applies);
 
-  const rows = sortedSource.map(choiceVal => {
-    const cv        = choiceVal.trim();
-    const isCurrent = cv.toLowerCase() === svLow;
+  // Anzeige-Label aus echten SP-Choices (falls geladen), sonst aus TIMELINE_STAGES
+  const spLabel = st => (statusChoices.find(c => st.test(c.trim())) || st.label).trim();
 
-    // Look up approver/comment field names from TIMELINE_STAGES
-    const tsd      = TIMELINE_STAGES.find(d => d.test(cv));
-    const approver = resolvePersonField(fields, tsd?.approverField);
-    const comment  = tsd?.commentField ? String(fields[tsd.commentField] || '').trim() : '';
+  const isRej = /^abgelehnt$/i.test(sv);
 
-    const isInBestellungFuture = IN_BESTELLG.test(cv) && isFreigegebenNow;
-    const isInBestellungPast   = IN_BESTELLG.test(cv) && isBestelltNow;
-
-    // Visibility rules — NO index-based "past" (index order is meaningless for
-    // branching workflows; "Abgelehnt" sits after "Freigegeben" in SP list order
-    // which would falsely mark it as reached for "Bestellt" items, etc.)
-    //
-    // A stage is shown when:
-    //   • It is the current status                   → always
-    //   • It is "Eingereicht"                        → always (first step, always happened)
-    //   • Its approverField was filled by workflow   → stage was actually reached
-    //     EXCEPT: skip "Genehmigt"-labelled stages for rejected items
-    //     (item was rejected, not approved, even if the field was filled earlier)
-    //   • "In Bestellung" special cases
-    const isGenehmigt = /genehmigt/i.test(cv);
-    const visible = isCurrent
-      || /^eingereicht$/i.test(cv)
-      || isInBestellungFuture
-      || isInBestellungPast
-      || (approver != null && !(isRej && isGenehmigt));
-
-    if (!visible) return null;
-
-    let dot, cls;
-    if (isCurrent) {
-      if      (TERMINAL_OK.test(cv))  { dot = '✓'; cls = 'ap-ok';     }
-      else if (IN_BESTELLG.test(cv))  { dot = '○'; cls = 'ap-circle'; }
-      else if (isRej)                 { dot = '✗'; cls = 'ap-no';     }
-      else                            { dot = '●'; cls = 'ap-pending';}
-    } else if (isInBestellungFuture) {
-      dot = '○'; cls = 'ap-circle-future';
-    } else {
-      dot = '✓'; cls = 'ap-ok'; // past stage
-    }
-
+  // Eine Zeitleisten-Zeile rendern (mit Genehmiger-Dedup gegen Doppelnennung)
+  let lastApprover = null;
+  const row = (label, dot, cls, approverField, commentField, bold) => {
     let approverHtml = '';
-    if (approver) {
-      const commentHtml = comment
-        ? `<div class="ap-inline-comment">💬 ${esc(comment)}</div>` : '';
-      const pastCls = isCurrent ? '' : ' ap-approver-past';
+    const approver = resolvePersonField(fields, approverField);
+    const comment  = commentField ? String(fields[commentField] || '').trim() : '';
+    if (approver && approver !== lastApprover) {
+      lastApprover = approver;
+      const commentHtml = comment ? `<div class="ap-inline-comment">💬 ${esc(comment)}</div>` : '';
+      const pastCls = cls === 'ap-ok' ? ' ap-approver-past' : '';
       approverHtml = `<div class="ap-approver${pastCls}">👤 ${esc(approver)}${commentHtml}</div>`;
     }
-
-    const isActive = isCurrent && !TERMINAL_OK.test(cv) && !IN_BESTELLG.test(cv) && !isRej;
-    const bold = isActive ? ' style="font-weight:600"' : '';
+    const boldAttr = bold ? ' style="font-weight:600"' : '';
     return `<div class="approval-stage"><div class="ap-dot ${cls}">${dot}</div>`
-         + `<div class="ap-body"><div class="ap-stage-label"${bold}>${esc(cv)}</div>${approverHtml}</div></div>`;
-  }).filter(Boolean);
+         + `<div class="ap-body"><div class="ap-stage-label"${boldAttr}>${esc(label)}</div>${approverHtml}</div></div>`;
+  };
 
-  return rows.join('');
+  const out = [];
+
+  // Abgelehnt: erreichte Stufen (Genehmiger hinterlegt) als erledigt, dann „Abgelehnt"
+  if (isRej) {
+    for (const st of stages) {
+      if (/^(freigegeben|bestellt)$/i.test(st.label)) continue;
+      if (/^eingereicht$/i.test(st.label)) { out.push(row(spLabel(st), '✓', 'ap-ok', null, null, false)); continue; }
+      if (resolvePersonField(fields, st.approverField)) {
+        out.push(row(spLabel(st), '✓', 'ap-ok', st.approverField, st.commentField, false));
+      }
+    }
+    const rejLabel = (statusChoices.find(c => /^abgelehnt$/i.test(c.trim())) || 'Abgelehnt').trim();
+    out.push(row(rejLabel, '✗', 'ap-no', null, null, false));
+    return out.join('');
+  }
+
+  // Normaler Verlauf: erledigt (✓) / aktuell (●) / kommend (○)
+  const curIdx = stages.findIndex(st => st.test(sv));
+  stages.forEach((st, i) => {
+    const label        = spLabel(st);
+    const isTerminalOk = /^(freigegeben|bestellt)$/i.test(st.label);
+    let dot, cls, bold = false;
+    if (curIdx === -1) {                       // unbekannter Status → erste Stufe erledigt, Rest kommend
+      if (i === 0) { dot = '✓'; cls = 'ap-ok'; } else { dot = '○'; cls = 'ap-circle-future'; }
+    } else if (i < curIdx) {                   // erledigt
+      dot = '✓'; cls = 'ap-ok';
+    } else if (i === curIdx) {                 // aktuell
+      if (isTerminalOk) { dot = '✓'; cls = 'ap-ok'; } else { dot = '●'; cls = 'ap-pending'; bold = true; }
+    } else {                                   // kommend
+      dot = '○'; cls = 'ap-circle-future';
+    }
+    // Genehmiger nur bei erledigten/aktuellen Stufen anzeigen (kommende noch ohne)
+    const show = curIdx !== -1 && i <= curIdx;
+    out.push(row(label, dot, cls, show ? st.approverField : null, show ? st.commentField : null, bold));
+  });
+
+  return out.join('');
 }
 
 function approvalStyle(val) {
@@ -3143,9 +3146,11 @@ function initSchulung() {
 
       <section class="schulung-sec" id="sch-4">
         <h2>4 · Status & Genehmigung</h2>
-        <p>Jede Anfrage durchläuft den folgenden Freigabeprozess – die Reihenfolge entspricht
-           exakt dem hinterlegten <b>Power-Automate-Workflow</b>. Je nach Beschaffungsart und
-           Bestellvolumen werden einzelne Stufen automatisch übersprungen.</p>
+        <p>Jede Anfrage durchläuft den folgenden Freigabeprozess. Die <b>Genehmigung beginnt in
+           der App</b> (Schritte 1–3, Prüfung durch den Einkauf); ab „Genehmigt (Einkauf)"
+           übernimmt der <b>Power-Automate-Workflow</b> die weiteren Stufen. Je nach Beschaffungsart
+           und Bestellvolumen werden einzelne Stufen automatisch übersprungen – im „Verlauf" einer
+           Anfrage erscheinen <b>nur die Stufen, die für genau diese Anfrage zutreffen</b>.</p>
 
         <div class="flow-steps">
           <div class="flow-step">
