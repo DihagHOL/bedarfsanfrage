@@ -1115,6 +1115,25 @@ details#attach-extra-wrap[open] .attach-more-toggle { color:#374151; }
 .rep-ms-opt input { width: 15px; height: 15px; cursor: pointer; flex-shrink: 0; }
 .rep-ms-opt span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rep-ms-empty { padding: 8px; font-size: .78rem; color: #9ca3af; }
+.rep-active { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; align-items: center; }
+.rep-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: #eef2ff; color: #3730a3; border: 1px solid #c7d2fe;
+  border-radius: 999px; padding: 3px 6px 3px 10px; font-size: .76rem;
+}
+.rep-chip b { font-weight: 700; }
+.rep-chip button {
+  background: rgba(55,48,163,.12); border: none; color: #3730a3;
+  width: 16px; height: 16px; border-radius: 50%; cursor: pointer;
+  font-size: .65rem; line-height: 1; display: flex; align-items: center; justify-content: center;
+}
+.rep-chip button:hover { background: #dc2626; color: #fff; }
+.rep-chip-clear {
+  background: none; border: none; color: #6b7280; cursor: pointer;
+  font-size: .76rem; text-decoration: underline; padding: 2px 4px;
+}
+.rep-chip-clear:hover { color: #dc2626; }
+
 .rep-table-wrap {
   flex: 1; overflow: auto; background: #fff;
   border: 1px solid #e5e9ef; border-radius: 10px;

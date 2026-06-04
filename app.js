@@ -3154,11 +3154,13 @@ function renderReports() {
         ${dat('rep-termin-from','Benötigt von')}
         ${dat('rep-termin-to','Benötigt bis')}
       </div>
+      <div class="rep-active" id="rep-active"></div>
       <div class="rep-table-wrap">
         <table class="rep-table" id="rep-table"></table>
       </div>
     </div>`;
-  renderReportsTable();
+  _restoreReportFilters();   // zuletzt genutzte Filter wiederherstellen
+  applyReportFilters();      // liest Werte + rendert Tabelle
 }
 
 // Liest die angehakten Werte eines Mehrfachauswahl-Dropdowns
@@ -3217,6 +3219,7 @@ function applyReportFilters() {
     terminFrom:  $id('rep-termin-from')?.value || '',
     terminTo:    $id('rep-termin-to')?.value || '',
   };
+  try { localStorage.setItem(LS_REPORT_FILTERS, JSON.stringify(reportFilters)); } catch {}
   renderReportsTable();
 }
 
@@ -3227,8 +3230,82 @@ function applyReportFiltersDebounced() {
   _repFilterTimer = setTimeout(applyReportFilters, 200);
 }
 
+// Filter-Persistenz + Wiederherstellung
+const LS_REPORT_FILTERS = 'DIHAG_REPORT_FILTERS';
+const REP_TEXT_INPUTS = {
+  search:'rep-search', lieferant:'rep-lieferant', kst:'rep-kst', be:'rep-be',
+  preisMin:'rep-preis-min', preisMax:'rep-preis-max',
+  createdFrom:'rep-created-from', createdTo:'rep-created-to',
+  terminFrom:'rep-termin-from', terminTo:'rep-termin-to',
+};
+const REP_MS_FIELDS = { status:'rep-status', wg:'rep-wg', ma:'rep-ma', prio:'rep-prio', ba:'rep-ba' };
+const REP_LABELS = {
+  search:'Suche', status:'Status', wg:'Warengruppe', ma:'Mitarbeiter', prio:'Priorität',
+  ba:'Beschaffungsart', lieferant:'Lieferant', kst:'Kostenstelle', be:'Bestell-Nr.',
+  preisMin:'Volumen ab', preisMax:'Volumen bis', createdFrom:'Erstellt von', createdTo:'Erstellt bis',
+  terminFrom:'Benötigt von', terminTo:'Benötigt bis',
+};
+
+function _restoreReportFilters() {
+  let saved;
+  try { saved = JSON.parse(localStorage.getItem(LS_REPORT_FILTERS) || '{}'); } catch { return; }
+  if (!saved || typeof saved !== 'object') return;
+  // Textfelder/Zahlen/Daten
+  for (const [key, id] of Object.entries(REP_TEXT_INPUTS)) {
+    const v = saved[key];
+    const el = $id(id);
+    if (el && v != null && v !== '') el.value = v;
+  }
+  // Mehrfachauswahl
+  for (const [key, field] of Object.entries(REP_MS_FIELDS)) {
+    const vals = saved[key];
+    if (!Array.isArray(vals) || !vals.length) continue;
+    const wrap = document.querySelector(`.rep-ms[data-field="${field}"]`);
+    if (!wrap) continue;
+    wrap.querySelectorAll('input[type=checkbox]').forEach(c => { if (vals.includes(c.value)) c.checked = true; });
+    const lbl = wrap.querySelector('.rep-ms-label');
+    if (lbl) {
+      lbl.textContent = vals.length === 1 ? vals[0] : `${vals.length} ausgewählt`;
+      lbl.classList.add('active');
+    }
+  }
+}
+
+function clearReportFilter(key) {
+  if (REP_TEXT_INPUTS[key]) {
+    const el = $id(REP_TEXT_INPUTS[key]); if (el) el.value = '';
+  } else if (REP_MS_FIELDS[key]) {
+    const wrap = document.querySelector(`.rep-ms[data-field="${REP_MS_FIELDS[key]}"]`);
+    if (wrap) {
+      wrap.querySelectorAll('input[type=checkbox]').forEach(c => c.checked = false);
+      const lbl = wrap.querySelector('.rep-ms-label');
+      if (lbl) { lbl.textContent = 'Alle'; lbl.classList.remove('active'); }
+    }
+  }
+  applyReportFilters();
+}
+
+function _renderActiveFilters() {
+  const el = $id('rep-active');
+  if (!el) return;
+  const f = reportFilters || {};
+  const chips = [];
+  const chip = (key, val) => chips.push(
+    `<span class="rep-chip">${esc(REP_LABELS[key] || key)}: <b>${esc(val)}</b>` +
+    `<button title="Filter entfernen" onclick="clearReportFilter('${key}')">✕</button></span>`);
+  ['status','wg','ma','prio','ba'].forEach(k => { if (Array.isArray(f[k]) && f[k].length) chip(k, f[k].join(', ')); });
+  ['search','lieferant','kst','be','createdFrom','createdTo','terminFrom','terminTo'].forEach(k => { if (f[k]) chip(k, f[k]); });
+  if (f.preisMin != null) chip('preisMin', fmtEuro(f.preisMin));
+  if (f.preisMax != null) chip('preisMax', fmtEuro(f.preisMax));
+  el.innerHTML = chips.length
+    ? chips.join('') + `<button class="rep-chip-clear" onclick="resetReportFilters()">Alle löschen</button>`
+    : '';
+  el.style.display = chips.length ? 'flex' : 'none';
+}
+
 function resetReportFilters() {
   reportFilters = {};
+  try { localStorage.removeItem(LS_REPORT_FILTERS); } catch {}
   ['rep-search','rep-lieferant','rep-kst','rep-be','rep-preis-min','rep-preis-max',
    'rep-created-from','rep-created-to','rep-termin-from','rep-termin-to']
     .forEach(id => { const el = $id(id); if (el) el.value = ''; });
@@ -3292,6 +3369,7 @@ function reportSortBy(colKey) {
 function renderReportsTable() {
   const table = $id('rep-table');
   if (!table) return;
+  _renderActiveFilters();
   const rows = getReportRows();
 
   // Count + sum
