@@ -2225,17 +2225,48 @@ function renderFavBar(kind) {
 }
 
 // Füllt den Einzel-Wizard mit Favoritendaten
+// Setzt einen <select> tolerant: exakt, sonst über den beschreibenden Teil
+// (ohne „NNNN – "-Präfix), sonst per Teilstring. So greift z. B. altes
+// „Ersatzteile" auch auf die Option „4320 – Ersatzteile" (und umgekehrt).
+function _setSelectFlexible(id, val) {
+  const el = $id(id);
+  if (!el || val == null || String(val).trim() === '') return;
+  const v   = String(val).trim();
+  const opts = [...el.options].filter(o => o.value !== '');
+  const desc = s => String(s).replace(/^\s*\d+\s*[–-]\s*/, '').trim().toLowerCase();
+  let opt = opts.find(o => o.value.trim() === v)
+         || opts.find(o => desc(o.value) === desc(v))
+         || opts.find(o => o.value.toLowerCase().includes(v.toLowerCase()) || v.toLowerCase().includes(desc(o.value)));
+  if (opt) el.value = opt.value;
+}
+
+// Beschaffungslogik wiederherstellen: erster Teil = Radio (Beschaffungsart),
+// weitere Teile = „Zusätzlich kombinierbar"-Karten.
+function _applyBeschaffungPrefill(beschaffung, radioName, extraContainerId) {
+  if (!beschaffung) return;
+  const parts    = String(beschaffung).split(',').map(s => s.trim()).filter(Boolean);
+  const radioVal = (parts[0] || '').toLowerCase();
+  const extraVals = parts.slice(1).map(s => s.toLowerCase());
+  const radios = [...document.querySelectorAll(`input[name=${radioName}]`)];
+  const rm = radios.find(r => r.value.trim().toLowerCase() === radioVal);
+  if (rm) rm.checked = true;
+  document.querySelectorAll(`#${extraContainerId} .check-card`).forEach(c => {
+    const cv = (c.dataset.value || '').trim().toLowerCase();
+    c.classList.toggle('selected', extraVals.includes(cv));
+  });
+}
+
 function applyWizardPrefill(data) {
   if (!data) return;
   const setVal = (id, v) => { const el = $id(id); if (el && v != null && v !== '') el.value = v; };
   setVal('f-Title', data.Title);
   setVal('f-Beschreibung', data.Beschreibung);
-  setVal('f-Warengruppe', data.Warengruppe);
-  setVal('f-Prioritaet', data.Prioritaet);
+  _setSelectFlexible('f-Warengruppe', data.Warengruppe);
+  _setSelectFlexible('f-Prioritaet', data.Prioritaet);
   setVal('f-Artikelnummer', data.Artikelnummer);
   setVal('f-ExterneArtikelnummer', data.ExterneArtikelnummer);
   setVal('f-Menge', data.Menge);
-  setVal('f-Mengeneinheit', data.Mengeneinheit);
+  _setSelectFlexible('f-Mengeneinheit', data.Mengeneinheit);
   setVal('f-Mindestlagermenge', data.Mindestlagermenge);
   setVal('f-Termin', data.Termin ? String(data.Termin).slice(0,10) : '');
   setVal('f-Lieferant', data.Lieferant);
@@ -2244,13 +2275,8 @@ function applyWizardPrefill(data) {
   setVal('f-Lieferant4', data.Lieferant4);
   setVal('f-GeschaetzterPreis', data.GeschaetzterPreis);
   setVal('f-Kostenstelle', data.Kostenstelle);
-  // Beschaffungslogik-Radio nach erstem Teil setzen
-  if (data.Beschaffungslogik) {
-    const first = String(data.Beschaffungslogik).split(',')[0].trim();
-    const radios = [...document.querySelectorAll('input[name=Beschaffungslogik]')];
-    const match  = radios.find(r => r.value.trim() === first);
-    if (match) match.checked = true;
-  }
+  // Beschaffungslogik: Radio + Zusatz-Karten
+  _applyBeschaffungPrefill(data.Beschaffungslogik, 'Beschaffungslogik', 'beschaffungslogik-extra-cards');
   // Zusatz-Lieferanten einblenden, wenn befüllt
   [2,3,4].forEach(n => {
     if (data['Lieferant' + n]) { const grp = $id('lieferant-extra-' + n); if (grp) grp.style.display = ''; }
@@ -3739,20 +3765,16 @@ function initMultiWizard() {
 function applyMultiPrefill(fav) {
   const data = fav.data || {};
   const setVal = (id, v) => { const el = $id(id); if (el && v != null && v !== '') el.value = v; };
-  setVal('mf-Warengruppe', data.Warengruppe);
-  setVal('mf-Prioritaet', data.Prioritaet);
+  _setSelectFlexible('mf-Warengruppe', data.Warengruppe);
+  _setSelectFlexible('mf-Prioritaet', data.Prioritaet);
   setVal('mf-Beschreibung', data.Beschreibung);
   setVal('mf-Lieferant', data.Lieferant);
   setVal('mf-Lieferant2', data.Lieferant2);
   setVal('mf-Lieferant3', data.Lieferant3);
   setVal('mf-Lieferant4', data.Lieferant4);
   setVal('mf-GeschaetzterPreis', data.GeschaetzterPreis);
-  if (data.Beschaffungslogik) {
-    const first  = String(data.Beschaffungslogik).split(',')[0].trim();
-    const radios = [...document.querySelectorAll('input[name=mBeschaffungslogik]')];
-    const match  = radios.find(r => r.value.trim() === first);
-    if (match) match.checked = true;
-  }
+  // Beschaffungslogik: Radio + Zusatz-Karten
+  _applyBeschaffungPrefill(data.Beschaffungslogik, 'mBeschaffungslogik', 'm-beschaffungslogik-extra-cards');
   [2,3,4].forEach(n => {
     if (data['Lieferant' + n]) { const grp = $id('m-lieferant-extra-' + n); if (grp) grp.style.display = ''; }
   });
