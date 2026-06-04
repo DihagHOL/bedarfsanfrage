@@ -5279,6 +5279,21 @@ function toast(msg, type='info') {
   setTimeout(() => { t.classList.add('out'); setTimeout(()=>t.remove(),260); }, 4000);
 }
 
+// ── GLOBALE FEHLER-SICHTBARKEIT ──────────────────────────────────────────────
+// Macht sonst stille (unerwartete) Fehler sichtbar – gedrosselt, um Spam zu vermeiden.
+let _lastErrToast = 0;
+function reportError(where, err) {
+  const msg = err && err.message ? err.message : String(err || 'Unbekannter Fehler');
+  console.error('[Fehler]', where, err);
+  const now = Date.now();
+  if (now - _lastErrToast > 4000) {
+    _lastErrToast = now;
+    try { toast('Unerwarteter Fehler: ' + msg, 'error'); } catch {}
+  }
+}
+window.addEventListener('error', e => { if (e?.error) reportError('JS', e.error); });
+window.addEventListener('unhandledrejection', e => reportError('Promise', e?.reason));
+
 // ── HELPERS ──────────────────────────────────────────────────────────────────
 const $id = id => document.getElementById(id);
 const esc = s  => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
