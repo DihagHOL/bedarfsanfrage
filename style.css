@@ -1154,6 +1154,8 @@ details#attach-extra-wrap[open] .attach-more-toggle { color:#374151; }
 .rep-row { cursor: pointer; }
 .rep-row:hover .rep-td { background: #f8fafc; }
 .rep-empty { padding: 30px; text-align: center; color: #9ca3af; }
+.rep-cap-note { padding: 12px; text-align: center; color: #6b7280; font-size: .8rem; font-style: italic; background: #f8fafc; }
+.list-cap-note { padding: 12px 14px; text-align: center; color: #6b7280; font-size: .82rem; font-style: italic; }
 
 /* ── Schulung ── */
 .schulung-wrap { max-width: 860px; margin: 0 auto; padding-bottom: 40px; }

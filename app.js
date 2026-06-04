@@ -184,7 +184,7 @@ function startAutoRefresh() {
     arCountdown--;
     if (arCountdown <= 0) {
       arCountdown = 20;
-      loadItems(false);
+      _autoRefreshData();    // inkrementell (bzw. periodisch voll)
       refreshAccessConfig(); // Zugriffsfreigaben automatisch übernehmen (~20s)
     }
     updateARBtn();
@@ -347,15 +347,27 @@ function doLogout() {
   location.reload();
 }
 
-async function getToken() {
+async function getToken(forceRefresh = false) {
   if (!account) throw new Error('Nicht angemeldet');
-  try { return (await msalApp.acquireTokenSilent({scopes:SCOPES, account})).accessToken; }
+  try { return (await msalApp.acquireTokenSilent({scopes:SCOPES, account, forceRefresh})).accessToken; }
   catch(e) {
     if (e instanceof msal.InteractionRequiredAuthError) {
       await msalApp.acquireTokenRedirect({scopes:SCOPES});
     }
     throw e;
   }
+}
+
+// Authentifizierter fetch mit einmaligem Retry bei 401 (abgelaufenes/ungültiges Token).
+// Beim Retry wird ein frisches Token erzwungen (forceRefresh) – härtet lange Sitzungen.
+async function _authedFetch(url, opts = {}, _retry = true) {
+  const tok = await getToken();
+  const r = await fetch(url, { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + tok } });
+  if (r.status === 401 && _retry) {
+    try { await getToken(true); } catch {}
+    return _authedFetch(url, opts, false);
+  }
+  return r;
 }
 
 // SharePoint REST API needs a token for the SP resource (different from Graph)
@@ -373,11 +385,8 @@ async function getSpToken() {
 
 // ── GRAPH API ────────────────────────────────────────────────────────────────
 async function gGet(path) {
-  const tok = await getToken();
   const url = path.startsWith('http') ? path : API + path; // absolute URL = @odata.nextLink
-  const r   = await fetch(url, {
-    headers: { Authorization: 'Bearer ' + tok, 'Cache-Control': 'no-cache', Pragma: 'no-cache' }
-  });
+  const r   = await _authedFetch(url, { headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' } });
   if (!r.ok) throw new Error(`Graph GET ${r.status}: ${await r.text().catch(()=>'')}`);
   return r.json();
 }
@@ -394,11 +403,8 @@ async function gGetAll(path, maxPages = 100) {
   return out;
 }
 async function gPost(path, body) {
-  const tok = await getToken();
-  const url = API + path;
-  const r   = await fetch(url, {
-    method:'POST', headers:{ Authorization:'Bearer '+tok, 'Content-Type':'application/json' },
-    body: JSON.stringify(body)
+  const r = await _authedFetch(API + path, {
+    method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(body)
   });
   if (!r.ok) {
     const txt = await r.text().catch(()=>'');
@@ -425,10 +431,8 @@ async function retryOn404(fn, retries = 4, delayMs = 1200) {
 }
 
 async function gPatch(path, body) {
-  const tok = await getToken();
-  const r   = await fetch(API + path, {
-    method:'PATCH', headers:{ Authorization:'Bearer '+tok, 'Content-Type':'application/json' },
-    body: JSON.stringify(body)
+  const r = await _authedFetch(API + path, {
+    method:'PATCH', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(body)
   });
   if (r.status === 204) return {};
   if (!r.ok) throw new Error(`Graph PATCH ${r.status}: ${await r.text().catch(()=>'')}`);
@@ -436,10 +440,7 @@ async function gPatch(path, body) {
 }
 
 async function gDelete(path) {
-  const tok = await getToken();
-  const r   = await fetch(API + path, {
-    method:'DELETE', headers:{ Authorization:'Bearer '+tok }
-  });
+  const r = await _authedFetch(API + path, { method:'DELETE' });
   if (!r.ok && r.status !== 404) throw new Error(`Graph DELETE ${r.status}: ${await r.text().catch(()=>'')}`);
   return {};
 }
@@ -584,20 +585,58 @@ async function loadItems(showToast = true) {
       `/sites/${siteId}/lists/${listId}/items?$expand=fields($select=*)&$top=${top}&$orderby=createdDateTime desc`
     );
     if (showToast) toast('Daten aktualisiert', 'success');
-    // Re-render current view
-    if (currentView === 'dashboard') renderDashboard();
-    else if (currentView === 'mine')  renderList('mine');
-    else if (currentView === 'all')   renderList('all');
-    // Refresh open panel – aber NICHT, solange bearbeitet wird (Eingaben nicht überschreiben)
-    if (panelItemId && !panelEditMode && ['mine','all','dashboard'].includes(currentView)) {
-      const pi = allItems.find(i => String(i.id) === panelItemId);
-      if (pi) { $id(`panel-${currentView}-content`).innerHTML = renderPanel(pi); bindPanelEvents(panelItemId); }
-    }
+    _rerenderAfterData();
   } catch(e) {
     toast('Fehler beim Laden: ' + e.message, 'error');
   } finally {
     if (btn) btn.disabled = false;
   }
+}
+
+// Aktuelle Ansicht (+ offenes Panel) nach Datenänderung neu rendern
+function _rerenderAfterData() {
+  if (currentView === 'dashboard')    renderDashboard();
+  else if (currentView === 'mine')    renderList('mine');
+  else if (currentView === 'all')     renderList('all');
+  else if (currentView === 'reports') renderReportsTable();
+  // Offenes Panel aktualisieren – aber NICHT, solange bearbeitet wird
+  if (panelItemId && !panelEditMode && ['mine','all','dashboard'].includes(currentView)) {
+    const pi = allItems.find(i => String(i.id) === panelItemId);
+    if (pi) { $id(`panel-${currentView}-content`).innerHTML = renderPanel(pi); bindPanelEvents(panelItemId); }
+  }
+}
+
+// Inkrementelle Aktualisierung für den Auto-Refresh: holt nur die zuletzt
+// geänderten Einträge (kleine Seite) und merged sie – statt der ganzen Liste.
+// Löschungen fängt der periodische Voll-Reload (siehe _autoRefreshData) + Tabwechsel.
+async function refreshItemsIncremental() {
+  if (!siteId || !listId) return;
+  try {
+    const page = await gGet(
+      `/sites/${siteId}/lists/${listId}/items?$expand=fields($select=*)&$top=50&$orderby=lastModifiedDateTime desc`
+    );
+    const recent = page.value || [];
+    if (!recent.length) return;
+    const byId = new Map(allItems.map(i => [String(i.id), i]));
+    let changed = false;
+    for (const it of recent) {
+      const id = String(it.id);
+      const ex = byId.get(id);
+      if (!ex || ex.lastModifiedDateTime !== it.lastModifiedDateTime) { byId.set(id, it); changed = true; }
+    }
+    if (changed) { allItems = [...byId.values()]; _rerenderAfterData(); }
+  } catch {
+    // z. B. orderby nicht unterstützt → sicherer Voll-Reload
+    try { await loadItems(false); } catch {}
+  }
+}
+
+// Auto-Refresh-Datenstrategie: meist inkrementell, ~alle 5 min voll (fängt Löschungen)
+let _arCycles = 0;
+function _autoRefreshData() {
+  _arCycles++;
+  if (_arCycles % 15 === 0) loadItems(false);
+  else                      refreshItemsIncremental();
 }
 
 // ── ROUTING ──────────────────────────────────────────────────────────────────
@@ -980,8 +1019,19 @@ function filterDashboard() {
 
   const container = $id('list-dashboard');
   if (container) container.innerHTML = items.length
-    ? items.map(i => itemCard(i)).join('')
+    ? _cardsHtml(items)
     : emptyState('Keine Anfragen für diesen Status.');
+}
+
+// Render-Performance: nur die ersten LIST_ROW_CAP Karten darstellen
+const LIST_ROW_CAP = 200;
+function _cardsHtml(items) {
+  const shown = items.slice(0, LIST_ROW_CAP);
+  let html = shown.map(i => itemCard(i)).join('');
+  if (items.length > LIST_ROW_CAP) {
+    html += `<div class="list-cap-note">Erste ${LIST_ROW_CAP} von ${items.length} angezeigt – nutze Suche/Filter zum Eingrenzen.</div>`;
+  }
+  return html;
 }
 
 function isOpenStatus(s) {
@@ -1153,7 +1203,7 @@ function filterView(type) {
     // compactView: toggle dense layout class
     container.classList.toggle('compact-list', !!(userSettings.compactView));
     container.innerHTML = items.length
-      ? items.map(i => itemCard(i)).join('')
+      ? _cardsHtml(items)
       : emptyState(type === 'mine' ? 'Sie haben noch keine Anfragen erstellt.' : 'Keine Anfragen gefunden.');
   }
 }
@@ -3387,20 +3437,27 @@ function renderReportsTable() {
     `<th class="rep-th${c.type==='num'?' rep-right':''}" onclick="reportSortBy('${c.key}')">${esc(c.label)}${arrow(c.key)}</th>`
   ).join('')}</tr></thead>`;
 
+  // Render-Performance: nur die ersten REP_ROW_CAP Zeilen darstellen (Export bleibt vollständig)
+  const REP_ROW_CAP = 300;
+  const shown = rows.slice(0, REP_ROW_CAP);
+  const rowHtml = i => {
+    const id = i.id;
+    return `<tr class="rep-row" onclick="navigate('detail','${id}')">${REPORT_COLS.map(c => {
+      let v = c.get(i);
+      if (c.key === 'Status') return `<td class="rep-td">${statusBadge(v)}</td>`;
+      if (c.type === 'date')  v = v ? fmtDate(v) : '–';
+      else if (c.key === 'GeschaetzterPreis') v = v != null ? fmtEuro(v) : '–';
+      else if (c.type === 'num') v = v != null ? v.toLocaleString('de-DE') : '–';
+      else v = (v == null || v === '') ? '–' : v;
+      return `<td class="rep-td${c.type==='num'?' rep-right':''}">${esc(String(v))}</td>`;
+    }).join('')}</tr>`;
+  };
+  const capNote = rows.length > REP_ROW_CAP
+    ? `<tr><td class="rep-cap-note" colspan="${REPORT_COLS.length}">Erste ${REP_ROW_CAP} von ${rows.length} angezeigt – Filter eingrenzen oder „Als Excel exportieren" für die vollständige Liste.</td></tr>`
+    : '';
   const body = rows.length === 0
     ? `<tbody><tr><td class="rep-empty" colspan="${REPORT_COLS.length}">Keine Einträge für die gewählten Filter.</td></tr></tbody>`
-    : `<tbody>${rows.map(i => {
-        const id = i.id;
-        return `<tr class="rep-row" onclick="navigate('detail','${id}')">${REPORT_COLS.map(c => {
-          let v = c.get(i);
-          if (c.key === 'Status') return `<td class="rep-td">${statusBadge(v)}</td>`;
-          if (c.type === 'date')  v = v ? fmtDate(v) : '–';
-          else if (c.key === 'GeschaetzterPreis') v = v != null ? fmtEuro(v) : '–';
-          else if (c.type === 'num') v = v != null ? v.toLocaleString('de-DE') : '–';
-          else v = (v == null || v === '') ? '–' : v;
-          return `<td class="rep-td${c.type==='num'?' rep-right':''}">${esc(String(v))}</td>`;
-        }).join('')}</tr>`;
-      }).join('')}</tbody>`;
+    : `<tbody>${shown.map(rowHtml).join('')}${capNote}</tbody>`;
 
   table.innerHTML = head + body;
 }
