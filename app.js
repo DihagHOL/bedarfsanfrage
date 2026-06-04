@@ -1383,7 +1383,9 @@ async function openOrderModal(itemId) {
   $id('modal-body').innerHTML = `
     <div class="form-group" style="margin-bottom:12px">
       <label>Bestellnummer</label>
-      <input type="text" id="m-ordernr" value="${esc(orderNr)}" placeholder="z. B. BE252093"/>
+      <input type="text" id="m-ordernr" value="${esc(orderNr)}" placeholder="z. B. BE252093"
+        oninput="checkBeDuplicate(this.value, ${itemId})"/>
+      <div id="be-warn" class="be-warn" style="display:none"></div>
     </div>
     <div class="form-group" style="margin-bottom:12px">
       <label style="display:flex;align-items:center;justify-content:space-between">
@@ -1415,6 +1417,32 @@ async function openOrderModal(itemId) {
     <button class="btn btn-ghost" onclick="closeModal()">Abbrechen</button>
     <button class="btn btn-primary" onclick="saveOrderData(${itemId})">Speichern</button>`;
   $id('modal-overlay').classList.remove('hidden');
+  // Initiale Prüfung, falls bereits eine BE eingetragen ist
+  checkBeDuplicate(orderNr, itemId);
+}
+
+// Warnt, wenn die eingegebene Bestellnummer bereits bei einem anderen Item verwendet wird
+function checkBeDuplicate(val, currentId) {
+  const el = $id('be-warn');
+  if (!el) return;
+  const v = (val || '').trim().toLowerCase();
+  if (!v) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  const beCol = resolvedFields['Bestellnummer'] || 'Bestellnummer';
+  const dupes = allItems.filter(i =>
+    String(i.id) !== String(currentId) &&
+    (getField(i, beCol) || '').trim().toLowerCase() === v
+  );
+  if (dupes.length) {
+    el.style.display = 'block';
+    const refs = dupes.map(d => {
+      const t = cleanTitle(getField(d, 'Title') || '');
+      return `#${d.id}${t ? ' – ' + esc(t) : ''}`;
+    }).join(', ');
+    el.innerHTML = `⚠️ Achtung: Bestellnummer „${esc(val.trim())}" wird bereits verwendet (${refs}).`;
+  } else {
+    el.style.display = 'none';
+    el.innerHTML = '';
+  }
 }
 
 function addAttachInput() {

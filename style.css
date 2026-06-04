@@ -1023,6 +1023,13 @@ details#attach-extra-wrap[open] .attach-more-toggle { color:#374151; }
 .review-dl dt { color: #9ca3af; font-size: .8rem; }
 .review-dl dd { font-weight: 500; margin: 0; }
 
+/* BE-Duplikat-Warnung im Einkauf-Modal */
+.be-warn {
+  margin-top: 6px; padding: 7px 10px;
+  background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px;
+  color: #b91c1c; font-size: .8rem; line-height: 1.4;
+}
+
 @media (max-width: 960px) {
   .sidebar { transform: translateX(-100%); }
   .sidebar.open { transform: translateX(0); }
