@@ -1891,45 +1891,60 @@ let favCache   = [];       // In-Memory-Spiegel der SP-Favoriten des aktuellen N
 
 function _favOwner() { return (account?.username || '').trim().toLowerCase(); }
 
+// Sucht die Favoriten-Liste (case-insensitiv, ohne Fehler zu werfen)
+async function _findFavList() {
+  try {
+    const all = await gGet(`/sites/${siteId}/lists?$select=id,displayName&$top=500`);
+    const hit = (all.value || []).find(l =>
+      (l.displayName || '').trim().toLowerCase() === FAV_LIST_NAME.toLowerCase());
+    return hit?.id || null;
+  } catch { return null; }
+}
+
+// Versucht, die Liste anzulegen. Gibt bei fehlender Berechtigung (403) leise null
+// zurück – KEIN console.error (das Anlegen erfordert Site-Owner-Rechte).
+async function _createFavList() {
+  try {
+    const tok = await getToken();
+    const r = await fetch(API + `/sites/${siteId}/lists`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        displayName: FAV_LIST_NAME,
+        list: { template: 'genericList' },
+        columns: [
+          { name: 'FavOwner',     text: {} },
+          { name: 'FavType',      text: {} },
+          { name: 'FavData',      text: { allowMultipleLines: true } },
+          { name: 'FavPositions', text: { allowMultipleLines: true } },
+        ],
+      }),
+    });
+    if (r.ok) return (await r.json()).id;
+    console.info(`[Favoriten] Liste konnte nicht automatisch angelegt werden (HTTP ${r.status}).`);
+    return null;
+  } catch { return null; }
+}
+
 // Beim Start aufrufen (nach discoverSP). Niemals werfen – Fallback ist localStorage.
 async function initFavorites() {
   favUseSP = false; favListId = null; favCache = [];
   try {
     if (!siteId) return;
-    // 1) Liste suchen
-    try {
-      const res = await gGet(`/sites/${siteId}/lists?$filter=displayName eq '${FAV_LIST_NAME}'&$select=id,displayName`);
-      if (res.value && res.value.length) favListId = res.value[0].id;
-    } catch { /* Filter evtl. nicht unterstützt – unten ohne Filter versuchen */ }
+    // 1) Bestehende Liste suchen (Normalfall, seit sie angelegt wurde)
+    favListId = await _findFavList();
+    // 2) Nur wenn nicht vorhanden: leise versuchen anzulegen, danach erneut suchen
     if (!favListId) {
-      try {
-        const all = await gGet(`/sites/${siteId}/lists?$select=id,displayName&$top=200`);
-        favListId = (all.value || []).find(l => l.displayName === FAV_LIST_NAME)?.id || null;
-      } catch {}
-    }
-    // 2) Liste anlegen, falls nicht vorhanden
-    if (!favListId) {
-      try {
-        const created = await gPost(`/sites/${siteId}/lists`, {
-          displayName: FAV_LIST_NAME,
-          list: { template: 'genericList' },
-          columns: [
-            { name: 'FavOwner',     text: {} },
-            { name: 'FavType',      text: {} },
-            { name: 'FavData',      text: { allowMultipleLines: true } },
-            { name: 'FavPositions', text: { allowMultipleLines: true } },
-          ],
-        });
-        favListId = created.id;
-      } catch (createErr) {
-        // Evtl. hat parallel jemand anderes die Liste angelegt → erneut suchen
-        const all = await gGet(`/sites/${siteId}/lists?$select=id,displayName&$top=200`);
-        favListId = (all.value || []).find(l => l.displayName === FAV_LIST_NAME)?.id || null;
-        if (!favListId) throw createErr; // wirklich nicht anlegbar → Fallback localStorage
-      }
+      favListId = await _createFavList();
+      if (!favListId) favListId = await _findFavList(); // evtl. parallel angelegt
     }
     favUseSP = !!favListId;
-    if (favUseSP) { await loadFavoritesSP(); _refreshFavBars(); }
+    if (favUseSP) {
+      await loadFavoritesSP();
+      _refreshFavBars();
+    } else {
+      console.info('[Favoriten] Keine SP-Liste verfügbar – nutze lokalen Speicher.');
+    }
   } catch (e) {
     console.warn('[Favoriten] SP nicht verfügbar, nutze localStorage:', e.message);
     favUseSP = false;
