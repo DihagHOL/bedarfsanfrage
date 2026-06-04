@@ -153,42 +153,16 @@ function getSettings(email) {
     canSeeDashboard:    false,   // admin-granted: show Dashboard tab (all items visible)
   }, all[(email||'').toLowerCase()] || {});
 }
-function saveUserSettings(email, patch, _skipSP = false) {
+// Persönliche Einstellungen (pageSize, compactView, Sortierung …) liegen lokal
+// im Browser. Zentrale, geräteübergreifende Steuerung läuft über die
+// Zugriffsverwaltung (BANF_Konfiguration), nicht hier.
+function saveUserSettings(email, patch) {
   const all = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
   const key = (email||'').toLowerCase();
   all[key] = Object.assign(getSettings(email), patch);
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(all));
-  // Persist to SP asynchronously so other users/devices pick up the change.
-  if (!_skipSP) persistSpSettings().catch(()=>{});
   return all[key];
 }
-function getAllUserSettings() {
-  return JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
-}
-
-// ── SP-BASED SETTINGS STORE ───────────────────────────────────────────────────
-// SharePoint list/drive creation requires Manage.All permissions the app does
-// not have. Instead we use a token-based grant system:
-//   Admin  → generates a compact base64 token from current user grants
-//          → copies it and sends to the user (e.g. via Teams/Email)
-//   User   → pastes token in Settings modal → grants applied locally
-// localStorage is the runtime cache; token is the out-of-band sync channel.
-const SP_REST = 'https://' + SP_SITE.replace(':/', '/') + '/_api/web';
-let _cfgItemId = null;
-
-// SP REST: common JSON headers (Bearer token makes X-RequestDigest unnecessary)
-function _spHdr(tok, extra = {}) {
-  return Object.assign({
-    Authorization: 'Bearer ' + tok,
-    Accept:        'application/json;odata=nometadata',
-    'Content-Type':'application/json;odata=verbose',
-  }, extra);
-}
-
-// No-op: SP sync removed (insufficient permissions to create lists or write drives).
-// Grants are distributed via copy-paste tokens (see openSettings / applyGrantToken).
-async function loadSpSettings()    { /* token-based, no remote fetch needed */ }
-async function persistSpSettings() { /* token-based, no remote write needed */ }
 
 // ── AUTO-REFRESH ─────────────────────────────────────────────────────────────
 // autoRefreshTimer: 1-second tick; arCountdown: seconds until next refresh
@@ -343,9 +317,6 @@ async function bootDone() {
   $id('boot-sub').textContent = 'Daten werden geladen…';
   try {
     await discoverSP();
-    // Load shared settings from SP (source of truth for admin grants).
-    // Must happen before migration so granted flags are already in localStorage.
-    await loadSpSettings();
     await loadItems(false);
     // Zentrale Zugriffssteuerung laden (bestimmt Sichtbarkeit von Dashboard/Reports/Importer)
     await loadAccessConfig();
@@ -353,15 +324,8 @@ async function bootDone() {
     initFavorites().catch(() => {});
     $id('boot').style.display = 'none';
     $id('app').style.display  = 'flex';
-    applyNavVisibility(); // re-apply after SP settings loaded (grants may have changed)
-    // Log what the current user's effective settings are — visible in browser console
-    if (account) {
-      const _em = (account.username || '').toLowerCase();
-      const _s  = getSettings(_em);
-      console.log('[bootDone] User:', _em, '| canSeeDashboard:', _s.canSeeDashboard, '| autoRefresh:', _s.autoRefresh);
-    }
+    applyNavVisibility(); // Nav-Sichtbarkeit nach geladener Zugriffskonfiguration setzen
     startAutoRefresh();
-    applyDashboardVisibility();
     // Set user info in sidebar
     const name = account?.name || account?.username || '?';
     $id('hdr-av').textContent   = name.split(' ').map(p=>p[0]||'').join('').substring(0,2).toUpperCase();
@@ -432,7 +396,6 @@ async function gGetAll(path, maxPages = 100) {
 async function gPost(path, body) {
   const tok = await getToken();
   const url = API + path;
-  console.log('[gPost] POST', url, JSON.stringify(body).slice(0, 300));
   const r   = await fetch(url, {
     method:'POST', headers:{ Authorization:'Bearer '+tok, 'Content-Type':'application/json' },
     body: JSON.stringify(body)
@@ -784,8 +747,6 @@ function applyNavVisibility() {
   GATED_FEATURES.forEach(f => setVis(f, canAccess(f)));
   // new, multi, mine, schulung sind für alle sichtbar
 }
-// Alias kept for any remaining call-sites
-const applyDashboardVisibility = applyNavVisibility;
 
 function navigate(view, id) {
   // Gated-Bereiche nur mit Zugriff betreten; sonst auf „Meine Anfragen" umleiten
@@ -5246,8 +5207,8 @@ function openSettings() {
     ${allRow}
     ${syncBtn}
     <div class="settings-row">
-      <span class="settings-label">📄 Elemente laden (max.)</span>
-      <input type="number" value="${s.pageSize}" min="10" max="500" step="10" class="su-num"
+      <span class="settings-label">📄 Seitengröße beim Laden <span class="field-sub">es werden stets alle geladen</span></span>
+      <input type="number" value="${s.pageSize}" min="50" max="200" step="10" class="su-num"
         onchange="saveUserSettings('${esc(email)}',{pageSize:parseInt(this.value)||100})">
     </div>
     <hr class="modal-hr">
@@ -5285,71 +5246,6 @@ function openSettings() {
 }
 
 function closeSettings() { $id('settings-modal').classList.add('hidden'); }
-
-// Admin: generate a base64 token for a specific user and copy to clipboard.
-function copyGrantToken(targetEmail) {
-  const settings = getAllUserSettings();
-  const userCfg  = settings[(targetEmail||'').toLowerCase()];
-  if (!userCfg) { toast('Benutzer nicht gefunden.', 'error'); return; }
-  // Token encodes: {email, grants} — only grant fields, not personal preferences
-  const grantFields = ['canSeeDashboard', 'autoRefresh', 'autoRefreshGranted'];
-  const grants = {};
-  grantFields.forEach(k => { if (userCfg[k] !== undefined) grants[k] = userCfg[k]; });
-  const token = btoa(unescape(encodeURIComponent(JSON.stringify({ email: targetEmail.toLowerCase(), grants }))));
-  navigator.clipboard.writeText(token).then(
-    () => toast(`Token für ${targetEmail} kopiert. Bitte an den Benutzer senden.`, 'success'),
-    () => {
-      // Fallback: show in prompt
-      prompt('Token kopieren:', token);
-    }
-  );
-}
-
-// User: paste a token from admin and apply the contained grants.
-function applyGrantToken() {
-  const raw = ($id('grant-token-input')?.value || '').trim();
-  if (!raw) { toast('Bitte Token eingeben.', 'error'); return; }
-  try {
-    const decoded = JSON.parse(decodeURIComponent(escape(atob(raw))));
-    if (!decoded?.email || !decoded?.grants) throw new Error('Ungültiges Format');
-    const myEmail = (account?.username || '').toLowerCase();
-    if (decoded.email !== myEmail) {
-      toast(`Dieser Token ist für ${decoded.email}, nicht für dein Konto.`, 'error'); return;
-    }
-    saveUserSettings(myEmail, decoded.grants);
-    applyNavVisibility();
-    toast('Berechtigungen erfolgreich übernommen!', 'success');
-    if (decoded.grants.canSeeDashboard) {
-      setTimeout(() => location.reload(), 900);
-    } else {
-      openSettings();
-    }
-  } catch(e) {
-    toast('Ungültiger Token — bitte erneut beim Admin anfragen.', 'error');
-    console.warn('[applyGrantToken]', e.message);
-  }
-}
-
-function addUserSetting() {
-  const em = ($id('su-new-email')?.value || '').trim().toLowerCase();
-  if (!em || !em.includes('@') || !em.includes('.')) {
-    toast('Bitte gültige E-Mail-Adresse eingeben.', 'error'); return;
-  }
-  const all = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
-  if (all[em]) { toast(`${em} ist bereits vorhanden.`, 'info'); openSettings(); return; }
-  saveUserSettings(em, { pageSize: 100 });
-  toast(`${em} hinzugefügt.`, 'success');
-  openSettings();
-}
-
-function deleteUserSetting(em) {
-  const all = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
-  delete all[(em||'').toLowerCase()];
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(all));
-  persistSpSettings().catch(() => {});
-  toast(`${em} entfernt.`, 'info');
-  openSettings();
-}
 
 function closePdfViewer() {
   const overlay = $id('pdf-viewer-modal');
