@@ -1060,6 +1060,9 @@ function renderDetail(id) {
         ${prioTag(getField(item,'Prioritaet') || getField(item, resolvedFields['Prioritaet']))}
       </div>
       <div class="detail-byline">Erstellt von <strong>${esc(createdBy)}</strong> am ${createdAt}</div>
+      <div class="detail-actions" style="margin-top:10px">
+        <button class="btn btn-sm btn-outline" id="detail-fav" title="Als Wiedervorlage / Favorit speichern">⭐ Als Wiedervorlage</button>
+      </div>
     </div>
 
     <div class="detail-grid">
@@ -1084,6 +1087,8 @@ function renderDetail(id) {
   // Bind update button
   const btnOrder = document.getElementById('btn-add-order');
   if (btnOrder) btnOrder.onclick = () => openOrderModal(item.id);
+  const btnFav = document.getElementById('detail-fav');
+  if (btnFav) btnFav.onclick = () => saveItemAsFavorite(item.id);
 
   // Load attachments async — cache-busting ensures freshly uploaded files appear immediately
   const attachEl = document.getElementById('detail-attachments');
@@ -1843,6 +1848,104 @@ function lookupTID(val) {
   }
 }
 
+// ── WIEDERVORLAGE / FAVORITEN ────────────────────────────────────────────────
+const LS_FAVORITES = 'DIHAG_FAVORITES';
+let pendingPrefill = null; // {type, data, positions} – wird beim nächsten Wizard-Init angewendet
+
+function getFavorites() {
+  try { return JSON.parse(localStorage.getItem(LS_FAVORITES) || '[]'); }
+  catch { return []; }
+}
+function saveFavorites(arr) {
+  localStorage.setItem(LS_FAVORITES, JSON.stringify(arr));
+}
+
+function saveItemAsFavorite(itemId) {
+  const item = allItems.find(i => String(i.id) === String(itemId));
+  if (!item) return;
+  let positions = null;
+  const posRaw = _rf(item, 'Positionen');
+  if (posRaw) { try { const p = JSON.parse(posRaw); if (Array.isArray(p) && p.length) positions = p; } catch {} }
+  const type  = positions ? 'multi' : 'single';
+  const title = cleanTitle(getField(item, 'Title') || '') || 'Anfrage';
+  const data = {};
+  ['Title','Beschreibung','Warengruppe','Prioritaet','Artikelnummer','ExterneArtikelnummer',
+   'Menge','Mengeneinheit','Mindestlagermenge','Termin','Beschaffungslogik',
+   'Lieferant','Lieferant2','Lieferant3','Lieferant4','GeschaetzterPreis','Kostenstelle']
+    .forEach(k => { data[k] = k === 'Title' ? title : _rf(item, k); });
+
+  const favs = getFavorites();
+  favs.unshift({ id: 'fav_' + Date.now(), name: title, type, data, positions, savedAt: new Date().toISOString() });
+  saveFavorites(favs);
+  toast('Als Wiedervorlage gespeichert ⭐', 'success');
+}
+
+function deleteFavorite(favId, ev) {
+  if (ev) ev.stopPropagation();
+  saveFavorites(getFavorites().filter(f => f.id !== favId));
+  if (currentView === 'new')   renderFavBar('single');
+  if (currentView === 'multi') renderFavBar('multi');
+}
+
+function useFavorite(favId) {
+  const fav = getFavorites().find(f => f.id === favId);
+  if (!fav) return;
+  pendingPrefill = fav;
+  navigate(fav.type === 'multi' ? 'multi' : 'new');
+}
+
+function renderFavBar(kind) {
+  const el = $id(kind === 'multi' ? 'fav-bar-multi' : 'fav-bar-single');
+  if (!el) return;
+  const favs = getFavorites().filter(f => (f.type || 'single') === (kind === 'multi' ? 'multi' : 'single'));
+  if (!favs.length) { el.innerHTML = ''; el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  el.innerHTML = `
+    <div class="fav-bar">
+      <div class="fav-bar-title">⭐ Wiedervorlagen</div>
+      <div class="fav-chips">
+        ${favs.map(f => `
+          <div class="fav-chip" onclick="useFavorite('${f.id}')" title="Übernehmen: ${esc(f.name)}">
+            <span class="fav-chip-name">${esc(f.name)}</span>
+            <button class="fav-chip-del" onclick="deleteFavorite('${f.id}', event)" title="Entfernen">✕</button>
+          </div>`).join('')}
+      </div>
+    </div>`;
+}
+
+// Füllt den Einzel-Wizard mit Favoritendaten
+function applyWizardPrefill(data) {
+  if (!data) return;
+  const setVal = (id, v) => { const el = $id(id); if (el && v != null && v !== '') el.value = v; };
+  setVal('f-Title', data.Title);
+  setVal('f-Beschreibung', data.Beschreibung);
+  setVal('f-Warengruppe', data.Warengruppe);
+  setVal('f-Prioritaet', data.Prioritaet);
+  setVal('f-Artikelnummer', data.Artikelnummer);
+  setVal('f-ExterneArtikelnummer', data.ExterneArtikelnummer);
+  setVal('f-Menge', data.Menge);
+  setVal('f-Mengeneinheit', data.Mengeneinheit);
+  setVal('f-Mindestlagermenge', data.Mindestlagermenge);
+  setVal('f-Termin', data.Termin ? String(data.Termin).slice(0,10) : '');
+  setVal('f-Lieferant', data.Lieferant);
+  setVal('f-Lieferant2', data.Lieferant2);
+  setVal('f-Lieferant3', data.Lieferant3);
+  setVal('f-Lieferant4', data.Lieferant4);
+  setVal('f-GeschaetzterPreis', data.GeschaetzterPreis);
+  setVal('f-Kostenstelle', data.Kostenstelle);
+  // Beschaffungslogik-Radio nach erstem Teil setzen
+  if (data.Beschaffungslogik) {
+    const first = String(data.Beschaffungslogik).split(',')[0].trim();
+    const radios = [...document.querySelectorAll('input[name=Beschaffungslogik]')];
+    const match  = radios.find(r => r.value.trim() === first);
+    if (match) match.checked = true;
+  }
+  // Zusatz-Lieferanten einblenden, wenn befüllt
+  [2,3,4].forEach(n => {
+    if (data['Lieferant' + n]) { const grp = $id('lieferant-extra-' + n); if (grp) grp.style.display = ''; }
+  });
+}
+
 function initWizard() {
   wizardData = {};
   showStep(1);
@@ -1912,6 +2015,13 @@ function initWizard() {
     lief1.appendChild(btn);
   }
   $id('preis-route-hint').style.display = 'none';
+  // Favoriten-Leiste + ggf. ausstehende Wiedervorlage anwenden
+  renderFavBar('single');
+  if (pendingPrefill && pendingPrefill.type === 'single') {
+    applyWizardPrefill(pendingPrefill.data);
+    toast('Wiedervorlage übernommen – bitte prüfen und absenden.', 'success');
+  }
+  pendingPrefill = null;
 }
 
 function showStep(n) {
@@ -3078,7 +3188,52 @@ function initMultiWizard() {
   // Reset submit button
   const sb = $id('btn-multi-submit');
   if (sb) { sb.disabled = false; sb.textContent = '✓ Sammelanfrage einreichen'; }
+
+  // Ausstehende Wiedervorlage anwenden (vor renderMultiPositions, damit Positionen gesetzt sind)
+  if (pendingPrefill && pendingPrefill.type === 'multi') {
+    applyMultiPrefill(pendingPrefill);
+    toast('Wiedervorlage übernommen – bitte prüfen und absenden.', 'success');
+  }
+  pendingPrefill = null;
+
   renderMultiPositions();
+  renderFavBar('multi');
+}
+
+// Füllt den Sammel-Wizard mit Favoritendaten
+function applyMultiPrefill(fav) {
+  const data = fav.data || {};
+  const setVal = (id, v) => { const el = $id(id); if (el && v != null && v !== '') el.value = v; };
+  setVal('mf-Warengruppe', data.Warengruppe);
+  setVal('mf-Prioritaet', data.Prioritaet);
+  setVal('mf-Beschreibung', data.Beschreibung);
+  setVal('mf-Lieferant', data.Lieferant);
+  setVal('mf-Lieferant2', data.Lieferant2);
+  setVal('mf-Lieferant3', data.Lieferant3);
+  setVal('mf-Lieferant4', data.Lieferant4);
+  setVal('mf-GeschaetzterPreis', data.GeschaetzterPreis);
+  if (data.Beschaffungslogik) {
+    const first  = String(data.Beschaffungslogik).split(',')[0].trim();
+    const radios = [...document.querySelectorAll('input[name=mBeschaffungslogik]')];
+    const match  = radios.find(r => r.value.trim() === first);
+    if (match) match.checked = true;
+  }
+  [2,3,4].forEach(n => {
+    if (data['Lieferant' + n]) { const grp = $id('m-lieferant-extra-' + n); if (grp) grp.style.display = ''; }
+  });
+  // Positionen übernehmen
+  if (Array.isArray(fav.positions) && fav.positions.length) {
+    multiPositions = fav.positions.map(p => ({
+      artNr:        p.Artikelnummer || '',
+      extArtNr:     p.ExterneArtikelnummer || '',
+      bezeichnung:  p.Bezeichnung || '',
+      menge:        p.Menge != null ? String(p.Menge) : '',
+      me:           p.ME || p.me || '',
+      preis:        p.Preis != null ? String(p.Preis) : '',
+      termin:       p.Termin ? String(p.Termin).slice(0,10) : '',
+      kostenstelle: p.Kostenstelle || '',
+    }));
+  }
 }
 
 function showMultiStep(n) {
@@ -3663,6 +3818,7 @@ function bindPanelEvents(itemId) {
   });
   pq('#panel-edit')?.addEventListener('click', () => startEditMode(itemId));
   pq('#panel-order')?.addEventListener('click', () => openOrderModal(itemId));
+  pq('#panel-fav')?.addEventListener('click', () => saveItemAsFavorite(itemId));
 
   // Genehmigungsaktion-Buttons
   pq('#btn-approve')?.addEventListener('click', () => doApprove(itemId));
@@ -4182,13 +4338,15 @@ function renderPanel(item, editMode = false) {
       ? `<button class="btn btn-outline btn-sm" id="panel-edit">✏️ Bearbeiten</button>`
       : `<button class="btn btn-outline btn-sm" disabled title="Nur bei Status 'In Prüfung (Einkauf)' möglich">✏️ Bearbeiten</button>`;
 
+  const favBtn = `<button class="btn btn-outline btn-sm" id="panel-fav" title="Als Wiedervorlage / Favorit speichern">⭐ Als Wiedervorlage</button>`;
   const buttons = editMode
     ? `${orderBtn}
        <button class="btn btn-primary btn-sm" id="panel-save">💾 Speichern</button>
        <button class="btn btn-ghost btn-sm" id="panel-cancel">✕ Abbrechen</button>
        <button class="btn btn-outline btn-sm" id="panel-history">📋 Verlauf</button>`
     : `${editBtn} ${orderBtn}
-       <button class="btn btn-outline btn-sm" id="panel-history">📋 Verlauf</button>`;
+       <button class="btn btn-outline btn-sm" id="panel-history">📋 Verlauf</button>
+       ${favBtn}`;
 
   const approvalInner = buildApprovalInner(item, statusVal);
 
