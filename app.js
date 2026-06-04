@@ -133,6 +133,7 @@ let prevView    = 'dashboard';
 let wizardData  = {};
 let wizardFilesArr = []; // Drag-and-drop file store for wizard attachments
 let panelItemId = null;
+let panelEditMode = false; // true, solange ein Panel im Bearbeiten-Modus offen ist (pausiert Auto-Refresh)
 // SP column may be misspelled "Stauts" in some tenants → always try both
 const getStatusVal = item => getField(item,'Status') || getField(item,'Stauts') || '';
 
@@ -202,6 +203,10 @@ function startAutoRefresh() {
   arPaused    = false;
   autoRefreshTimer = setInterval(() => {
     if (arPaused) return;
+    // Tab nicht sichtbar → kein API-Aufruf (spart Graph-Last/Throttling)
+    if (document.hidden) return;
+    // Panel im Bearbeiten-Modus offen → Refresh aussetzen (Eingaben nicht überschreiben)
+    if (panelEditMode) return;
     arCountdown--;
     if (arCountdown <= 0) {
       arCountdown = 20;
@@ -215,6 +220,14 @@ function stopAutoRefresh() {
   if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
   updateARBtn();
 }
+// Beim Zurückkehren auf den Tab sofort einmal aktualisieren und Countdown neu starten
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && autoRefreshTimer && !arPaused && !panelEditMode) {
+    arCountdown = 20;
+    loadItems(false);
+    updateARBtn();
+  }
+});
 function updateARBtn() {
   const btn = $id('btn-autorefresh');
   if (!btn) return;
@@ -583,8 +596,8 @@ async function loadItems(showToast = true) {
     if (currentView === 'dashboard') renderDashboard();
     else if (currentView === 'mine')  renderList('mine');
     else if (currentView === 'all')   renderList('all');
-    // Refresh open panel
-    if (panelItemId && ['mine','all','dashboard'].includes(currentView)) {
+    // Refresh open panel – aber NICHT, solange bearbeitet wird (Eingaben nicht überschreiben)
+    if (panelItemId && !panelEditMode && ['mine','all','dashboard'].includes(currentView)) {
       const pi = allItems.find(i => String(i.id) === panelItemId);
       if (pi) { $id(`panel-${currentView}-content`).innerHTML = renderPanel(pi); bindPanelEvents(panelItemId); }
     }
@@ -626,6 +639,7 @@ function navigate(view, id) {
     $id('split-' + v)?.classList.remove('has-panel');
   });
   panelItemId = null;
+  panelEditMode = false;
 
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.querySelectorAll('.nav-item[data-view]').forEach(n => n.classList.remove('active'));
@@ -2640,6 +2654,21 @@ function handleImpFile(input, type) {
   input.value = '';
 }
 
+// SheetJS (xlsx) erst bei Bedarf nachladen – spart ~900 KB beim Start
+let _xlsxPromise = null;
+function ensureXLSX() {
+  if (typeof XLSX !== 'undefined') return Promise.resolve();
+  if (_xlsxPromise) return _xlsxPromise;
+  _xlsxPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+    s.onload  = () => resolve();
+    s.onerror = () => { _xlsxPromise = null; reject(new Error('SheetJS konnte nicht geladen werden')); };
+    document.head.appendChild(s);
+  });
+  return _xlsxPromise;
+}
+
 async function parseImportFile(file, type) {
   const resultEl = $id('imp-result-' + type);
   resultEl.textContent = '⏳ Wird verarbeitet…';
@@ -2652,6 +2681,7 @@ async function parseImportFile(file, type) {
       const lines = text.split(/\r?\n/).filter(l => l.trim());
       rows = lines.map(l => l.split(/;|\t/).map(c => c.trim().replace(/^"|"$/g, '')));
     } else if (ext === 'xlsx') {
+      await ensureXLSX().catch(() => {}); // bei Fehlschlag greift der eingebaute Fallback-Parser
       rows = await parseXlsxFile(file);
     } else {
       resultEl.innerHTML = '<span style="color:#ef4444">❌ Nur CSV oder XLSX-Dateien unterstützt.</span>';
@@ -2841,12 +2871,12 @@ function renderReports() {
   const txt = (id, label, ph) => `
     <div class="rep-filter">
       <label>${label}</label>
-      <input type="text" class="rep-input" id="${id}" placeholder="${ph||''}" oninput="applyReportFilters()"/>
+      <input type="text" class="rep-input" id="${id}" placeholder="${ph||''}" oninput="applyReportFiltersDebounced()"/>
     </div>`;
   const num = (id, label, ph) => `
     <div class="rep-filter">
       <label>${label}</label>
-      <input type="number" class="rep-input" id="${id}" placeholder="${ph||''}" min="0" step="0.01" oninput="applyReportFilters()"/>
+      <input type="number" class="rep-input" id="${id}" placeholder="${ph||''}" min="0" step="0.01" oninput="applyReportFiltersDebounced()"/>
     </div>`;
   const dat = (id, label) => `
     <div class="rep-filter">
@@ -2949,6 +2979,13 @@ function applyReportFilters() {
   renderReportsTable();
 }
 
+// Entprellte Variante für Texteingaben (verhindert Neurendern bei jedem Tastendruck)
+let _repFilterTimer = null;
+function applyReportFiltersDebounced() {
+  clearTimeout(_repFilterTimer);
+  _repFilterTimer = setTimeout(applyReportFilters, 200);
+}
+
 function resetReportFilters() {
   reportFilters = {};
   ['rep-search','rep-lieferant','rep-kst','rep-be','rep-preis-min','rep-preis-max',
@@ -3049,9 +3086,10 @@ function renderReportsTable() {
   table.innerHTML = head + body;
 }
 
-function exportReportsExcel() {
+async function exportReportsExcel() {
   const rows = getReportRows();
   if (!rows.length) { toast('Keine Daten zum Exportieren.', 'error'); return; }
+  await ensureXLSX().catch(() => {}); // bei Fehlschlag greift der CSV-Fallback unten
   const header = REPORT_COLS.map(c => c.label);
   const aoa = [header];
   for (const it of rows) {
@@ -3862,8 +3900,14 @@ async function openPanel(itemId) {
   const item  = allItems.find(i => String(i.id) === panelItemId);
   if (!item) return;
 
-  // Auto-advance: läuft unabhängig von View und Rolle für jeden Nutzer
-  {
+  // Auto-advance: NICHT durch den Antragsteller auslösen. Der Wechsel
+  // Eingereicht → In Prüfung (Einkauf) bedeutet „der Einkauf hat die Anfrage in die
+  // Hand genommen" – das darf nur passieren, wenn jemand ANDERES als der Ersteller
+  // die Anfrage öffnet (sonst würde der Antragsteller selbst seine Anfrage vorrücken).
+  const creatorEmail = (item.createdBy?.user?.email || '').trim().toLowerCase();
+  const myEmail      = (account?.username || '').trim().toLowerCase();
+  const viewerIsCreator = !!myEmail && myEmail === creatorEmail;
+  if (!viewerIsCreator) {
     const sv        = (getStatusVal(item) || 'Eingereicht').trim(); // leeres Feld = Eingereicht
     const statusCol = resolvedFields['Status'] || 'Status';
     let   advanced  = false;
@@ -3872,16 +3916,13 @@ async function openPanel(itemId) {
     if (/^eingereicht$/i.test(sv)) {
       const target = statusChoices.find(c => /pr[üu]fung/i.test(c) && /einkauf/i.test(c) && !/strategisch/i.test(c))
                   || 'In Prüfung (Einkauf)';
-      console.log('[auto-advance] sv=', JSON.stringify(sv), 'statusCol=', statusCol, 'target=', target, 'choices=', statusChoices);
       try {
         await gPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, { [statusCol]: target });
         // Optimistisch allItems sofort aktualisieren (Graph-Cache umgehen)
         const cached = allItems.find(i => String(i.id) === String(itemId));
         if (cached?.fields) cached.fields[statusCol] = target;
         advanced = true;
-        console.log('[auto-advance] PATCH OK → ' + target);
       } catch(e) {
-        console.error('[auto-advance] PATCH fehlgeschlagen:', e.message);
         toast('Status-Update fehlgeschlagen: ' + e.message, 'error');
       }
     }
@@ -3921,6 +3962,7 @@ function closePanel() {
     $id('split-' + v)?.classList.remove('has-panel');
   });
   panelItemId = null;
+  panelEditMode = false;
   _vhLoaded = {};
   document.querySelectorAll('.item-card').forEach(c => c.classList.remove('selected'));
 }
@@ -3957,6 +3999,7 @@ function bindPanelEvents(itemId) {
     doReject(itemId, pq('#aab-reject-comment')?.value?.trim() || ''));
   pq('#panel-save')?.addEventListener('click', () => savePanelEdits(itemId, panelRoot));
   pq('#panel-cancel')?.addEventListener('click', async () => {
+    panelEditMode = false;
     await releaseLock(itemId);
     const item = allItems.find(i => String(i.id) === String(itemId));
     if (item) { panelRoot.innerHTML = renderPanel(item); bindPanelEvents(itemId); }
@@ -4159,6 +4202,7 @@ async function savePanelEdits(itemId, panelRoot) {
     try {
       await gPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, patch);
       await releaseLock(itemId); // clear edit lock on successful save
+      panelEditMode = false;
       if (skipped.length) toast(`Gespeichert (übersprungen: ${skipped.join(', ')})`, 'info');
       else toast('Gespeichert ✓', 'success');
       await loadItems(false);
@@ -4772,6 +4816,7 @@ async function startEditMode(itemId) {
   const item      = allItems.find(i => String(i.id) === String(itemId));
   const panelRoot = $id(`panel-${currentView}-content`);
   if (!item || !panelRoot) return;
+  panelEditMode = true; // Auto-Refresh aussetzen, solange bearbeitet wird
   panelRoot.innerHTML = renderPanel(item, true);
   bindPanelEvents(itemId);
 }
