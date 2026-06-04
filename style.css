@@ -1166,6 +1166,31 @@ details#attach-extra-wrap[open] .attach-more-toggle { color:#374151; }
   padding: 10px 14px; font-size: .85rem; color: #0369a1; line-height: 1.55; margin-top: 10px;
 }
 
+/* Freigabe-Reihenfolge (Power Automate Workflow) */
+.flow-steps { margin: 16px 0 4px; }
+.flow-step {
+  display: flex; align-items: center; gap: 14px;
+  background: #f8fafc; border: 1px solid #e5e9ef; border-radius: 10px;
+  padding: 12px 16px;
+}
+.flow-step.flow-cond { background: #fffbeb; border-color: #fde68a; }
+.flow-step.flow-ok   { background: #f0fdf4; border-color: #bbf7d0; }
+.flow-num {
+  width: 30px; height: 30px; flex-shrink: 0; border-radius: 50%;
+  background: #1a56db; color: #fff; font-weight: 700; font-size: .85rem;
+  display: flex; align-items: center; justify-content: center;
+}
+.flow-cond .flow-num { background: #d97706; }
+.flow-ok .flow-num   { background: #16a34a; }
+.flow-name { font-size: .92rem; font-weight: 700; color: #1e2939; }
+.flow-sub  { font-size: .8rem; color: #6b7280; margin-top: 2px; }
+.flow-tag {
+  display: inline-block; background: #fef3c7; color: #92400e;
+  font-size: .72rem; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+}
+.flow-ok .flow-tag { background: #dcfce7; color: #166534; }
+.flow-arrow { text-align: center; color: #cbd5e1; font-size: 1rem; line-height: 1; margin: 3px 0; }
+
 @media (max-width: 960px) {
   .sidebar { transform: translateX(-100%); }
   .sidebar.open { transform: translateX(0); }

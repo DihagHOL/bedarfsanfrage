@@ -1170,12 +1170,14 @@ const TIMELINE_STAGES = [
   { label: 'Genehmigt (Einkauf)',
     test: v => /genehmigt/i.test(v) && /einkauf/i.test(v),
     approverField: 'Entscheider_x002a_in', commentField: 'Genehmigungskommentar' },
-  { label: 'In Prüfung (Werkleitung)',
-    test: v => /werkleitung/i.test(v),
-    approverField: 'Genehmiger3', commentField: 'Genehmigungskommentar3' },
+  // Reihenfolge laut Power Automate-Freigabeprozess:
+  // Controlling (nur Dienstleistung) → Werkleitung (ab 1.500 €) → strategischer Einkauf (ab 10.000 €)
   { label: 'In Prüfung (Controlling)',
     test: v => /controlling/i.test(v),
     approverField: 'Genehmiger2', commentField: 'Genehmigungskommentar2' },
+  { label: 'In Prüfung (Werkleitung)',
+    test: v => /werkleitung/i.test(v),
+    approverField: 'Genehmiger3', commentField: 'Genehmigungskommentar3' },
   { label: 'In Prüfung (strategischer Einkauf)',
     test: v => /strategisch/i.test(v),
     approverField: 'Genehmiger4', commentField: 'Genehmigungskommentar4' },
@@ -1216,9 +1218,10 @@ function resolvePersonField(fields, fieldName) {
 const WORKFLOW_STAGES = [
   'Eingereicht',
   'In Prüfung (Einkauf)',
-  'In Prüfung (Werkleitung)',
+  'Genehmigt (Einkauf)',
   'In Prüfung (Controlling)',
-  'In Prüfung (strategischer Einkauf)',
+  'In Prüfung (Werkleitung)',
+  'In Prüfung (strategische Einkauf)',
   'Freigegeben',
   'In Bestellung',
   'Bestellt',
@@ -3140,13 +3143,65 @@ function initSchulung() {
 
       <section class="schulung-sec" id="sch-4">
         <h2>4 · Status & Genehmigung</h2>
-        <p>Jede Anfrage durchläuft mehrere Stufen, die im „Verlauf" sichtbar sind:</p>
-        <ul>
-          <li><b>Eingereicht</b> → beim Öffnen im Dashboard automatisch <b>In Prüfung (Einkauf)</b>.</li>
-          <li>Der Einkauf entscheidet direkt im Detailbereich über <b>Genehmigen</b> oder
-              <b>Ablehnen</b>.</li>
-          <li>Nach <b>Freigegeben</b> können die Einkauf-Daten (Bestellnummer etc.) erfasst werden.</li>
-        </ul>
+        <p>Jede Anfrage durchläuft den folgenden Freigabeprozess – die Reihenfolge entspricht
+           exakt dem hinterlegten <b>Power-Automate-Workflow</b>. Je nach Beschaffungsart und
+           Bestellvolumen werden einzelne Stufen automatisch übersprungen.</p>
+
+        <div class="flow-steps">
+          <div class="flow-step">
+            <div class="flow-num">1</div>
+            <div class="flow-body"><div class="flow-name">Eingereicht</div>
+              <div class="flow-sub">Anfrage wurde erstellt.</div></div>
+          </div>
+          <div class="flow-arrow">↓</div>
+          <div class="flow-step">
+            <div class="flow-num">2</div>
+            <div class="flow-body"><div class="flow-name">In Prüfung (Einkauf)</div>
+              <div class="flow-sub">Der Einkauf prüft und entscheidet (Genehmigen / Ablehnen) – direkt in der App.</div></div>
+          </div>
+          <div class="flow-arrow">↓</div>
+          <div class="flow-step">
+            <div class="flow-num">3</div>
+            <div class="flow-body"><div class="flow-name">Genehmigt (Einkauf)</div>
+              <div class="flow-sub">Startet den automatischen Genehmigungs-Workflow in Power Automate.</div></div>
+          </div>
+          <div class="flow-arrow">↓</div>
+          <div class="flow-step flow-cond">
+            <div class="flow-num">4</div>
+            <div class="flow-body"><div class="flow-name">In Prüfung (Controlling)</div>
+              <div class="flow-sub"><span class="flow-tag">nur bei Dienstleistung</span></div></div>
+          </div>
+          <div class="flow-arrow">↓</div>
+          <div class="flow-step flow-cond">
+            <div class="flow-num">5</div>
+            <div class="flow-body"><div class="flow-name">In Prüfung (Werkleitung)</div>
+              <div class="flow-sub"><span class="flow-tag">ab 1.500 € Bestellvolumen</span></div></div>
+          </div>
+          <div class="flow-arrow">↓</div>
+          <div class="flow-step flow-cond">
+            <div class="flow-num">6</div>
+            <div class="flow-body"><div class="flow-name">In Prüfung (strategischer Einkauf)</div>
+              <div class="flow-sub"><span class="flow-tag">ab 10.000 € &amp; kein Lead-Buyer-Abschluss</span></div></div>
+          </div>
+          <div class="flow-arrow">↓</div>
+          <div class="flow-step flow-ok">
+            <div class="flow-num">✓</div>
+            <div class="flow-body"><div class="flow-name">Freigegeben</div>
+              <div class="flow-sub">Alle erforderlichen Stufen haben zugestimmt.</div></div>
+          </div>
+          <div class="flow-arrow">↓</div>
+          <div class="flow-step flow-ok">
+            <div class="flow-num">📦</div>
+            <div class="flow-body"><div class="flow-name">Bestellt</div>
+              <div class="flow-sub">Einkauf hat die Bestellnummer hinterlegt.</div></div>
+          </div>
+        </div>
+
+        <p style="margin-top:14px"><b>Ablehnung:</b> Lehnt eine Stufe ab, wechselt die Anfrage
+           sofort auf <b>Abgelehnt</b> und der Antragsteller wird per E-Mail informiert –
+           die nachfolgenden Stufen entfallen.</p>
+        <div class="schulung-tip">💡 Im „Verlauf" einer Anfrage sehen Sie nur die Stufen, die für
+          diese Anfrage tatsächlich durchlaufen wurden – inklusive Genehmiger und Kommentar.</div>
         <div class="schulung-tip">📨 Sobald Ihre Genehmigung erforderlich ist, werden Sie
           <b>automatisch über Power Automate per E-Mail und Microsoft Teams</b> benachrichtigt.
           Sie müssen die App also nicht ständig offen halten – die Aufforderung kommt zu Ihnen.</div>
