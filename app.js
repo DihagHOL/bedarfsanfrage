@@ -598,7 +598,7 @@ async function loadItems(showToast = true) {
 // ── ROUTING ──────────────────────────────────────────────────────────────────
 // Dashboard title differs by role: admins see "Dashboard (Alle)", others see "Meine Anfragen"
 function VIEW_TITLES(view) {
-  const map = { new:'Neue Bedarfsanfrage', multi:'Sammelanfrage', mine:'Meine Anfragen', all:'Alle Anfragen', detail:'Anfrage Details', importer:'Tabellen-Importer' };
+  const map = { new:'Neue Bedarfsanfrage', multi:'Sammelanfrage', mine:'Meine Anfragen', all:'Alle Anfragen', detail:'Anfrage Details', importer:'Tabellen-Importer', reports:'Reports & Auswertungen', schulung:'Schulung (Beta)' };
   if (view === 'dashboard') return isAdmin() ? 'Dashboard (Alle Anfragen)' : 'Meine Anfragen';
   return map[view] || view;
 }
@@ -654,6 +654,8 @@ function navigate(view, id) {
   else if (view === 'new')       initWizard();
   else if (view === 'multi')     initMultiWizard();
   else if (view === 'importer')  initImporter();
+  else if (view === 'reports')   initReports();
+  else if (view === 'schulung')  initSchulung();
   else if (view === 'detail' && id) renderDetail(id);
 }
 
@@ -2656,6 +2658,391 @@ function resetTable(type) {
   if (type === 'kst')  localStorage.removeItem(LS_KOSTENST_KEY);
   reloadLookupData();
   renderImporter();
+}
+
+// ── REPORTS & AUSWERTUNGEN ───────────────────────────────────────────────────
+let reportFilters = {};
+let reportSort    = { col: 'id', dir: 'desc' };
+
+// rf = resolved field reader
+function _rf(i, key) { return getField(i, resolvedFields[key] || key) || ''; }
+
+const REPORT_COLS = [
+  { key:'id',               label:'ID',             type:'num',  get:i => parseInt(i.id, 10) },
+  { key:'Title',            label:'Bezeichnung',    type:'text', get:i => cleanTitle(getField(i,'Title') || '') },
+  { key:'Status',           label:'Status',         type:'text', get:i => getStatusVal(i) || 'Eingereicht' },
+  { key:'Warengruppe',      label:'Warengruppe',    type:'text', get:i => _rf(i,'Warengruppe') },
+  { key:'Prioritaet',       label:'Priorität',      type:'text', get:i => _rf(i,'Prioritaet') },
+  { key:'Menge',            label:'Menge',          type:'num',  get:i => { const n = parseFloat(_rf(i,'Menge')); return isNaN(n) ? null : n; } },
+  { key:'Mengeneinheit',    label:'ME',             type:'text', get:i => _rf(i,'Mengeneinheit') },
+  { key:'GeschaetzterPreis',label:'Volumen (€)',    type:'num',  get:i => { const n = parseFloat(_rf(i,'GeschaetzterPreis')); return isNaN(n) ? null : n; } },
+  { key:'Beschaffungslogik',label:'Beschaffungsart',type:'text', get:i => _rf(i,'Beschaffungslogik') },
+  { key:'Lieferant',        label:'Lieferant',      type:'text', get:i => _rf(i,'Lieferant') },
+  { key:'Kostenstelle',     label:'Kostenstelle',   type:'text', get:i => _rf(i,'Kostenstelle') },
+  { key:'Bestellnummer',    label:'Bestell-Nr.',    type:'text', get:i => _rf(i,'Bestellnummer') },
+  { key:'Artikelnummer',    label:'Artikel-Nr.',    type:'text', get:i => _rf(i,'Artikelnummer') },
+  { key:'Termin',           label:'Benötigt bis',   type:'date', get:i => _rf(i,'Termin') },
+  { key:'creator',          label:'Ersteller',      type:'text', get:i => i.createdBy?.user?.displayName || i.createdBy?.user?.email || '' },
+  { key:'created',          label:'Erstellt am',    type:'date', get:i => i.createdDateTime || '' },
+];
+
+function _uniqueReportVals(colKey) {
+  const col = REPORT_COLS.find(c => c.key === colKey);
+  if (!col) return [];
+  const set = new Set();
+  for (const i of allItems) { const v = col.get(i); if (v != null && String(v).trim() !== '') set.add(String(v)); }
+  return [...set].sort((a, b) => a.localeCompare(b, 'de'));
+}
+
+function initReports() {
+  reportFilters = {};
+  renderReports();
+}
+
+function renderReports() {
+  const statusOpts = _uniqueReportVals('Status');
+  const wgOpts     = _uniqueReportVals('Warengruppe');
+  const maOpts     = _uniqueReportVals('creator');
+  const prioOpts   = _uniqueReportVals('Prioritaet');
+  const baOpts     = _uniqueReportVals('Beschaffungslogik');
+
+  const sel = (id, label, opts) => `
+    <div class="rep-filter">
+      <label>${label}</label>
+      <select class="rep-input" id="${id}" onchange="applyReportFilters()">
+        <option value="">Alle</option>
+        ${opts.map(o => `<option value="${esc(o)}">${esc(o)}</option>`).join('')}
+      </select>
+    </div>`;
+  const txt = (id, label, ph) => `
+    <div class="rep-filter">
+      <label>${label}</label>
+      <input type="text" class="rep-input" id="${id}" placeholder="${ph||''}" oninput="applyReportFilters()"/>
+    </div>`;
+  const num = (id, label, ph) => `
+    <div class="rep-filter">
+      <label>${label}</label>
+      <input type="number" class="rep-input" id="${id}" placeholder="${ph||''}" min="0" step="0.01" oninput="applyReportFilters()"/>
+    </div>`;
+  const dat = (id, label) => `
+    <div class="rep-filter">
+      <label>${label}</label>
+      <input type="date" class="rep-input" id="${id}" onchange="applyReportFilters()"/>
+    </div>`;
+
+  $id('view-reports').innerHTML = `
+    <div class="rep-wrap">
+      <div class="rep-toolbar">
+        <div class="rep-toolbar-left">
+          <span class="rep-count" id="rep-count"></span>
+          <span class="rep-sum" id="rep-sum"></span>
+        </div>
+        <div class="rep-toolbar-right">
+          <button class="btn btn-sm btn-ghost" onclick="resetReportFilters()">↺ Filter zurücksetzen</button>
+          <button class="btn btn-sm btn-primary" onclick="exportReportsExcel()">⬇ Als Excel exportieren</button>
+        </div>
+      </div>
+      <div class="rep-filters">
+        ${txt('rep-search','Suche','Titel, ID, Artikel…')}
+        ${sel('rep-status','Status', statusOpts)}
+        ${sel('rep-wg','Warengruppe', wgOpts)}
+        ${sel('rep-ma','Mitarbeiter', maOpts)}
+        ${sel('rep-prio','Priorität', prioOpts)}
+        ${sel('rep-ba','Beschaffungsart', baOpts)}
+        ${txt('rep-lieferant','Lieferant','enthält…')}
+        ${txt('rep-kst','Kostenstelle','enthält…')}
+        ${txt('rep-be','Bestell-Nr.','enthält…')}
+        ${num('rep-preis-min','Volumen ab €','min')}
+        ${num('rep-preis-max','Volumen bis €','max')}
+        ${dat('rep-created-from','Erstellt von')}
+        ${dat('rep-created-to','Erstellt bis')}
+        ${dat('rep-termin-from','Benötigt von')}
+        ${dat('rep-termin-to','Benötigt bis')}
+      </div>
+      <div class="rep-table-wrap">
+        <table class="rep-table" id="rep-table"></table>
+      </div>
+    </div>`;
+  renderReportsTable();
+}
+
+function applyReportFilters() {
+  reportFilters = {
+    search:      ($id('rep-search')?.value || '').toLowerCase().trim(),
+    status:      $id('rep-status')?.value || '',
+    wg:          $id('rep-wg')?.value || '',
+    ma:          $id('rep-ma')?.value || '',
+    prio:        $id('rep-prio')?.value || '',
+    ba:          $id('rep-ba')?.value || '',
+    lieferant:   ($id('rep-lieferant')?.value || '').toLowerCase().trim(),
+    kst:         ($id('rep-kst')?.value || '').toLowerCase().trim(),
+    be:          ($id('rep-be')?.value || '').toLowerCase().trim(),
+    preisMin:    parseFloat($id('rep-preis-min')?.value) || null,
+    preisMax:    parseFloat($id('rep-preis-max')?.value) || null,
+    createdFrom: $id('rep-created-from')?.value || '',
+    createdTo:   $id('rep-created-to')?.value || '',
+    terminFrom:  $id('rep-termin-from')?.value || '',
+    terminTo:    $id('rep-termin-to')?.value || '',
+  };
+  renderReportsTable();
+}
+
+function resetReportFilters() {
+  reportFilters = {};
+  ['rep-search','rep-status','rep-wg','rep-ma','rep-prio','rep-ba','rep-lieferant',
+   'rep-kst','rep-be','rep-preis-min','rep-preis-max','rep-created-from','rep-created-to',
+   'rep-termin-from','rep-termin-to'].forEach(id => { const el = $id(id); if (el) el.value = ''; });
+  renderReportsTable();
+}
+
+function getReportRows() {
+  const f = reportFilters;
+  const get = (i, key) => { const c = REPORT_COLS.find(x => x.key === key); return c ? c.get(i) : ''; };
+  let rows = allItems.filter(i => {
+    if (f.status    && (get(i,'Status') || '') !== f.status) return false;
+    if (f.wg        && (get(i,'Warengruppe') || '') !== f.wg) return false;
+    if (f.ma        && (get(i,'creator') || '') !== f.ma) return false;
+    if (f.prio      && (get(i,'Prioritaet') || '') !== f.prio) return false;
+    if (f.ba        && (get(i,'Beschaffungslogik') || '') !== f.ba) return false;
+    if (f.lieferant && !String(get(i,'Lieferant') || '').toLowerCase().includes(f.lieferant)) return false;
+    if (f.kst       && !String(get(i,'Kostenstelle') || '').toLowerCase().includes(f.kst)) return false;
+    if (f.be        && !String(get(i,'Bestellnummer') || '').toLowerCase().includes(f.be)) return false;
+    const preis = get(i,'GeschaetzterPreis');
+    if (f.preisMin != null && (preis == null || preis < f.preisMin)) return false;
+    if (f.preisMax != null && (preis == null || preis > f.preisMax)) return false;
+    const created = (get(i,'created') || '').slice(0,10);
+    if (f.createdFrom && (!created || created < f.createdFrom)) return false;
+    if (f.createdTo   && (!created || created > f.createdTo)) return false;
+    const termin = (get(i,'Termin') || '').slice(0,10);
+    if (f.terminFrom && (!termin || termin < f.terminFrom)) return false;
+    if (f.terminTo   && (!termin || termin > f.terminTo)) return false;
+    if (f.search) {
+      const hay = [get(i,'id'), get(i,'Title'), get(i,'Artikelnummer'), get(i,'Lieferant'),
+                   get(i,'Bestellnummer'), get(i,'Kostenstelle'), get(i,'creator')]
+                  .map(v => String(v ?? '').toLowerCase()).join(' ');
+      if (!hay.includes(f.search)) return false;
+    }
+    return true;
+  });
+  // Sort
+  const col = REPORT_COLS.find(c => c.key === reportSort.col) || REPORT_COLS[0];
+  const dir = reportSort.dir === 'asc' ? 1 : -1;
+  rows.sort((a, b) => {
+    let va = col.get(a), vb = col.get(b);
+    if (col.type === 'num')  { va = va == null ? -Infinity : va; vb = vb == null ? -Infinity : vb; return (va - vb) * dir; }
+    if (col.type === 'date') { return (String(va).localeCompare(String(vb))) * dir; }
+    return String(va).localeCompare(String(vb), 'de') * dir;
+  });
+  return rows;
+}
+
+function reportSortBy(colKey) {
+  if (reportSort.col === colKey) reportSort.dir = reportSort.dir === 'asc' ? 'desc' : 'asc';
+  else { reportSort.col = colKey; reportSort.dir = 'asc'; }
+  renderReportsTable();
+}
+
+function renderReportsTable() {
+  const table = $id('rep-table');
+  if (!table) return;
+  const rows = getReportRows();
+
+  // Count + sum
+  const cnt = $id('rep-count');
+  if (cnt) cnt.textContent = `${rows.length} ${rows.length === 1 ? 'Eintrag' : 'Einträge'}`;
+  const sumVal = rows.reduce((s, i) => {
+    const c = REPORT_COLS.find(x => x.key === 'GeschaetzterPreis');
+    return s + (c.get(i) || 0);
+  }, 0);
+  const sumEl = $id('rep-sum');
+  if (sumEl) sumEl.textContent = sumVal > 0 ? `· Gesamtvolumen ${fmtEuro(sumVal)}` : '';
+
+  const arrow = key => reportSort.col === key ? (reportSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+  const head = `<thead><tr>${REPORT_COLS.map(c =>
+    `<th class="rep-th${c.type==='num'?' rep-right':''}" onclick="reportSortBy('${c.key}')">${esc(c.label)}${arrow(c.key)}</th>`
+  ).join('')}</tr></thead>`;
+
+  const body = rows.length === 0
+    ? `<tbody><tr><td class="rep-empty" colspan="${REPORT_COLS.length}">Keine Einträge für die gewählten Filter.</td></tr></tbody>`
+    : `<tbody>${rows.map(i => {
+        const id = i.id;
+        return `<tr class="rep-row" onclick="navigate('detail','${id}')">${REPORT_COLS.map(c => {
+          let v = c.get(i);
+          if (c.key === 'Status') return `<td class="rep-td">${statusBadge(v)}</td>`;
+          if (c.type === 'date')  v = v ? fmtDate(v) : '–';
+          else if (c.key === 'GeschaetzterPreis') v = v != null ? fmtEuro(v) : '–';
+          else if (c.type === 'num') v = v != null ? v.toLocaleString('de-DE') : '–';
+          else v = (v == null || v === '') ? '–' : v;
+          return `<td class="rep-td${c.type==='num'?' rep-right':''}">${esc(String(v))}</td>`;
+        }).join('')}</tr>`;
+      }).join('')}</tbody>`;
+
+  table.innerHTML = head + body;
+}
+
+function exportReportsExcel() {
+  const rows = getReportRows();
+  if (!rows.length) { toast('Keine Daten zum Exportieren.', 'error'); return; }
+  const header = REPORT_COLS.map(c => c.label);
+  const aoa = [header];
+  for (const it of rows) {
+    aoa.push(REPORT_COLS.map(c => {
+      let v = c.get(it);
+      if (c.type === 'date' && v) v = fmtDate(v);
+      return v == null ? '' : v;
+    }));
+  }
+  const stamp = new Date().toISOString().slice(0,10);
+  if (typeof XLSX !== 'undefined') {
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = REPORT_COLS.map(c => ({ wch: Math.max(10, c.label.length + 2) }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Bedarfsanfragen');
+    XLSX.writeFile(wb, `Bedarfsanfragen_Report_${stamp}.xlsx`);
+    toast(`${rows.length} Einträge als Excel exportiert.`, 'success');
+  } else {
+    // Fallback: CSV
+    const csv = aoa.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(';')).join('\r\n');
+    downloadCSV(csv, `Bedarfsanfragen_Report_${stamp}.csv`);
+    toast(`${rows.length} Einträge als CSV exportiert (Excel-Bibliothek nicht geladen).`, 'success');
+  }
+}
+
+// ── SCHULUNG (BETA) ──────────────────────────────────────────────────────────
+function initSchulung() {
+  $id('view-schulung').innerHTML = `
+    <div class="schulung-wrap">
+      <div class="schulung-hero">
+        <div class="schulung-badge">Beta</div>
+        <h1>Willkommen im DIHAG Bedarfsanfragen-Tool</h1>
+        <p>Diese Schulung erklärt Schritt für Schritt, wie Sie Bedarfsanfragen erstellen,
+           verfolgen und genehmigen. Die Anwendung ist mit SharePoint verbunden – alle
+           Eingaben werden zentral gespeichert und über Power Automate weitergeleitet.</p>
+      </div>
+
+      <div class="schulung-toc">
+        <a href="#sch-1">1 · Überblick</a>
+        <a href="#sch-2">2 · Neue Anfrage</a>
+        <a href="#sch-3">3 · Sammelanfrage</a>
+        <a href="#sch-4">4 · Status & Genehmigung</a>
+        <a href="#sch-5">5 · Einkauf-Daten</a>
+        <a href="#sch-6">6 · Reports</a>
+        <a href="#sch-7">7 · Wiedervorlage/Favoriten</a>
+        <a href="#sch-8">8 · Tabellen-Importer</a>
+        <a href="#sch-9">9 · FAQ</a>
+      </div>
+
+      <section class="schulung-sec" id="sch-1">
+        <h2>1 · Überblick</h2>
+        <p>Die Navigation links führt zu den Hauptbereichen:</p>
+        <ul>
+          <li><b>Dashboard</b> – Liste aller Anfragen mit Status-Chips, Warengruppen- und Mitarbeiterfilter.</li>
+          <li><b>Neue Anfrage</b> – Assistent für eine einzelne Position.</li>
+          <li><b>Sammelanfrage</b> – Assistent für mehrere Positionen in einer Anfrage.</li>
+          <li><b>Meine Anfragen</b> – nur Ihre eigenen Anfragen.</li>
+          <li><b>Reports</b> – Auswertungen mit vielen Filtern und Excel-Export.</li>
+          <li><b>Tabellen-Importer</b> – Artikelnummern- und Kostenstellentabellen aktualisieren.</li>
+        </ul>
+        <div class="schulung-tip">💡 Die Liste aktualisiert sich automatisch alle 20 Sekunden.
+          Während Sie eine Anfrage ausfüllen, pausiert die Aktualisierung, damit nichts verloren geht.</div>
+      </section>
+
+      <section class="schulung-sec" id="sch-2">
+        <h2>2 · Neue Anfrage erstellen</h2>
+        <ol>
+          <li><b>Bedarf:</b> Bezeichnung und Warengruppe (Pflicht). Geben Sie eine Artikelnummer
+              ein – Bezeichnung und Warengruppe werden automatisch vorgeschlagen.</li>
+          <li><b>Menge:</b> Menge, Mengeneinheit und „Benötigt bis"-Termin.</li>
+          <li><b>Beschaffung:</b> Beschaffungsart, Lieferant(en), Kostenstelle und
+              <b>Bestellvolumen in € (Pflicht)</b>. Anhand des Volumens zeigt das Tool den
+              erforderlichen Genehmigungsweg an (z. B. Anzahl Angebote).</li>
+          <li><b>Prüfen & Einreichen:</b> Zusammenfassung kontrollieren und absenden.</li>
+        </ol>
+        <div class="schulung-tip">💡 Über das Feld „Externe Artikelnummer" erfassen Sie bei
+          Katalogware die Lieferanten-Nummer.</div>
+      </section>
+
+      <section class="schulung-sec" id="sch-3">
+        <h2>3 · Sammelanfrage (mehrere Positionen)</h2>
+        <p>Nutzen Sie die Sammelanfrage, wenn mehrere unterschiedliche Artikel zusammen
+           angefragt werden.</p>
+        <ol>
+          <li><b>Positionen erfassen:</b> Pro Zeile Artikelnummer, Bezeichnung, Menge, ME,
+              <b>Preis</b>, <b>Benötigt bis</b> und <b>Kostenstelle</b>. Mit „+ Position
+              hinzufügen" beliebig erweitern.</li>
+          <li>Das <b>Bestellvolumen</b> wird automatisch aus den Einzelpreisen summiert.</li>
+          <li>Warengruppe, Priorität und Beschaffungsart gelten für die gesamte Anfrage.</li>
+        </ol>
+      </section>
+
+      <section class="schulung-sec" id="sch-4">
+        <h2>4 · Status & Genehmigung</h2>
+        <p>Jede Anfrage durchläuft mehrere Stufen, die im „Verlauf" sichtbar sind:</p>
+        <ul>
+          <li><b>Eingereicht</b> → beim Öffnen im Dashboard automatisch <b>In Prüfung (Einkauf)</b>.</li>
+          <li>Der Einkauf entscheidet direkt im Detailbereich über <b>Genehmigen</b> oder
+              <b>Ablehnen</b>.</li>
+          <li>Nach <b>Freigegeben</b> können die Einkauf-Daten (Bestellnummer etc.) erfasst werden.</li>
+        </ul>
+        <div class="schulung-tip">💡 In „Meine Anfragen" sehen Sie nur den Fortschritt – die
+          Genehmigungsschaltflächen erscheinen dort nicht.</div>
+      </section>
+
+      <section class="schulung-sec" id="sch-5">
+        <h2>5 · Einkauf-Daten eintragen</h2>
+        <p>Bei Status <b>Freigegeben</b> öffnen Sie über „📦 Einkauf-Daten" das Formular für
+           Bestellnummer, Lieferdatum, tatsächlichen Preis und Angebots-PDFs.</p>
+        <div class="schulung-tip">⚠️ Ist eine <b>Bestellnummer (BE)</b> bereits bei einer anderen
+          Anfrage hinterlegt, warnt das Tool sofort – so vermeiden Sie Doppelbestellungen.</div>
+      </section>
+
+      <section class="schulung-sec" id="sch-6">
+        <h2>6 · Reports & Auswertungen</h2>
+        <p>Im Reiter <b>Reports</b> filtern Sie alle Anfragen nach Status, Warengruppe,
+           Mitarbeiter, Priorität, Beschaffungsart, Lieferant, Kostenstelle, Bestell-Nr.,
+           Volumen und Zeiträumen – ähnlich wie in Excel.</p>
+        <ul>
+          <li>Spaltenüberschrift anklicken = sortieren.</li>
+          <li>Zeile anklicken = Anfrage öffnen.</li>
+          <li><b>„Als Excel exportieren"</b> lädt die aktuell gefilterte Liste als .xlsx herunter.</li>
+        </ul>
+      </section>
+
+      <section class="schulung-sec" id="sch-7">
+        <h2>7 · Wiedervorlage / Favoriten</h2>
+        <p>Wiederkehrende Anfragen müssen Sie nicht neu tippen:</p>
+        <ul>
+          <li>In einer geöffneten Anfrage auf <b>„⭐ Als Wiedervorlage"</b> klicken.</li>
+          <li>Die Anfrage wird als Favorit gespeichert (lokal in Ihrem Browser).</li>
+          <li>Oben in <b>Neue Anfrage</b> bzw. <b>Sammelanfrage</b> erscheinen Ihre Favoriten –
+              ein Klick füllt den Assistenten automatisch aus. Sammelanfragen landen dabei
+              automatisch im richtigen Assistenten.</li>
+        </ul>
+      </section>
+
+      <section class="schulung-sec" id="sch-8">
+        <h2>8 · Tabellen-Importer</h2>
+        <p>Aktualisieren Sie die Hinterlegungen für die Autovervollständigung:</p>
+        <ul>
+          <li><b>Artikelnummern</b> und <b>Kostenstellen</b> per CSV oder XLSX hochladen.</li>
+          <li>Mit <b>„⬇ Export"</b> laden Sie die aktuelle Tabelle herunter, mit
+              <b>„📄 Vorlage"</b> eine leere Beispieldatei.</li>
+          <li>„↺ Zurücksetzen" stellt die Standardtabelle wieder her.</li>
+        </ul>
+      </section>
+
+      <section class="schulung-sec" id="sch-9">
+        <h2>9 · Häufige Fragen</h2>
+        <p><b>Warum sehe ich keine Genehmigungs-Buttons?</b><br>
+           Diese erscheinen nur im Dashboard / „Alle Anfragen", nicht in „Meine Anfragen".</p>
+        <p><b>Meine Änderung ist weg?</b><br>
+           Prüfen Sie, ob die Anfrage noch im Status „In Prüfung (Einkauf)" ist – nur dann ist
+           sie bearbeitbar.</p>
+        <p><b>Wo werden Favoriten gespeichert?</b><br>
+           Lokal in Ihrem Browser. Bei Browserwechsel oder Cache-Löschung sind sie nicht mehr da.</p>
+        <div class="schulung-tip">📨 Weitere Fragen? Wenden Sie sich an den Einkauf / IT.</div>
+      </section>
+    </div>`;
 }
 
 // ── SAMMELANFRAGE (MULTI-POSITION WIZARD) ────────────────────────────────────

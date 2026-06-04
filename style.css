@@ -1030,6 +1030,92 @@ details#attach-extra-wrap[open] .attach-more-toggle { color:#374151; }
   color: #b91c1c; font-size: .8rem; line-height: 1.4;
 }
 
+/* ── Nav Beta-Badge ── */
+.nav-beta {
+  margin-left: auto; font-size: .62rem; font-weight: 700;
+  background: #ede9fe; color: #6d28d9; padding: 1px 6px;
+  border-radius: 999px; text-transform: uppercase; letter-spacing: .04em;
+}
+
+/* ── Reports ── */
+.rep-wrap { display: flex; flex-direction: column; height: calc(100vh - 130px); }
+.rep-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; margin-bottom: 12px;
+}
+.rep-toolbar-left { display: flex; align-items: baseline; gap: 8px; }
+.rep-count { font-size: 1rem; font-weight: 700; color: #1e2939; }
+.rep-sum   { font-size: .85rem; color: #6b7280; }
+.rep-toolbar-right { display: flex; gap: 8px; }
+.rep-filters {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px 12px; margin-bottom: 14px;
+  background: #fff; border: 1px solid #e5e9ef; border-radius: 10px; padding: 14px;
+}
+.rep-filter { display: flex; flex-direction: column; gap: 3px; }
+.rep-filter label { font-size: .68rem; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: .03em; }
+.rep-input {
+  height: 32px; padding: 0 8px; border: 1px solid #e2e8f0; border-radius: 6px;
+  font-size: .8rem; color: #1e2939; background: #fff; font-family: inherit;
+}
+.rep-input:focus { outline: none; border-color: #6366f1; }
+.rep-table-wrap {
+  flex: 1; overflow: auto; background: #fff;
+  border: 1px solid #e5e9ef; border-radius: 10px;
+}
+.rep-table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+.rep-th {
+  position: sticky; top: 0; z-index: 2;
+  background: #f1f5f9; color: #475569; text-align: left;
+  padding: 9px 10px; font-weight: 700; font-size: .72rem;
+  text-transform: uppercase; letter-spacing: .03em;
+  cursor: pointer; white-space: nowrap; user-select: none;
+  border-bottom: 1px solid #e2e8f0;
+}
+.rep-th:hover { background: #e2e8f0; }
+.rep-th.rep-right { text-align: right; }
+.rep-td { padding: 8px 10px; border-bottom: 1px solid #f1f5f9; color: #1e2939; white-space: nowrap; }
+.rep-td.rep-right { text-align: right; }
+.rep-row { cursor: pointer; }
+.rep-row:hover .rep-td { background: #f8fafc; }
+.rep-empty { padding: 30px; text-align: center; color: #9ca3af; }
+
+/* ── Schulung ── */
+.schulung-wrap { max-width: 860px; margin: 0 auto; padding-bottom: 40px; }
+.schulung-hero {
+  position: relative; background: linear-gradient(135deg, #1a56db, #4f46e5);
+  color: #fff; border-radius: 14px; padding: 28px 30px; margin-bottom: 20px;
+}
+.schulung-hero h1 { font-size: 1.5rem; margin-bottom: 8px; }
+.schulung-hero p { font-size: .92rem; line-height: 1.6; opacity: .95; max-width: 640px; }
+.schulung-badge {
+  position: absolute; top: 18px; right: 22px;
+  background: rgba(255,255,255,.22); color: #fff;
+  font-size: .68rem; font-weight: 700; padding: 3px 10px;
+  border-radius: 999px; text-transform: uppercase; letter-spacing: .05em;
+}
+.schulung-toc {
+  display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 22px;
+}
+.schulung-toc a {
+  font-size: .8rem; font-weight: 600; color: #1a56db; text-decoration: none;
+  background: #eff3ff; padding: 6px 12px; border-radius: 999px;
+  transition: background .12s;
+}
+.schulung-toc a:hover { background: #dbe5ff; }
+.schulung-sec {
+  background: #fff; border: 1px solid #e5e9ef; border-radius: 12px;
+  padding: 22px 26px; margin-bottom: 16px; scroll-margin-top: 70px;
+}
+.schulung-sec h2 { font-size: 1.15rem; margin-bottom: 12px; color: #1e2939; }
+.schulung-sec p  { font-size: .9rem; line-height: 1.65; color: #374151; margin-bottom: 10px; }
+.schulung-sec ul, .schulung-sec ol { margin: 0 0 10px 20px; }
+.schulung-sec li { font-size: .9rem; line-height: 1.7; color: #374151; }
+.schulung-tip {
+  background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px;
+  padding: 10px 14px; font-size: .85rem; color: #0369a1; line-height: 1.55; margin-top: 10px;
+}
+
 @media (max-width: 960px) {
   .sidebar { transform: translateX(-100%); }
   .sidebar.open { transform: translateX(0); }
