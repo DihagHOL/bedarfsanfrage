@@ -3822,7 +3822,7 @@ function renderMultiPositions() {
           <input type="number" class="mpos-menge" data-idx="${i}"
             value="${esc(pos.menge)}"
             placeholder="1" min="0.001" step="any"
-            oninput="multiPosChange(${i},'menge',this.value)"/>
+            oninput="multiPosChange(${i},'menge',this.value); updateMultiTotal()"/>
         </div>
         <div class="multi-pos-field" style="flex:0 0 130px">
           <label>ME <span class="req">*</span></label>
@@ -3831,7 +3831,7 @@ function renderMultiPositions() {
           </select>
         </div>
         <div class="multi-pos-field" style="flex:0 0 110px">
-          <label>Preis (€)</label>
+          <label>Einzelpreis (€)</label>
           <input type="number" class="mpos-preis" data-idx="${i}"
             value="${esc(String(pos.preis || ''))}"
             placeholder="0.00" min="0" step="0.01"
@@ -3893,8 +3893,14 @@ function renderMultiPositions() {
   updateMultiTotal();
 }
 
+// Positions-Gesamtbetrag = Einzelpreis × Menge (Menge fehlt/ungültig → als 1 gewertet)
+function _lineSum(preis, menge) {
+  const p = parseFloat(preis) || 0;
+  const m = parseFloat(menge);
+  return p * (m > 0 ? m : 1);
+}
 function updateMultiTotal() {
-  const total = multiPositions.reduce((s, p) => s + (parseFloat(p.preis) || 0), 0);
+  const total = multiPositions.reduce((s, p) => s + _lineSum(p.preis, p.menge), 0);
   const el = $id('mf-GeschaetzterPreis');
   if (el) el.value = total > 0 ? total.toFixed(2) : '';
   const displayEl = $id('mf-total-display');
@@ -3998,6 +4004,7 @@ function buildMultiReview() {
       <td style="padding:4px 8px;text-align:right">${esc(p.menge)}</td>
       <td style="padding:4px 8px">${esc(p.me)}</td>
       <td style="padding:4px 8px;text-align:right">${p.preis ? fmtEuro(p.preis) : '–'}</td>
+      <td style="padding:4px 8px;text-align:right;font-weight:600">${p.preis ? fmtEuro(_lineSum(p.preis, p.menge)) : '–'}</td>
       <td style="padding:4px 8px">${p.termin || '–'}</td>
       <td style="padding:4px 8px">${esc(p.kostenstelle) || '–'}</td>
     </tr>`).join('');
@@ -4015,7 +4022,8 @@ function buildMultiReview() {
             <th style="padding:6px 8px;text-align:left">Bezeichnung</th>
             <th style="padding:6px 8px;text-align:right">Menge</th>
             <th style="padding:6px 8px;text-align:left">ME</th>
-            <th style="padding:6px 8px;text-align:right">Preis (€)</th>
+            <th style="padding:6px 8px;text-align:right">Einzelpreis (€)</th>
+            <th style="padding:6px 8px;text-align:right">Gesamt (€)</th>
             <th style="padding:6px 8px;text-align:left">Termin</th>
             <th style="padding:6px 8px;text-align:left">KST</th>
           </tr></thead>
@@ -4070,7 +4078,7 @@ async function submitMultiRequest() {
       Kostenstelle: p.kostenstelle || '',
     })));
 
-    const totalPreis = multiPositions.reduce((s,p) => s + (parseFloat(p.preis)||0), 0);
+    const totalPreis = multiPositions.reduce((s,p) => s + _lineSum(p.preis, p.menge), 0);
 
     const rawData = {
       Title:             autoTitle,
@@ -4772,7 +4780,7 @@ async function panelPosSave(itemId) {
   _syncPanelPosFromDOM();
   const posField = resolvedFields['Positionen'] || 'Positionen';
   const priceField = resolvedFields['GeschaetzterPreis'] || 'GeschaetzterPreis';
-  const totalPrice = _panelPosData.reduce((s,p) => s + (parseFloat(p.Preis)||0), 0);
+  const totalPrice = _panelPosData.reduce((s,p) => s + _lineSum(p.Preis, p.Menge), 0);
   try {
     await gPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, {
       [posField]: JSON.stringify(_panelPosData),
@@ -5011,7 +5019,7 @@ function renderPanel(item, editMode = false) {
                 <th class="pos-th pos-bez">Bezeichnung</th>
                 <th class="pos-th pos-right">Menge</th>
                 <th class="pos-th">ME</th>
-                <th class="pos-th pos-right">Preis (€)</th>
+                <th class="pos-th pos-right">Einzelpreis (€)</th>
                 <th class="pos-th">Benötigt bis</th>
                 <th class="pos-th">Kostenstelle</th>
                 ${canEditPos ? '<th class="pos-th"></th>' : ''}
