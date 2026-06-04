@@ -19,6 +19,7 @@ const FORM_FIELDS = [
   { key:'Beschreibung',          label:'Beschreibung',                   step:1, alsoTry:['Description','Beschreibung_x002f_Begruendung','Grund'] },
   { key:'Warengruppe',           label:'Warengruppe',                    step:1, required:true, alsoTry:['ProductCategory'] },
   { key:'Prioritaet',            label:'Priorität',                      step:1, alsoTry:['Priority','Priorit_x00e4_t'] },
+  { key:'AutoBedarfDatum',       label:'Datum zur Automatische Bedarfsanfrage', step:1, alsoTry:['AutomatischeBedarfsanfrageDatum','DatumAutomatischeBedarfsanfrage','DatumZurAutomatischenBedarfsanfrage','AutoBANFDatum'] },
   // Step 2: Menge
   { key:'Menge',                 label:'Menge',                          step:2, required:true, alsoTry:['Quantity','Amount'] },
   { key:'Mengeneinheit',         label:'Mengeneinheit',                  step:2, required:true, alsoTry:['Unit','UnitOfMeasure'] },
@@ -1303,7 +1304,7 @@ function detailRow(label, value) {
 function formatFieldValue(fd, v) {
   if (!v && v !== 0) return '';
   if (fd.key === 'GeschaetzterPreis' || fd.key === 'TatsaechlicherPreis') return fmtEuro(v);
-  if (fd.key === 'Termin' || fd.key === 'Lieferdatum') return v ? fmtDate(v) : '';
+  if (fd.key === 'Termin' || fd.key === 'Lieferdatum' || fd.key === 'AutoBedarfDatum') return v ? fmtDate(v) : '';
   return v;
 }
 
@@ -1412,6 +1413,7 @@ const WORKFLOW_STAGES = [
 // Farbe für einen Status anhand von Schlüsselwörtern bestimmen
 function statusColorFor(val) {
   const v = (val || '').toLowerCase();
+  if (/entwurf|automatisch erstellt/.test(v)) return { bg:'#f1f5f9', color:'#64748b' }; // grau
   if (/eingereicht/.test(v))            return { bg:'#fce7f3', color:'#be185d' };
   if (/werkleitung/.test(v))            return { bg:'#ffe4e6', color:'#be123c' };
   if (/prüf|pruef|prüf/.test(v))        return { bg:'#ccfbf1', color:'#0f766e' };
@@ -2304,7 +2306,7 @@ function initWizard() {
   }
   // Reset fields
   ['Title','Beschreibung','Warengruppe','Mengeneinheit',
-   'Mindestlagermenge','Termin','Artikelnummer','ExterneArtikelnummer',
+   'Mindestlagermenge','Termin','Artikelnummer','ExterneArtikelnummer','AutoBedarfDatum',
    'Lieferant','Lieferant2','Lieferant3','Lieferant4',
    'GeschaetzterPreis','Kostenstelle']
     .forEach(k => { const el = $id('f-'+k); if(el) el.value = ''; });
@@ -2384,6 +2386,7 @@ function wNext(step) {
       Prioritaet:           $id('f-Prioritaet').value,
       Artikelnummer:        $id('f-Artikelnummer').value.trim(),
       ExterneArtikelnummer: $id('f-ExterneArtikelnummer')?.value.trim() || '',
+      AutoBedarfDatum:      $id('f-AutoBedarfDatum')?.value || '',
     };
   } else if (step === 2) {
     const menge  = $id('f-Menge').value;
@@ -2602,7 +2605,7 @@ function reviewSection(title, rows) {
 
 // ── SUBMIT ───────────────────────────────────────────────────────────────────
 const NUMBER_FIELDS = new Set(['GeschaetzterPreis','Menge','Mindestlagermenge','TatsaechlicherPreis']);
-const DATE_FIELDS   = new Set(['Termin','Lieferdatum']);
+const DATE_FIELDS   = new Set(['Termin','Lieferdatum','AutoBedarfDatum']);
 const BOOL_FIELDS   = new Set(['LeadBuyerAbschluss']);
 
 // SP Graph requires ISO 8601 for DateTime columns: "2026-05-10T00:00:00Z"
@@ -4966,6 +4969,7 @@ function renderPanel(item, editMode = false) {
         ${fRow(FORM_FIELDS.find(f=>f.key==='Beschreibung'),'textarea')}
         ${fRow(FORM_FIELDS.find(f=>f.key==='Warengruppe'), 'text', WG_OPTS)}
         ${fRow(FORM_FIELDS.find(f=>f.key==='Prioritaet'),  'text', PRIO_OPTS)}
+        ${(() => { const fd = FORM_FIELDS.find(f=>f.key==='AutoBedarfDatum'); return (editMode || gv('AutoBedarfDatum')) ? fRow(fd, 'date') : ''; })()}
       </div>
       <div class="pf-section">
         <div class="pf-sec-title">Mengengaben</div>
