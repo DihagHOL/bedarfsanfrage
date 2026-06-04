@@ -410,11 +410,24 @@ async function getSpToken() {
 // ── GRAPH API ────────────────────────────────────────────────────────────────
 async function gGet(path) {
   const tok = await getToken();
-  const r   = await fetch(API + path, {
+  const url = path.startsWith('http') ? path : API + path; // absolute URL = @odata.nextLink
+  const r   = await fetch(url, {
     headers: { Authorization: 'Bearer ' + tok, 'Cache-Control': 'no-cache', Pragma: 'no-cache' }
   });
   if (!r.ok) throw new Error(`Graph GET ${r.status}: ${await r.text().catch(()=>'')}`);
   return r.json();
+}
+// Folgt @odata.nextLink und sammelt ALLE Seiten (mit Sicherheitslimit gegen Endlosschleifen).
+async function gGetAll(path, maxPages = 100) {
+  const out = [];
+  let next = path, pages = 0;
+  while (next && pages < maxPages) {
+    pages++;
+    const data = await gGet(next);
+    if (Array.isArray(data.value)) out.push(...data.value);
+    next = data['@odata.nextLink'] || null;
+  }
+  return out;
 }
 async function gPost(path, body) {
   const tok = await getToken();
@@ -601,11 +614,12 @@ async function loadItems(showToast = true) {
   const btn = $id('btn-reload');
   if (btn) btn.disabled = true;
   try {
-    const pageSize = account ? getSettings(account.username).pageSize : 100;
-    const data = await gGet(
-      `/sites/${siteId}/lists/${listId}/items?$expand=fields($select=*)&$top=${pageSize}&$orderby=createdDateTime desc`
+    // Vollständig laden: allen Seiten folgen (Graph max. 200/Seite), nicht nur die ersten N
+    const ps  = account ? (getSettings(account.username).pageSize || 100) : 100;
+    const top = Math.min(Math.max(ps, 50), 200);
+    allItems = await gGetAll(
+      `/sites/${siteId}/lists/${listId}/items?$expand=fields($select=*)&$top=${top}&$orderby=createdDateTime desc`
     );
-    allItems = data.value || [];
     if (showToast) toast('Daten aktualisiert', 'success');
     // Re-render current view
     if (currentView === 'dashboard') renderDashboard();
