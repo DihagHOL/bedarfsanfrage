@@ -2816,13 +2816,21 @@ function renderReports() {
   const prioOpts   = _uniqueReportVals('Prioritaet');
   const baOpts     = _uniqueReportVals('Beschaffungslogik');
 
+  // Mehrfachauswahl-Dropdown (Excel-Stil mit Checkboxen)
   const sel = (id, label, opts) => `
     <div class="rep-filter">
       <label>${label}</label>
-      <select class="rep-input" id="${id}" onchange="applyReportFilters()">
-        <option value="">Alle</option>
-        ${opts.map(o => `<option value="${esc(o)}">${esc(o)}</option>`).join('')}
-      </select>
+      <div class="rep-ms" data-field="${id}">
+        <button type="button" class="rep-ms-btn" onclick="toggleRepMs(this)">
+          <span class="rep-ms-label">Alle</span>
+          <span class="rep-ms-caret">▾</span>
+        </button>
+        <div class="rep-ms-panel" style="display:none">
+          ${opts.length ? opts.map(o =>
+            `<label class="rep-ms-opt"><input type="checkbox" value="${esc(o)}" onchange="onRepMsChange(this)"/> <span>${esc(o)}</span></label>`
+          ).join('') : '<div class="rep-ms-empty">– keine Werte –</div>'}
+        </div>
+      </div>
     </div>`;
   const txt = (id, label, ph) => `
     <div class="rep-filter">
@@ -2876,14 +2884,52 @@ function renderReports() {
   renderReportsTable();
 }
 
+// Liest die angehakten Werte eines Mehrfachauswahl-Dropdowns
+function repMsValues(field) {
+  const wrap = document.querySelector(`.rep-ms[data-field="${field}"]`);
+  if (!wrap) return [];
+  return [...wrap.querySelectorAll('input[type=checkbox]:checked')].map(c => c.value);
+}
+
+// Öffnet/schließt ein Dropdown; schließt andere offene
+function toggleRepMs(btn) {
+  const panel = btn.parentElement.querySelector('.rep-ms-panel');
+  const isOpen = panel.style.display !== 'none';
+  document.querySelectorAll('.rep-ms-panel').forEach(p => p.style.display = 'none');
+  document.querySelectorAll('.rep-ms-btn').forEach(b => b.classList.remove('open'));
+  if (!isOpen) { panel.style.display = 'block'; btn.classList.add('open'); }
+}
+
+// Aktualisiert Button-Label + filtert
+function onRepMsChange(cb) {
+  const wrap = cb.closest('.rep-ms');
+  const btn  = wrap.querySelector('.rep-ms-label');
+  const vals = [...wrap.querySelectorAll('input[type=checkbox]:checked')].map(c => c.value);
+  if (btn) {
+    btn.textContent = vals.length === 0 ? 'Alle'
+      : vals.length === 1 ? vals[0]
+      : `${vals.length} ausgewählt`;
+    btn.classList.toggle('active', vals.length > 0);
+  }
+  applyReportFilters();
+}
+
+// Schließt offene Dropdowns bei Klick außerhalb
+document.addEventListener('click', e => {
+  if (!e.target.closest('.rep-ms')) {
+    document.querySelectorAll('.rep-ms-panel').forEach(p => p.style.display = 'none');
+    document.querySelectorAll('.rep-ms-btn').forEach(b => b.classList.remove('open'));
+  }
+});
+
 function applyReportFilters() {
   reportFilters = {
     search:      ($id('rep-search')?.value || '').toLowerCase().trim(),
-    status:      $id('rep-status')?.value || '',
-    wg:          $id('rep-wg')?.value || '',
-    ma:          $id('rep-ma')?.value || '',
-    prio:        $id('rep-prio')?.value || '',
-    ba:          $id('rep-ba')?.value || '',
+    status:      repMsValues('rep-status'),
+    wg:          repMsValues('rep-wg'),
+    ma:          repMsValues('rep-ma'),
+    prio:        repMsValues('rep-prio'),
+    ba:          repMsValues('rep-ba'),
     lieferant:   ($id('rep-lieferant')?.value || '').toLowerCase().trim(),
     kst:         ($id('rep-kst')?.value || '').toLowerCase().trim(),
     be:          ($id('rep-be')?.value || '').toLowerCase().trim(),
@@ -2899,21 +2945,28 @@ function applyReportFilters() {
 
 function resetReportFilters() {
   reportFilters = {};
-  ['rep-search','rep-status','rep-wg','rep-ma','rep-prio','rep-ba','rep-lieferant',
-   'rep-kst','rep-be','rep-preis-min','rep-preis-max','rep-created-from','rep-created-to',
-   'rep-termin-from','rep-termin-to'].forEach(id => { const el = $id(id); if (el) el.value = ''; });
+  ['rep-search','rep-lieferant','rep-kst','rep-be','rep-preis-min','rep-preis-max',
+   'rep-created-from','rep-created-to','rep-termin-from','rep-termin-to']
+    .forEach(id => { const el = $id(id); if (el) el.value = ''; });
+  // Mehrfachauswahl zurücksetzen
+  document.querySelectorAll('.rep-ms').forEach(wrap => {
+    wrap.querySelectorAll('input[type=checkbox]').forEach(c => c.checked = false);
+    const lbl = wrap.querySelector('.rep-ms-label');
+    if (lbl) { lbl.textContent = 'Alle'; lbl.classList.remove('active'); }
+  });
   renderReportsTable();
 }
 
 function getReportRows() {
   const f = reportFilters;
   const get = (i, key) => { const c = REPORT_COLS.find(x => x.key === key); return c ? c.get(i) : ''; };
+  const has = arr => Array.isArray(arr) && arr.length > 0;
   let rows = allItems.filter(i => {
-    if (f.status    && (get(i,'Status') || '') !== f.status) return false;
-    if (f.wg        && (get(i,'Warengruppe') || '') !== f.wg) return false;
-    if (f.ma        && (get(i,'creator') || '') !== f.ma) return false;
-    if (f.prio      && (get(i,'Prioritaet') || '') !== f.prio) return false;
-    if (f.ba        && (get(i,'Beschaffungslogik') || '') !== f.ba) return false;
+    if (has(f.status) && !f.status.includes(get(i,'Status') || '')) return false;
+    if (has(f.wg)     && !f.wg.includes(get(i,'Warengruppe') || '')) return false;
+    if (has(f.ma)     && !f.ma.includes(get(i,'creator') || '')) return false;
+    if (has(f.prio)   && !f.prio.includes(get(i,'Prioritaet') || '')) return false;
+    if (has(f.ba)     && !f.ba.includes(get(i,'Beschaffungslogik') || '')) return false;
     if (f.lieferant && !String(get(i,'Lieferant') || '').toLowerCase().includes(f.lieferant)) return false;
     if (f.kst       && !String(get(i,'Kostenstelle') || '').toLowerCase().includes(f.kst)) return false;
     if (f.be        && !String(get(i,'Bestellnummer') || '').toLowerCase().includes(f.be)) return false;
@@ -3094,6 +3147,9 @@ function initSchulung() {
               <b>Ablehnen</b>.</li>
           <li>Nach <b>Freigegeben</b> können die Einkauf-Daten (Bestellnummer etc.) erfasst werden.</li>
         </ul>
+        <div class="schulung-tip">📨 Sobald Ihre Genehmigung erforderlich ist, werden Sie
+          <b>automatisch über Power Automate per E-Mail und Microsoft Teams</b> benachrichtigt.
+          Sie müssen die App also nicht ständig offen halten – die Aufforderung kommt zu Ihnen.</div>
         <div class="schulung-tip">💡 In „Meine Anfragen" sehen Sie nur den Fortschritt – die
           Genehmigungsschaltflächen erscheinen dort nicht.</div>
       </section>
@@ -3144,13 +3200,18 @@ function initSchulung() {
       <section class="schulung-sec" id="sch-9">
         <h2>9 · Häufige Fragen</h2>
         <p><b>Warum sehe ich keine Genehmigungs-Buttons?</b><br>
-           Diese erscheinen nur im Dashboard / „Alle Anfragen", nicht in „Meine Anfragen".</p>
+           Die Genehmigungs-Aufforderung wird Ihnen <b>per Power Automate automatisch per
+           E-Mail und Microsoft Teams</b> zugestellt – Sie müssen also nicht selbst danach suchen.
+           In der App erscheinen die Schaltflächen „Genehmigen / Ablehnen" zusätzlich im
+           <b>Dashboard / „Alle Anfragen"</b>, jedoch nicht in „Meine Anfragen".</p>
         <p><b>Meine Änderung ist weg?</b><br>
            Prüfen Sie, ob die Anfrage noch im Status „In Prüfung (Einkauf)" ist – nur dann ist
            sie bearbeitbar.</p>
         <p><b>Wo werden Favoriten gespeichert?</b><br>
            Lokal in Ihrem Browser. Bei Browserwechsel oder Cache-Löschung sind sie nicht mehr da.</p>
-        <div class="schulung-tip">📨 Weitere Fragen? Wenden Sie sich an den Einkauf / IT.</div>
+        <div class="schulung-tip">📨 Problem oder Frage an die IT? Schreiben Sie einfach eine
+          E-Mail an <a href="mailto:ticket@dihag.com"><b>ticket@dihag.com</b></a> – es wird
+          <b>automatisch ein Ticket erstellt</b> und dem passenden Kollegen zugeordnet.</div>
       </section>
     </div>`;
 }
