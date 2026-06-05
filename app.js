@@ -323,8 +323,10 @@ async function bootDone() {
     await loadAccessConfig();
     // Wiedervorlagen aus SharePoint laden (nicht blockierend für den Start)
     initFavorites().catch(() => {});
-    // Fällige automatische Entwürfe anlegen (nur Admin; nicht blockierend)
-    processAutoDrafts().catch(() => {});
+    // Hinweis: Automatische Entwürfe werden jetzt vom geplanten GitHub-Actions-Cron
+    // (scripts/auto-drafts.mjs) angelegt – die App-seitige Erstellung ist deaktiviert,
+    // um Doppelanlagen zu vermeiden.
+    // processAutoDrafts().catch(() => {});
     $id('boot').style.display = 'none';
     $id('app').style.display  = 'flex';
     applyNavVisibility(); // Nav-Sichtbarkeit nach geladener Zugriffskonfiguration setzen

@@ -1,0 +1,28 @@
+name: Automatische Bedarfsanfrage-Entwürfe
+
+on:
+  schedule:
+    # Täglich 05:00 UTC (~06:00 Winter / 07:00 Sommer DE).
+    # GitHub-Cron kann sich um einige Minuten verzögern – das ist hier unkritisch.
+    - cron: '0 5 * * *'
+  workflow_dispatch: {}   # Manuell auslösbar (Tab „Actions" → Run workflow) zum Testen
+
+# Mehrfachläufe vermeiden, falls ein Lauf noch aktiv ist
+concurrency:
+  group: auto-drafts
+  cancel-in-progress: false
+
+jobs:
+  drafts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Fällige Entwürfe anlegen
+        run: node scripts/auto-drafts.mjs
+        env:
+          TENANT_ID:     ${{ secrets.TENANT_ID }}
+          CLIENT_ID:     ${{ secrets.CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
