@@ -4410,18 +4410,11 @@ async function openPanel(itemId) {
   const item  = allItems.find(i => String(i.id) === panelItemId);
   if (!item) return;
 
-  // Auto-advance: NICHT durch den Antragsteller auslösen. Der Wechsel
-  // Eingereicht → In Prüfung (Einkauf) bedeutet „der Einkauf hat die Anfrage in die
-  // Hand genommen" – das darf nur passieren, wenn jemand ANDERES als der Ersteller
-  // die Anfrage öffnet (sonst würde der Antragsteller selbst seine Anfrage vorrücken).
-  const creatorEmail = (item.createdBy?.user?.email || '').trim().toLowerCase();
-  const viewerIsCreator = !!creatorEmail && _myIdentities().has(creatorEmail);
-  // Diagnose (bei Bedarf in F12-Konsole prüfen)
-  console.log('[auto-advance] Identitäten:', [..._myIdentities()],
-    '| Einkäufer/Admin:', canApprove(), '| Ersteller:', creatorEmail || '(unbekannt)',
-    '| istErsteller:', viewerIsCreator, '| Status:', getStatusVal(item) || '(leer→Eingereicht)');
-  // Nur definierte Einkäufer (oder Admin) lösen den Statuswechsel aus – nicht der Ersteller.
-  if (!viewerIsCreator && canApprove()) {
+  // Auto-advance: Statuswechsel Eingereicht → In Prüfung (Einkauf) beim Öffnen.
+  // Nur Einkäufer/Admin lösen ihn aus (canApprove). Auch bei EIGENEN Anfragen erlaubt –
+  // ein Einkäufer darf seine eigene Anfrage in die Prüfung nehmen. Normale Antragsteller
+  // sind durch canApprove() ohnehin ausgeschlossen.
+  if (canApprove()) {
     const sv        = (getStatusVal(item) || 'Eingereicht').trim(); // leeres Feld = Eingereicht
     const statusCol = resolvedFields['Status'] || 'Status';
     let   advanced  = false;
