@@ -4422,7 +4422,9 @@ async function openPanel(itemId) {
         if (cached?.fields) cached.fields[statusCol] = target;
         advanced = true;
       } catch(e) {
-        toast('Status-Update fehlgeschlagen: ' + e.message, 'error');
+        const denied = /\b403\b|accessdenied|denied/i.test(e.message);
+        toast('Status-Update fehlgeschlagen: ' + e.message
+          + (denied ? ' – vermutlich fehlen Schreibrechte (Mitwirken) auf der SharePoint-Liste.' : ''), 'error');
       }
     }
 
