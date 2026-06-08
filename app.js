@@ -732,10 +732,27 @@ let accessUsers         = {}; // { 'upn@dihag.com': { dashboard:true, reports:tr
 
 function myUPN() { return (account?.username || '').trim().toLowerCase(); }
 
+// Alle Identitäts-Bezeichner des aktuellen Nutzers (kleingeschrieben).
+// Wichtig bei Gast-/Fremddomänen-Konten (z. B. @shb-guss.de): der angemeldete
+// „username" kann vom E-Mail-Schlüssel in der Zugriffsliste abweichen – daher
+// prüfen wir zusätzlich die Token-Claims (email, preferred_username, upn, emails).
+function _myIdentities() {
+  const ids = new Set();
+  const add = v => { if (v) ids.add(String(v).trim().toLowerCase()); };
+  add(account?.username);
+  const c = account?.idTokenClaims || {};
+  add(c.email); add(c.preferred_username); add(c.upn);
+  if (Array.isArray(c.emails)) c.emails.forEach(add);
+  return ids;
+}
+
 function canAccess(feature) {
   if (isAdmin()) return true;
-  const u = accessUsers[myUPN()];
-  return !!(u && u[feature]);
+  for (const id of _myIdentities()) {
+    const u = accessUsers[id];
+    if (u && u[feature]) return true;
+  }
+  return false;
 }
 function canSeeDashboard() { return canAccess('dashboard'); }
 // Einkäufer: darf beim Öffnen den Status auf „In Prüfung (Einkauf)" setzen und
@@ -4383,8 +4400,11 @@ async function openPanel(itemId) {
   // Hand genommen" – das darf nur passieren, wenn jemand ANDERES als der Ersteller
   // die Anfrage öffnet (sonst würde der Antragsteller selbst seine Anfrage vorrücken).
   const creatorEmail = (item.createdBy?.user?.email || '').trim().toLowerCase();
-  const myEmail      = (account?.username || '').trim().toLowerCase();
-  const viewerIsCreator = !!myEmail && myEmail === creatorEmail;
+  const viewerIsCreator = !!creatorEmail && _myIdentities().has(creatorEmail);
+  // Diagnose (bei Bedarf in F12-Konsole prüfen)
+  console.log('[auto-advance] Identitäten:', [..._myIdentities()],
+    '| Einkäufer/Admin:', canApprove(), '| Ersteller:', creatorEmail || '(unbekannt)',
+    '| istErsteller:', viewerIsCreator, '| Status:', getStatusVal(item) || '(leer→Eingereicht)');
   // Nur definierte Einkäufer (oder Admin) lösen den Statuswechsel aus – nicht der Ersteller.
   if (!viewerIsCreator && canApprove()) {
     const sv        = (getStatusVal(item) || 'Eingereicht').trim(); // leeres Feld = Eingereicht
