@@ -319,6 +319,8 @@ async function bootDone() {
   try {
     await discoverSP();
     await loadItems(false);
+    // Echte Identitäten (UPN/Mail/Aliase) laden – Basis für die Zugriffsprüfung
+    await loadMyIdentities();
     // Zentrale Zugriffssteuerung laden (bestimmt Sichtbarkeit von Dashboard/Reports/Importer)
     await loadAccessConfig();
     // Wiedervorlagen aus SharePoint laden (nicht blockierend für den Start)
@@ -732,12 +734,25 @@ let accessUsers         = {}; // { 'upn@dihag.com': { dashboard:true, reports:tr
 
 function myUPN() { return (account?.username || '').trim().toLowerCase(); }
 
-// Alle Identitäts-Bezeichner des aktuellen Nutzers (kleingeschrieben).
-// Wichtig bei Gast-/Fremddomänen-Konten (z. B. @shb-guss.de): der angemeldete
-// „username" kann vom E-Mail-Schlüssel in der Zugriffsliste abweichen – daher
-// prüfen wir zusätzlich die Token-Claims (email, preferred_username, upn, emails).
+// Identitäten aus Graph /me (UPN, Mail, Alias-/Proxy-Adressen) – beim Start geladen.
+// Entscheidend bei Membern mit Zweitdomäne: dort ist der Login-UPN oft ≠ E-Mail,
+// und der E-Mail-Claim fehlt im Token. /me liefert die echten Adressen zuverlässig.
+let _meIds = null;
+async function loadMyIdentities() {
+  _meIds = new Set();
+  try {
+    const me = await gGet('/me?$select=userPrincipalName,mail,otherMails,proxyAddresses');
+    const add = v => { if (v) _meIds.add(String(v).replace(/^smtp:/i, '').trim().toLowerCase()); };
+    add(me.userPrincipalName); add(me.mail);
+    (me.otherMails || []).forEach(add);
+    (me.proxyAddresses || []).forEach(add);
+  } catch (e) { console.warn('[ident] /me konnte nicht geladen werden:', e.message); }
+}
+
+// Alle Identitäts-Bezeichner des aktuellen Nutzers (kleingeschrieben):
+// Graph /me-Adressen + angemeldeter „username" + Token-Claims.
 function _myIdentities() {
-  const ids = new Set();
+  const ids = new Set(_meIds || []);
   const add = v => { if (v) ids.add(String(v).trim().toLowerCase()); };
   add(account?.username);
   const c = account?.idTokenClaims || {};
