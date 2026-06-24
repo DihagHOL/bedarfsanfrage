@@ -1870,6 +1870,7 @@ function openBeschModal(itemId) {
     <button class="btn btn-ghost" onclick="closeModal()">Abbrechen</button>
     <button class="btn btn-primary" onclick="saveBeschData(${itemId})">Speichern</button>`;
   $id('modal-overlay').classList.remove('hidden');
+  initKostenstAuto($id('b-kostenstelle'));
 }
 
 async function saveBeschData(itemId) {
@@ -2052,7 +2053,7 @@ function initKostenstAuto(inputEl) {
     if (!items.length) { hide(); return; }
     activeIdx = -1;
     const dd = getOrCreate();
-    dd.innerHTML = items.slice(0, 12).map((e, i) =>
+    dd.innerHTML = items.slice(0, 50).map((e, i) =>
       `<div class="tid-ac-item" data-nr="${esc(e.nr)}" data-idx="${i}">
         <span class="tid-ac-nr">${esc(e.nr)}</span>
         <span class="tid-ac-name">${esc(e.label)}</span>
@@ -2070,14 +2071,19 @@ function initKostenstAuto(inputEl) {
     inputEl.value = entry.nr + ' – ' + entry.label;
     hide();
   }
-  inputEl.addEventListener('input', () => {
-    const q = inputEl.value.trim().toLowerCase();
-    if (q.length < 1) { hide(); return; }
-    const matches = KOSTENST_DATA.filter(e =>
-      e.nr.includes(q) || e.label.toLowerCase().includes(q)
-    );
-    show(matches);
-  });
+  // Liefert die (sortierte) Trefferliste. Leere Eingabe = komplette Liste zum
+  // Durchblättern – so kann die Kostenstelle ausgewählt werden, ohne sie zu kennen.
+  function _kstMatches(q) {
+    q = (q || '').trim().toLowerCase();
+    const list = q.length < 1
+      ? KOSTENST_DATA.slice()
+      : KOSTENST_DATA.filter(e => e.nr.toLowerCase().includes(q) || e.label.toLowerCase().includes(q));
+    return list.sort((a, b) =>
+      (parseInt(a.nr, 10) || 0) - (parseInt(b.nr, 10) || 0) || a.nr.localeCompare(b.nr));
+  }
+  // Fokus/Klick: ganze Liste zum Auswählen anzeigen. Tippen: nach Nr. ODER Bezeichnung filtern.
+  inputEl.addEventListener('focus', () => show(_kstMatches('')));
+  inputEl.addEventListener('input', () => show(_kstMatches(inputEl.value)));
   inputEl.addEventListener('keydown', e => {
     if (!dropdown || dropdown.style.display === 'none') return;
     const items = dropdown.querySelectorAll('.tid-ac-item');
@@ -2384,6 +2390,18 @@ function applyWizardPrefill(data) {
   [2,3,4].forEach(n => {
     if (data['Lieferant' + n]) { const grp = $id('lieferant-extra-' + n); if (grp) grp.style.display = ''; }
   });
+  // Einzelpreis ableiten → Menge × EP gilt auch hier. Expliziter Einzelpreis hat Vorrang,
+  // sonst aus „Gesamtwert ÷ Menge" der Vorlage. So führt eine geänderte Menge zu neuem Gesamtwert.
+  const epEl = $id('f-Einzelpreis');
+  if (epEl) {
+    const menge = parseFloat(String(data.Menge ?? '').replace(',', '.')) || 0;
+    const total = parseFloat(String(data.GeschaetzterPreis ?? '').replace(',', '.')) || 0;
+    const ep = (data.Einzelpreis != null && data.Einzelpreis !== '')
+      ? (parseFloat(String(data.Einzelpreis).replace(',', '.')) || 0)
+      : (menge > 0 && total > 0 ? total / menge : 0);
+    if (ep > 0) epEl.value = (Math.round(ep * 100) / 100);
+  }
+  recalcEinzelPreis();
 }
 
 function initWizard() {
@@ -2409,8 +2427,12 @@ function initWizard() {
   ['Title','Beschreibung','Warengruppe','Mengeneinheit',
    'Mindestlagermenge','Termin','Artikelnummer','ExterneArtikelnummer','AutoBedarfDatum',
    'Lieferant','Lieferant2','Lieferant3','Lieferant4',
-   'GeschaetzterPreis','Kostenstelle']
+   'Einzelpreis','GeschaetzterPreis','Kostenstelle']
     .forEach(k => { const el = $id('f-'+k); if(el) el.value = ''; });
+  // Bestellvolumen-Feld in den frei eingebbaren Zustand zurücksetzen (kein Auto-Wert)
+  const bvEl = $id('f-GeschaetzterPreis');
+  if (bvEl) { bvEl.readOnly = false; bvEl.classList.remove('input-computed'); }
+  const bvNote = $id('bv-auto-note'); if (bvNote) bvNote.textContent = '';
   const prioEl = $id('f-Prioritaet');
   if (prioEl) {
     // SP populate-code may have replaced HTML options with SP choice values (e.g. "HIGH").
@@ -2472,6 +2494,8 @@ function showStep(n) {
     if (i < n)  s.classList.add('done');
     if (i === n) s.classList.add('active');
   });
+  // Beim Wechsel auf die Beschaffungsdetails das Bestellvolumen aus Menge × Einzelpreis aktualisieren
+  if (n === 3) recalcEinzelPreis();
 }
 
 function wNext(step) {
@@ -2552,14 +2576,36 @@ function addLieferant(n) {
   $id('f-Lieferant' + n)?.focus();
 }
 
+// Bestellvolumen = Menge × Einzelpreis. Sobald ein Einzelpreis (>0) gesetzt ist, wird das
+// Bestellvolumen automatisch berechnet und schreibgeschützt. Ohne Einzelpreis bleibt das
+// Feld frei eingebbar (Pauschalbetrag). Greift in JEDEM Fall – auch aus Wiedervorlagen/
+// Auto-Entwürfen: dort wird der Einzelpreis aus „Gesamtwert ÷ Menge" abgeleitet, sodass
+// eine geänderte Menge den Gesamtwert sofort neu berechnet.
+function recalcEinzelPreis() {
+  const totalEl = $id('f-GeschaetzterPreis');
+  if (!totalEl) return;
+  const ep    = parseFloat(String($id('f-Einzelpreis')?.value || '').replace(',', '.')) || 0;
+  const menge = parseFloat(String($id('f-Menge')?.value || '').replace(',', '.')) || 0;
+  const note  = $id('bv-auto-note');
+  if (ep > 0) {
+    totalEl.value    = (Math.round(ep * (menge || 1) * 100) / 100);
+    totalEl.readOnly = true;
+    totalEl.classList.add('input-computed');
+    if (note) note.textContent = `= ${menge || 1} × ${fmtEuro(ep)}`;
+  } else {
+    totalEl.readOnly = false;
+    totalEl.classList.remove('input-computed');
+    if (note) note.textContent = '';
+  }
+  updatePreisHint();
+}
+
 function updatePreisHint() {
   const preis = parseFloat($id('f-GeschaetzterPreis').value) || 0;
   const lba   = $id('f-LeadBuyerAbschluss')?.checked ?? false;
   const hint  = $id('preis-route-hint');
   if (preis > 0) {
-    let text = genehmigungsweg(preis);
-    if (lba) text = text.replace(/ \(entfällt bei Lead-Buyer-Abschluss\)/g, ' ✓ entfällt');
-    hint.textContent = text;
+    hint.textContent = genehmigungsweg(preis, lba);
     hint.style.display = 'block';
   } else {
     hint.style.display = 'none';
@@ -2622,34 +2668,32 @@ function renderWizardFiles() {
   if (zone) zone.classList.toggle('has-files', wizardFilesArr.length > 0);
 }
 
-function genehmigungsweg(gesamt) {
-  let stufe, freigabe, angebote;
+function genehmigungsweg(gesamt, leadBuyer = false) {
+  let stufe, freigeber, angebote;
   if (gesamt <= 500) {
-    stufe    = 1;
-    freigabe = 'Anforderer Fachabt. + Einkäufer Werk';
-    angebote = 'kein Angebot nötig';
+    stufe = 1; freigeber = ['Anforderer Fachabt.', 'Einkäufer Werk']; angebote = 'kein Angebot nötig';
   } else if (gesamt <= 2500) {
-    stufe    = 2;
-    freigabe = 'Einkäufer Werk + Werkleiter';
-    angebote = 'mind. 2 Angebote (entfällt bei Lead-Buyer-Abschluss)';
+    stufe = 2; freigeber = ['Einkäufer Werk', 'Werkleiter'];           angebote = 'mind. 2 Angebote';
   } else if (gesamt <= 5000) {
-    stufe    = 2;
-    freigabe = 'Einkäufer Werk + Werkleiter';
-    angebote = 'mind. 2–3 Angebote (entfällt bei Lead-Buyer-Abschluss)';
+    stufe = 2; freigeber = ['Einkäufer Werk', 'Werkleiter'];           angebote = 'mind. 2–3 Angebote';
   } else if (gesamt <= 10000) {
-    stufe    = 3;
-    freigabe = 'Werkleiter + Einkaufsleitung Holding';
-    angebote = 'mind. 3 Angebote (entfällt bei Lead-Buyer-Abschluss)';
+    stufe = 3; freigeber = ['Werkleiter', 'Einkaufsleitung Holding'];  angebote = 'mind. 3 Angebote';
   } else if (gesamt <= 50000) {
-    stufe    = 3;
-    freigabe = 'Werkleiter + Einkaufsleitung Holding';
-    angebote = 'mind. 3–4 Angebote (entfällt bei Lead-Buyer-Abschluss)';
+    stufe = 3; freigeber = ['Werkleiter', 'Einkaufsleitung Holding'];  angebote = 'mind. 3–4 Angebote';
   } else {
-    stufe    = 4;
-    freigabe = 'Einkaufsleitung Holding + GF kfm. Leitung Holding';
-    angebote = 'Europ. Ausschreibung (mind. 5 Angebote, entfällt bei Lead-Buyer-Abschluss)';
+    stufe = 4; freigeber = ['Einkaufsleitung Holding', 'GF kfm. Leitung Holding'];
+    angebote = 'Europ. Ausschreibung (mind. 5 Angebote)';
   }
-  return `Stufe ${stufe} · ${fmtEuro(gesamt)} · ${angebote} · Freigabe: ${freigabe}`;
+  // Angebotspflicht: ab Stufe 2 entfällt sie beim Lead-Buyer-Abschluss.
+  let angeboteText = angebote;
+  if (stufe > 1) angeboteText += leadBuyer ? ' ✓ entfällt' : ' (entfällt bei Lead-Buyer-Abschluss)';
+  // Lead-Buyer-Abschluss macht die Holding-Freigabe (Einkaufsleitung Holding) überflüssig.
+  let fg = freigeber;
+  if (leadBuyer) {
+    const filtered = freigeber.filter(f => !/Einkaufsleitung Holding/i.test(f));
+    if (filtered.length) fg = filtered;
+  }
+  return `Stufe ${stufe} · ${fmtEuro(gesamt)} · ${angeboteText} · Freigabe: ${fg.join(' + ')}`;
 }
 
 function buildReview() {
@@ -2678,11 +2722,12 @@ function buildReview() {
         ['Lieferant 2', d.Lieferant2],
         ['Lieferant 3', d.Lieferant3],
         ['Lieferant 4', d.Lieferant4],
+        ['Einzelpreis (€)', (() => { const v = parseFloat(String($id('f-Einzelpreis')?.value || '').replace(',', '.')) || 0; return v > 0 ? fmtEuro(v) : null; })()],
         ['Bestellvolumen in €', d.GeschaetzterPreis ? fmtEuro(d.GeschaetzterPreis) : null],
         ['Kostenstelle', d.Kostenstelle],
       ])}
     </div>
-    ${d.GeschaetzterPreis ? `<div class="info-box info" style="margin-top:12px">${genehmigungsweg(d.GeschaetzterPreis)}</div>` : ''}
+    ${d.GeschaetzterPreis ? `<div class="info-box info" style="margin-top:12px">${genehmigungsweg(d.GeschaetzterPreis, d.LeadBuyerAbschluss === true || /^(true|ja|yes|1)$/i.test(String(d.LeadBuyerAbschluss || '')))}</div>` : ''}
     <div class="info-box info" style="margin-top:10px">
       Nach dem Einreichen wird <strong>Power Automate</strong> automatisch den Genehmigungsprozess starten und den zuständigen Genehmiger per E-Mail / Teams benachrichtigen.
     </div>`;
@@ -4419,8 +4464,10 @@ async function openPanel(itemId) {
     const statusCol = resolvedFields['Status'] || 'Status';
     let   advanced  = false;
 
-    // Eingereicht → In Prüfung (Einkauf)
-    if (/^eingereicht$/i.test(sv)) {
+    // Eingereicht ODER „Automatisch erstellter Entwurf" → In Prüfung (Einkauf).
+    // Öffnet ein Einkäufer einen Auto-Entwurf, soll er wie eine normale Anfrage in die
+    // Prüfung wandern (statt im grauen Entwurfsstatus zu verbleiben).
+    if (/^eingereicht$/i.test(sv) || /automatisch erstellter entwurf/i.test(sv)) {
       const target = statusChoices.find(c => /pr[üu]fung/i.test(c) && /einkauf/i.test(c) && !/strategisch/i.test(c))
                   || 'In Prüfung (Einkauf)';
       try {
@@ -4987,7 +5034,9 @@ function renderPanel(item, editMode = false) {
 
   const preis = parseFloat(gv('GeschaetzterPreis')) || 0;
   const menge = parseFloat(gv('Menge')) || 1;
-  const gesamtHint = !editMode && preis > 0 ? genehmigungsweg(preis) : '';
+  const lbRaw     = gv('LeadBuyerAbschluss');
+  const leadBuyer = lbRaw === true || /^(true|ja|yes|1)$/i.test(String(lbRaw || ''));
+  const gesamtHint = !editMode && preis > 0 ? genehmigungsweg(preis, leadBuyer) : '';
 
   const orderNr  = gv('Bestellnummer');
   const lieferd  = gv('Lieferdatum');

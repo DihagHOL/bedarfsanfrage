@@ -940,6 +940,11 @@ details#attach-extra-wrap[open] .attach-more-toggle { color:#374151; }
   margin-left: 4px; font-style: italic;
 }
 
+/* Automatisch berechnetes (schreibgeschütztes) Feld, z. B. Bestellvolumen = Menge × Einzelpreis */
+.input-computed {
+  background: #f3f4f6; color: #374151; cursor: not-allowed;
+}
+
 /* ── Tabellen-Importer ── */
 .imp-card {
   background: #fff; border: 1px solid #e5e9ef; border-radius: 12px; padding: 18px 20px;
