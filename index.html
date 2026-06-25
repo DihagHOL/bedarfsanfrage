@@ -244,7 +244,7 @@
             <div class="form-grid">
               <div class="form-group">
                 <label>Menge <span class="req">*</span></label>
-                <input type="number" id="f-Menge" min="0.001" step="any" placeholder="1" value="1" oninput="recalcEinzelPreis()"/>
+                <input type="number" id="f-Menge" min="0.001" step="any" placeholder="1" value="1"/>
                 <div class="field-hint" id="hint-Menge"></div>
               </div>
               <div class="form-group">
@@ -339,14 +339,14 @@
                 <input type="text" id="f-Lieferant4" placeholder="optional"/>
                 <div class="field-hint" id="hint-Lieferant4"></div>
               </div>
-              <div class="form-group">
-                <label>Einzelpreis (€) <span class="field-sub">pro Mengeneinheit</span></label>
-                <input type="number" id="f-Einzelpreis" min="0" step="0.01" placeholder="0,00" oninput="recalcEinzelPreis()"/>
-                <div class="field-hint" id="hint-Einzelpreis">Bestellvolumen wird automatisch aus Menge × Einzelpreis berechnet.</div>
+              <div class="form-group full">
+                <label>Mengen × Einzelpreise <span class="req">*</span> <span class="field-sub">mehrere Zeilen möglich – Bestellvolumen wird summiert</span></label>
+                <div id="einzel-lines"></div>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="einzelLineAdd()" style="margin-top:2px">+ Zeile hinzufügen</button>
               </div>
               <div class="form-group">
-                <label>Bestellvolumen in € <span class="req">*</span> <span class="field-sub" id="bv-auto-note"></span></label>
-                <input type="number" id="f-GeschaetzterPreis" min="0" step="0.01" placeholder="0,00" oninput="updatePreisHint()"/>
+                <label>Bestellvolumen in € <span class="field-sub" id="bv-auto-note">automatisch berechnet</span></label>
+                <input type="number" id="f-GeschaetzterPreis" min="0" step="0.01" placeholder="0,00" readonly class="input-computed"/>
                 <div class="field-hint" id="hint-GeschaetzterPreis"></div>
                 <div id="preis-route-hint" class="info-box info" style="display:none;margin-top:6px"></div>
                 <label class="checkbox-inline" style="margin-top:8px;display:flex;align-items:center;gap:6px;font-size:.84rem;cursor:pointer">

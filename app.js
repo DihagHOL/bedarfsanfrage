@@ -133,6 +133,9 @@ let currentView = 'dashboard';
 let prevView    = 'dashboard';
 let wizardData  = {};
 let wizardFilesArr = []; // Drag-and-drop file store for wizard attachments
+// Einzelanfrage: mehrere (Menge × Einzelpreis)-Zeilen; Bestellvolumen = Σ(Menge×EP)
+let einzelLines = [{ stueck: '', preis: '' }];
+const _ezNum = v => parseFloat(String(v ?? '').replace(',', '.')) || 0;
 let panelItemId = null;
 let panelEditMode = false; // true, solange ein Panel im Bearbeiten-Modus offen ist (pausiert Auto-Refresh)
 // SP column may be misspelled "Stauts" in some tenants → always try both
@@ -1651,6 +1654,10 @@ async function openOrderModal(itemId) {
   const tatPreis   = getField(item,'TatsaechlicherPreis') || getField(item, resolvedFields['TatsaechlicherPreis']) || '';
   const termin     = getField(item,'Termin')              || getField(item, resolvedFields['Termin'])              || '';
   const geschPreis = getField(item,'GeschaetzterPreis')   || getField(item, resolvedFields['GeschaetzterPreis'])   || '';
+  const lief1      = getField(item,'Lieferant')           || getField(item, resolvedFields['Lieferant'])           || '';
+  const lief2      = getField(item,'Lieferant2')          || getField(item, resolvedFields['Lieferant2'])          || '';
+  const lief3      = getField(item,'Lieferant3')          || getField(item, resolvedFields['Lieferant3'])          || '';
+  const lief4      = getField(item,'Lieferant4')          || getField(item, resolvedFields['Lieferant4'])          || '';
 
   // Fetch existing attachments
   let existingFiles = [];
@@ -1684,6 +1691,18 @@ async function openOrderModal(itemId) {
       <input type="text" id="m-ordernr" value="${esc(orderNr)}" placeholder="z. B. BE252093"
         oninput="checkBeDuplicate(this.value, ${itemId})"/>
       <div id="be-warn" class="be-warn" style="display:none"></div>
+    </div>
+    <div class="form-group" style="margin-bottom:12px">
+      <label>Lieferant 1</label>
+      <input type="text" id="m-lief1" value="${esc(lief1)}" placeholder="Firmenname oder Lieferanten-Nr."/>
+      <details style="margin-top:6px" ${(lief2 || lief3 || lief4) ? 'open' : ''}>
+        <summary class="attach-more-toggle">+ Weitere Lieferanten</summary>
+        <div style="margin-top:6px;display:flex;flex-direction:column;gap:6px">
+          <input type="text" id="m-lief2" value="${esc(lief2)}" placeholder="Lieferant 2 (Alternative)"/>
+          <input type="text" id="m-lief3" value="${esc(lief3)}" placeholder="Lieferant 3 (Alternative)"/>
+          <input type="text" id="m-lief4" value="${esc(lief4)}" placeholder="Lieferant 4 (Alternative)"/>
+        </div>
+      </details>
     </div>
     <div class="form-group" style="margin-bottom:12px">
       <label style="display:flex;align-items:center;justify-content:space-between">
@@ -1775,6 +1794,11 @@ async function saveOrderData(itemId) {
   add('Bestellnummer', orderNr);
   if (delivery) add('Lieferdatum', toSpDate(delivery, resolvedFields['Lieferdatum'] || 'Lieferdatum'));
   if (price) add('TatsaechlicherPreis', parseFloat(price));
+  // Lieferanten (bearbeitbar): nur nicht-leere Werte schreiben – verhindert versehentliches Leeren.
+  add('Lieferant',  $id('m-lief1')?.value.trim());
+  add('Lieferant2', $id('m-lief2')?.value.trim());
+  add('Lieferant3', $id('m-lief3')?.value.trim());
+  add('Lieferant4', $id('m-lief4')?.value.trim());
   // Wenn Bestellnummer vergeben → Status auf "Bestellt" setzen
   if (orderNr) {
     const statusCol = resolvedFields['Status'] || 'Status';
@@ -2390,18 +2414,14 @@ function applyWizardPrefill(data) {
   [2,3,4].forEach(n => {
     if (data['Lieferant' + n]) { const grp = $id('lieferant-extra-' + n); if (grp) grp.style.display = ''; }
   });
-  // Einzelpreis ableiten → Menge × EP gilt auch hier. Expliziter Einzelpreis hat Vorrang,
-  // sonst aus „Gesamtwert ÷ Menge" der Vorlage. So führt eine geänderte Menge zu neuem Gesamtwert.
-  const epEl = $id('f-Einzelpreis');
-  if (epEl) {
-    const menge = parseFloat(String(data.Menge ?? '').replace(',', '.')) || 0;
-    const total = parseFloat(String(data.GeschaetzterPreis ?? '').replace(',', '.')) || 0;
-    const ep = (data.Einzelpreis != null && data.Einzelpreis !== '')
-      ? (parseFloat(String(data.Einzelpreis).replace(',', '.')) || 0)
-      : (menge > 0 && total > 0 ? total / menge : 0);
-    if (ep > 0) epEl.value = (Math.round(ep * 100) / 100);
-  }
-  recalcEinzelPreis();
+  // Preiszeile aus der Vorlage ableiten: eine Zeile mit Menge + Einzelpreis
+  // (= Gesamtwert ÷ Menge). Bestellvolumen rechnet sich daraus neu; eine geänderte
+  // Menge ergibt sofort einen neuen Gesamtwert.
+  const mengeP = _ezNum(data.Menge);
+  const totalP = _ezNum(data.GeschaetzterPreis);
+  const epP    = mengeP > 0 && totalP > 0 ? Math.round((totalP / mengeP) * 100) / 100 : 0;
+  einzelLines = [{ stueck: mengeP > 0 ? data.Menge : '', preis: epP > 0 ? epP : '' }];
+  renderEinzelLines();
 }
 
 function initWizard() {
@@ -2427,12 +2447,11 @@ function initWizard() {
   ['Title','Beschreibung','Warengruppe','Mengeneinheit',
    'Mindestlagermenge','Termin','Artikelnummer','ExterneArtikelnummer','AutoBedarfDatum',
    'Lieferant','Lieferant2','Lieferant3','Lieferant4',
-   'Einzelpreis','GeschaetzterPreis','Kostenstelle']
+   'GeschaetzterPreis','Kostenstelle']
     .forEach(k => { const el = $id('f-'+k); if(el) el.value = ''; });
-  // Bestellvolumen-Feld in den frei eingebbaren Zustand zurücksetzen (kein Auto-Wert)
-  const bvEl = $id('f-GeschaetzterPreis');
-  if (bvEl) { bvEl.readOnly = false; bvEl.classList.remove('input-computed'); }
-  const bvNote = $id('bv-auto-note'); if (bvNote) bvNote.textContent = '';
+  // Mengen×Einzelpreis-Zeilen zurücksetzen (Bestellvolumen bleibt schreibgeschützt)
+  einzelLines = [{ stueck: '', preis: '' }];
+  renderEinzelLines();
   const prioEl = $id('f-Prioritaet');
   if (prioEl) {
     // SP populate-code may have replaced HTML options with SP choice values (e.g. "HIGH").
@@ -2494,8 +2513,15 @@ function showStep(n) {
     if (i < n)  s.classList.add('done');
     if (i === n) s.classList.add('active');
   });
-  // Beim Wechsel auf die Beschaffungsdetails das Bestellvolumen aus Menge × Einzelpreis aktualisieren
-  if (n === 3) recalcEinzelPreis();
+  // Beim Wechsel auf die Beschaffungsdetails: erste Preiszeile mit der Menge aus
+  // Schritt 1 vorbelegen (Komfort), dann Zeilen rendern + Bestellvolumen berechnen.
+  if (n === 3) {
+    if (einzelLines.length === 1 && !String(einzelLines[0].stueck || '').trim()) {
+      const m = ($id('f-Menge')?.value || '').trim();
+      if (m) einzelLines[0].stueck = m;
+    }
+    renderEinzelLines();
+  }
 }
 
 function wNext(step) {
@@ -2531,8 +2557,9 @@ function wNext(step) {
     if (!lieferant) { toast('Bitte mindestens Lieferant 1 angeben.', 'error'); return; }
     const extraSelected = document.querySelector('#beschaffungslogik-extra-cards .check-card.selected');
     if (!extraSelected) { toast('Bitte unter „Zusätzlich kombinierbar" eine Option auswählen.', 'error'); return; }
-    const preisVal = $id('f-GeschaetzterPreis').value;
-    if (!preisVal || parseFloat(preisVal) <= 0) { toast('Bitte Bestellvolumen in € angeben.', 'error'); return; }
+    const total    = einzelLines.reduce((s, ln) => s + _ezNum(ln.stueck) * _ezNum(ln.preis), 0);
+    const totalQty = einzelLines.reduce((s, ln) => s + _ezNum(ln.stueck), 0);
+    if (!(total > 0)) { toast('Bitte mindestens eine Zeile mit Menge und Einzelpreis ausfüllen.', 'error'); return; }
     wizardData.step3 = {
       Beschaffungslogik: [
         document.querySelector('input[name=Beschaffungslogik]:checked')?.value || '',
@@ -2542,10 +2569,12 @@ function wNext(step) {
       Lieferant2:        $id('f-Lieferant2').value.trim(),
       Lieferant3:        $id('f-Lieferant3').value.trim(),
       Lieferant4:        $id('f-Lieferant4').value.trim(),
-      GeschaetzterPreis:  $id('f-GeschaetzterPreis').value ? parseFloat($id('f-GeschaetzterPreis').value) : null,
+      GeschaetzterPreis:  Math.round(total * 100) / 100,
       Kostenstelle:       $id('f-Kostenstelle').value.trim(),
       LeadBuyerAbschluss: $id('f-LeadBuyerAbschluss')?.checked ?? false,
     };
+    // Gesamtmenge aus den Zeilen übernehmen (überschreibt die Menge aus Schritt 2)
+    if (totalQty > 0) wizardData.step3.Menge = String(totalQty);
     buildReview();
   }
   showStep(step + 1);
@@ -2576,26 +2605,57 @@ function addLieferant(n) {
   $id('f-Lieferant' + n)?.focus();
 }
 
-// Bestellvolumen = Menge × Einzelpreis. Sobald ein Einzelpreis (>0) gesetzt ist, wird das
-// Bestellvolumen automatisch berechnet und schreibgeschützt. Ohne Einzelpreis bleibt das
-// Feld frei eingebbar (Pauschalbetrag). Greift in JEDEM Fall – auch aus Wiedervorlagen/
-// Auto-Entwürfen: dort wird der Einzelpreis aus „Gesamtwert ÷ Menge" abgeleitet, sodass
-// eine geänderte Menge den Gesamtwert sofort neu berechnet.
+// ── EINZELANFRAGE: MENGEN × EINZELPREIS-ZEILEN ───────────────────────────────
+// Mehrere (Menge × Einzelpreis)-Zeilen; das Bestellvolumen wird daraus summiert
+// und ist schreibgeschützt ("nicht mehr beschreibbar"). Greift in JEDEM Fall –
+// auch aus Wiedervorlage/Auto-Entwurf (dort als eine Zeile: Menge + Gesamtwert÷Menge).
+function renderEinzelLines() {
+  const wrap = $id('einzel-lines');
+  if (!wrap) return;
+  if (!einzelLines.length) einzelLines.push({ stueck: '', preis: '' });
+  wrap.innerHTML = einzelLines.map((ln, i) => {
+    const sum = _ezNum(ln.stueck) * _ezNum(ln.preis);
+    const del = einzelLines.length > 1
+      ? `<button type="button" class="ezl-del" title="Zeile entfernen" onclick="einzelLineRemove(${i})">✕</button>`
+      : `<span class="ezl-del-ph"></span>`;
+    return `<div class="ezl-row">
+      <input type="number" class="ezl-stueck" min="0" step="any" placeholder="Menge"
+        value="${esc(String(ln.stueck ?? ''))}" oninput="einzelLineChange(${i},'stueck',this.value)"/>
+      <span class="ezl-x">×</span>
+      <input type="number" class="ezl-preis" min="0" step="0.01" placeholder="Einzelpreis €"
+        value="${esc(String(ln.preis ?? ''))}" oninput="einzelLineChange(${i},'preis',this.value)"/>
+      <span class="ezl-eq" data-idx="${i}">= ${fmtEuro(sum)}</span>
+      ${del}
+    </div>`;
+  }).join('');
+  recalcEinzelPreis();
+}
+
+function einzelLineAdd()    { einzelLines.push({ stueck: '', preis: '' }); renderEinzelLines(); }
+function einzelLineRemove(i){ einzelLines.splice(i, 1); if (!einzelLines.length) einzelLines.push({ stueck: '', preis: '' }); renderEinzelLines(); }
+function einzelLineChange(i, field, val) {
+  if (!einzelLines[i]) return;
+  einzelLines[i][field] = val;
+  // Zeilensumme live aktualisieren (kein Re-Render → Fokus bleibt erhalten)
+  const eq = document.querySelector(`#einzel-lines .ezl-eq[data-idx="${i}"]`);
+  if (eq) eq.textContent = '= ' + fmtEuro(_ezNum(einzelLines[i].stueck) * _ezNum(einzelLines[i].preis));
+  recalcEinzelPreis();
+}
+
 function recalcEinzelPreis() {
   const totalEl = $id('f-GeschaetzterPreis');
   if (!totalEl) return;
-  const ep    = parseFloat(String($id('f-Einzelpreis')?.value || '').replace(',', '.')) || 0;
-  const menge = parseFloat(String($id('f-Menge')?.value || '').replace(',', '.')) || 0;
-  const note  = $id('bv-auto-note');
-  if (ep > 0) {
-    totalEl.value    = (Math.round(ep * (menge || 1) * 100) / 100);
-    totalEl.readOnly = true;
-    totalEl.classList.add('input-computed');
-    if (note) note.textContent = `= ${menge || 1} × ${fmtEuro(ep)}`;
-  } else {
-    totalEl.readOnly = false;
-    totalEl.classList.remove('input-computed');
-    if (note) note.textContent = '';
+  const total = einzelLines.reduce((s, ln) => s + _ezNum(ln.stueck) * _ezNum(ln.preis), 0);
+  const rounded = Math.round(total * 100) / 100;
+  totalEl.value    = rounded > 0 ? rounded : '';
+  totalEl.readOnly = true;
+  totalEl.classList.add('input-computed');
+  const note = $id('bv-auto-note');
+  if (note) {
+    const qty = einzelLines.reduce((s, ln) => s + _ezNum(ln.stueck), 0);
+    note.textContent = rounded > 0
+      ? `Σ aus ${einzelLines.length} Zeile(n) · Menge gesamt ${qty}`
+      : 'automatisch berechnet';
   }
   updatePreisHint();
 }
@@ -2722,7 +2782,7 @@ function buildReview() {
         ['Lieferant 2', d.Lieferant2],
         ['Lieferant 3', d.Lieferant3],
         ['Lieferant 4', d.Lieferant4],
-        ['Einzelpreis (€)', (() => { const v = parseFloat(String($id('f-Einzelpreis')?.value || '').replace(',', '.')) || 0; return v > 0 ? fmtEuro(v) : null; })()],
+        ['Mengen × Einzelpreise', einzelLines.filter(l => _ezNum(l.stueck) && _ezNum(l.preis)).map(l => `${l.stueck} × ${fmtEuro(_ezNum(l.preis))}`).join('  ·  ') || null],
         ['Bestellvolumen in €', d.GeschaetzterPreis ? fmtEuro(d.GeschaetzterPreis) : null],
         ['Kostenstelle', d.Kostenstelle],
       ])}
@@ -5056,7 +5116,9 @@ function renderPanel(item, editMode = false) {
   const lockBadge   = isLocked && !lockedByMe
     ? `<span class="panel-lock-badge">🔒 ${esc(lockData.by)} bearbeitet gerade</span>` : '';
 
-  const canEdit = /pr[üu]fung/i.test(statusVal) && /einkauf/i.test(statusVal) && !/strategisch/i.test(statusVal);
+  // Einkäufer/Admin dürfen jederzeit bearbeiten (z. B. Titel/Bezeichnung ändern, auch bei
+  // Auto-Entwürfen). Alle anderen nur im Status „In Prüfung (Einkauf)".
+  const canEdit = canApprove() || (/pr[üu]fung/i.test(statusVal) && /einkauf/i.test(statusVal) && !/strategisch/i.test(statusVal));
   const editBtn = isMineView ? '' : (isLocked && !lockedByMe)
     ? `<button class="btn btn-outline btn-sm" disabled title="Gesperrt von ${esc(lockData.by)}">🔒 Gesperrt</button>`
     : canEdit
