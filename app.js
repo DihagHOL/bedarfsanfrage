@@ -1794,11 +1794,20 @@ async function saveOrderData(itemId) {
   add('Bestellnummer', orderNr);
   if (delivery) add('Lieferdatum', toSpDate(delivery, resolvedFields['Lieferdatum'] || 'Lieferdatum'));
   if (price) add('TatsaechlicherPreis', parseFloat(price));
-  // Lieferanten (bearbeitbar): nur nicht-leere Werte schreiben – verhindert versehentliches Leeren.
-  add('Lieferant',  $id('m-lief1')?.value.trim());
-  add('Lieferant2', $id('m-lief2')?.value.trim());
-  add('Lieferant3', $id('m-lief3')?.value.trim());
-  add('Lieferant4', $id('m-lief4')?.value.trim());
+  // Lieferanten sind voll editierbar (ändern UND entfernen). Nur tatsächlich geänderte
+  // Felder schreiben – so wird ein geleertes Feld auch wirklich in SharePoint geleert,
+  // unveränderte Felder lösen aber keinen unnötigen Write aus.
+  const _item   = allItems.find(i => String(i.id) === String(itemId));
+  const curLief = key => String(getField(_item, key) || getField(_item, resolvedFields[key]) || '').trim();
+  const setLief = (key, elId) => {
+    const el = $id(elId); if (!el) return;
+    const val = el.value.trim();
+    if (val !== curLief(key)) { const col = resolvedFields[key] || key; if (col) patch[col] = val; }
+  };
+  setLief('Lieferant',  'm-lief1');
+  setLief('Lieferant2', 'm-lief2');
+  setLief('Lieferant3', 'm-lief3');
+  setLief('Lieferant4', 'm-lief4');
   // Wenn Bestellnummer vergeben → Status auf "Bestellt" setzen
   if (orderNr) {
     const statusCol = resolvedFields['Status'] || 'Status';
