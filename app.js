@@ -1031,7 +1031,7 @@ function renderStatusChips() {
     const labelText = s || 'Eingereicht';
     return `<button class="sc-chip${isActive ? ' active' : ''}"
       style="--sc-bg:${st.bg};--sc-color:${st.color}"
-      onclick="setDashFilter('${s.replace(/'/g,"\\'")}')">
+      onclick="setDashFilter('${escJs(s)}')">
       ${icon ? `<span class="sc-icon">${icon}</span>` : ''}
       <span class="sc-label">${esc(labelText)}</span>
       <span class="sc-count" style="background:${st.bg};color:${st.color}">${n}</span>
@@ -1247,7 +1247,7 @@ function renderStatusChipsMine() {
              : sl.includes('prüfung') || sl.includes('bearbeitung') ? '⏳' : '📋';
     const isActive = mineStatusFilter === s;
     return `<button class="sc-chip${isActive ? ' active' : ''}" style="--sc-bg:${st.bg};--sc-color:${st.color}"
-      onclick="setMineFilter('${s.replace(/'/g,"\\'")}')">
+      onclick="setMineFilter('${escJs(s)}')">
       <span class="sc-icon">${icon}</span>
       <span class="sc-label">${esc(s||'Eingereicht')}</span>
       <span class="sc-count" style="background:${st.bg};color:${st.color}">${n}</span>
@@ -1839,7 +1839,10 @@ async function saveOrderData(itemId) {
     const errors = [];
     for (const file of files) {
       try {
-        const fname = encodeURIComponent(file.name);
+        // Einfache Anführungszeichen müssen im OData-Stringliteral verdoppelt
+        // werden ('' = ein '); encodeURIComponent kodiert sie nicht. Ohne das
+        // schlägt der Upload bei Dateinamen wie "Angebot'25.pdf" mit 400 fehl.
+        const fname = encodeURIComponent(file.name.replace(/'/g, "''"));
         const r = await fetch(
           `${SP_BASE}/_api/web/lists/getByTitle('${SP_LIST}')/items(${itemId})/AttachmentFiles/add(FileName='${fname}')`,
           { method: 'POST', headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json;odata=nometadata' }, body: await file.arrayBuffer() }
@@ -4410,7 +4413,7 @@ function getApprovalSummary(item) {
 }
 
 function itemCard(item) {
-  const title   = esc(getField(item,'Title') || '–');
+  const title   = esc(cleanTitle(getField(item,'Title')));
   const status  = getStatusVal(item);
   const wg      = getField(item, resolvedFields['Warengruppe']    || 'Warengruppe')      || '';
   const preis   = parseFloat(getField(item, resolvedFields['GeschaetzterPreis'] || 'GeschaetzterPreis')) || null;
@@ -4428,7 +4431,7 @@ function itemCard(item) {
   return `
     <div class="item-card${sel}" data-id="${item.id}" onclick="openPanel('${item.id}')">
       <div class="ic-top">
-        <div class="ic-title">${prioDot(prio)}${cleanTitle(getField(item,'Title'))}</div>
+        <div class="ic-title">${prioDot(prio)}${title}</div>
         <div class="ic-topright">
           <span class="ic-price">${preis ? fmtEuro(preis) : '–'}</span>
           ${statusBadge(status)}
@@ -5498,12 +5501,12 @@ async function openPdfViewer(relUrl, fileName) {
     let apiUrl;
     if (attachMatch) {
       const itemId  = attachMatch[1];
-      const rawName = attachMatch[2]; // may contain #, spaces, etc.
-      apiUrl = `${SP_BASE}/_api/web/lists/getByTitle('${SP_LIST}')/items(${itemId})/AttachmentFiles(@f)/$value?@f='${encodeURIComponent(rawName)}'`;
+      const rawName = attachMatch[2]; // may contain #, spaces, ' etc.
+      apiUrl = `${SP_BASE}/_api/web/lists/getByTitle('${SP_LIST}')/items(${itemId})/AttachmentFiles(@f)/$value?@f='${encodeURIComponent(rawName.replace(/'/g, "''"))}'`;
     } else {
       // Fallback for non-attachment URLs
       const spSafe = rawRelUrl.replace(/#/g, '%23');
-      apiUrl = `${SP_BASE}/_api/web/GetFileByServerRelativeUrl(@u)/$value?@u='${encodeURIComponent(spSafe)}'`;
+      apiUrl = `${SP_BASE}/_api/web/GetFileByServerRelativeUrl(@u)/$value?@u='${encodeURIComponent(spSafe.replace(/'/g, "''"))}'`;
     }
     const resp   = await fetch(apiUrl, { headers: { Authorization: 'Bearer ' + tok } });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
@@ -5541,17 +5544,17 @@ function openSettings() {
       <span class="su-email" title="${esc(upn)}">${esc(upn)}</span>
       <label class="tgl-wrap" title="Dashboard">
         <input type="checkbox" ${p.dashboard ? 'checked' : ''}
-          onchange="setAccess('${esc(upn)}','dashboard',this.checked)"><span class="tgl"></span></label>
+          onchange="setAccess('${escJs(upn)}','dashboard',this.checked)"><span class="tgl"></span></label>
       <label class="tgl-wrap" title="Reports">
         <input type="checkbox" ${p.reports ? 'checked' : ''}
-          onchange="setAccess('${esc(upn)}','reports',this.checked)"><span class="tgl"></span></label>
+          onchange="setAccess('${escJs(upn)}','reports',this.checked)"><span class="tgl"></span></label>
       <label class="tgl-wrap" title="Tabellen-Importer">
         <input type="checkbox" ${p.importer ? 'checked' : ''}
-          onchange="setAccess('${esc(upn)}','importer',this.checked)"><span class="tgl"></span></label>
+          onchange="setAccess('${escJs(upn)}','importer',this.checked)"><span class="tgl"></span></label>
       <label class="tgl-wrap" title="Einkauf: Status setzen + genehmigen/ablehnen">
         <input type="checkbox" ${p.einkauf ? 'checked' : ''}
-          onchange="setAccess('${esc(upn)}','einkauf',this.checked)"><span class="tgl"></span></label>
-      <button class="su-del" title="UPN entfernen" onclick="removeAccessUser('${esc(upn)}')">✕</button>
+          onchange="setAccess('${escJs(upn)}','einkauf',this.checked)"><span class="tgl"></span></label>
+      <button class="su-del" title="UPN entfernen" onclick="removeAccessUser('${escJs(upn)}')">✕</button>
     </div>`;
 
   const adminSection = adminMode ? `
@@ -5666,7 +5669,7 @@ function closePdfViewer() {
 }
 
 function attachmentLink(f) {
-  const safeUrl = esc(f.ServerRelativeUrl.replace(/#/g,'%23').replace(/\?/g,'%3F').replace(/ /g,'%20'));
+  const safeUrl = escJs(f.ServerRelativeUrl.replace(/#/g,'%23').replace(/\?/g,'%3F').replace(/ /g,'%20'));
   const name    = esc(f.FileName);
   return `<div class="attach-item">
     📎 <span class="attach-name">${name}</span>
@@ -5704,6 +5707,13 @@ window.addEventListener('unhandledrejection', e => reportError('Promise', e?.rea
 // ── HELPERS ──────────────────────────────────────────────────────────────────
 const $id = id => document.getElementById(id);
 const esc = s  => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+// Für Werte, die in einem einfach gequoteten JS-String INNERHALB eines
+// HTML-Attributs landen, z. B. onclick="tuWas('${escJs(v)}')".
+// esc() allein reicht dort NICHT: Der HTML-Parser dekodiert Entities, BEVOR der
+// JS-Code kompiliert wird – aus &#39; würde wieder ' und der String bräche auf.
+// Daher erst auf JS-Ebene maskieren (Backslash zuerst!), dann fürs Attribut escapen.
+const escJs = s => esc(String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'"));
 
 function getField(item, key) {
   if (!key || !item?.fields) return null;
