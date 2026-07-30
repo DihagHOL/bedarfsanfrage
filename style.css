@@ -354,12 +354,12 @@ body {
 .tid-ac-wrap .pf-input { width: 100%; }
 .tid-ac-dropdown   { background: #fff; border: 1px solid #d1d5db; border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0,0,0,.15); max-height: 260px; overflow-y: auto; }
-.tid-ac-item       { display: flex; align-items: baseline; gap: 8px; padding: 7px 10px;
+.tid-ac-item       { display: flex; align-items: flex-start; gap: 8px; padding: 7px 10px;
   cursor: pointer; font-size: .82rem; border-bottom: 1px solid #f3f4f6; }
 .tid-ac-item:last-child  { border-bottom: none; }
 .tid-ac-item:hover, .tid-ac-item.tid-ac-active { background: #eff6ff; }
 .tid-ac-nr         { font-weight: 600; color: #1d4ed8; white-space: nowrap; min-width: 90px; }
-.tid-ac-name       { color: #1e2939; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tid-ac-name       { color: #1e2939; flex: 1; white-space: normal; overflow-wrap: anywhere; }
 .tid-ac-wg         { color: #9ca3af; font-size: .76rem; white-space: nowrap; }
 .tid-ac-confirm    { font-size: .76rem; color: #15803d; margin-top: 3px; }
 textarea.pf-input { resize: vertical; min-height: 52px; }

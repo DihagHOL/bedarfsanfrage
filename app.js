@@ -1969,9 +1969,14 @@ function initTidAutocomplete(inputEl, getRelatedInput) {
   function reposition() {
     if (!dropdown || dropdown.style.display === 'none') return;
     const r = inputEl.getBoundingClientRect();
-    dropdown.style.left  = r.left + 'px';
+    // Vorschlagsliste mind. 380px breit (damit auch der beschreibende Text sichtbar ist),
+    // aber nie breiter als der Viewport; ragt sie rechts heraus, nach links verschieben.
+    const w = Math.min(Math.max(r.width, 380), window.innerWidth - 16);
+    let   left = r.left;
+    if (left + w > window.innerWidth - 8) left = Math.max(8, window.innerWidth - 8 - w);
+    dropdown.style.left  = left + 'px';
     dropdown.style.top   = (r.bottom + 2) + 'px';
-    dropdown.style.width = r.width + 'px';
+    dropdown.style.width = w + 'px';
   }
 
   function hide() {
@@ -2077,9 +2082,14 @@ function initKostenstAuto(inputEl) {
   function reposition() {
     if (!dropdown || dropdown.style.display === 'none') return;
     const r = inputEl.getBoundingClientRect();
-    dropdown.style.left  = r.left + 'px';
+    // Vorschlagsliste mind. 380px breit (damit auch der beschreibende Text sichtbar ist),
+    // aber nie breiter als der Viewport; ragt sie rechts heraus, nach links verschieben.
+    const w = Math.min(Math.max(r.width, 380), window.innerWidth - 16);
+    let   left = r.left;
+    if (left + w > window.innerWidth - 8) left = Math.max(8, window.innerWidth - 8 - w);
+    dropdown.style.left  = left + 'px';
     dropdown.style.top   = (r.bottom + 2) + 'px';
-    dropdown.style.width = r.width + 'px';
+    dropdown.style.width = w + 'px';
   }
   function hide() { if (dropdown) dropdown.style.display = 'none'; activeIdx = -1; }
   function show(items) {
