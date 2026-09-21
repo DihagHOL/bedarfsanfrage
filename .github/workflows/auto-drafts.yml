@@ -26,3 +26,32 @@ jobs:
           TENANT_ID:     ${{ secrets.TENANT_ID }}
           CLIENT_ID:     ${{ secrets.CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+
+  # Hält das Repo "aktiv": GitHub deaktiviert geplante Workflows nach 60 Tagen ohne
+  # Push (tägliche Cron-Läufe zählen NICHT). Dieser Job erzeugt daher nur bei >=45 Tagen
+  # Stille automatisch einen leeren Commit und setzt den Zähler zurück. In aktiven
+  # Entwicklungsphasen passiert nichts.
+  keepalive:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Repo bei Bedarf aktiv halten
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          BRANCH=master
+          LAST=$(gh api "repos/$REPO/commits/$BRANCH" --jq '.commit.committer.date')
+          DAYS=$(( ( $(date -u +%s) - $(date -u -d "$LAST" +%s) ) / 86400 ))
+          echo "Letzte Repo-Aktivitaet: $LAST (vor $DAYS Tagen; Deaktivierung ab 60)."
+          if [ "$DAYS" -ge 45 ]; then
+            SHA=$(gh api "repos/$REPO/git/ref/heads/$BRANCH" --jq '.object.sha')
+            TREE=$(gh api "repos/$REPO/git/commits/$SHA" --jq '.tree.sha')
+            NEW=$(gh api -X POST "repos/$REPO/git/commits" -f message="chore: keepalive - geplante Workflows aktiv halten" -f tree="$TREE" -f "parents[]=$SHA" --jq '.sha')
+            gh api -X PATCH "repos/$REPO/git/refs/heads/$BRANCH" -f sha="$NEW" >/dev/null
+            echo "Keepalive-Commit $NEW erstellt - 60-Tage-Timer zurueckgesetzt."
+          else
+            echo "Genug Puffer - kein Keepalive noetig."
+          fi

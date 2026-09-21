@@ -86,8 +86,12 @@ in der Status-Spalte vorhanden sein (beides bereits vorhanden).
   änderbar.
 
 ### Gut zu wissen
-- Geplante GitHub-Workflows **pausieren nach 60 Tagen ohne Repo-Aktivität** (ein Commit
-  reaktiviert sie) und können sich um einige Minuten verzögern.
+- Geplante GitHub-Workflows **pausieren nach 60 Tagen ohne Repo-Aktivität** (nur echte
+  Pushes zählen, tägliche Cron-Läufe nicht). Der zusätzliche **`keepalive`-Job** in
+  `auto-drafts.yml` verhindert das automatisch: er erzeugt **nur bei ≥ 45 Tagen Stille**
+  einen leeren Commit und setzt den 60-Tage-Zähler zurück. Er nutzt das eingebaute
+  `GITHUB_TOKEN` (Berechtigung `contents: write`) – **kein zusätzliches Secret nötig**.
+  Nicht gewünscht? Einfach den `keepalive`-Job aus `auto-drafts.yml` entfernen.
 - Das Secret läuft ab (Schritt 2) → rechtzeitig erneuern und in GitHub aktualisieren.
 - Die **App-seitige** Auto-Erstellung ist deaktiviert (in `app.js` auskommentiert), damit
   keine doppelten Entwürfe entstehen.
