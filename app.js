@@ -173,6 +173,7 @@ function saveUserSettings(email, patch) {
 let autoRefreshTimer = null;
 let arCountdown = 30;
 let arPaused = false;   // user can pause without admin losing the feature-enable
+let arPausedByWizard = false; // true, wenn die Pause nur durch einen offenen Wizard entstand
 
 function startAutoRefresh() {
   stopAutoRefresh();
@@ -225,6 +226,7 @@ function toggleAutoRefresh() {
   if (!account) return;
   if (!autoRefreshTimer) { startAutoRefresh(); return; }
   arPaused = !arPaused;
+  arPausedByWizard = false; // manuelle Steuerung hat Vorrang
   updateARBtn();
 }
 
@@ -527,7 +529,6 @@ async function discoverSP() {
       WORKFLOW_STAGES.length = 0;
       WORKFLOW_STAGES.push(...stages);
     }
-    console.log('[discoverSP] Status-Werte synchronisiert:', choices);
   }
 
   // 5. Build SP user map (id → display name) for Person-column LookupId resolution.
@@ -542,7 +543,6 @@ async function discoverSP() {
       const name = u.fields?.Title || u.fields?.Name || u.fields?.EMail;
       if (name) spUserMap[String(u.id)] = name;
     }
-    console.log('[discoverSP] spUserMap loaded:', Object.keys(spUserMap).length, 'users');
   } catch(e) {
     console.warn('[discoverSP] Could not load User Information List:', e.message);
   }
@@ -919,9 +919,13 @@ function navigate(view, id) {
 
   // Pause auto-refresh while filling in a form; resume when leaving
   if (view === 'new' || view === 'multi') {
-    arPaused = true; updateARBtn();
-  } else {
-    if (arPaused) { arPaused = false; if (!autoRefreshTimer) startAutoRefresh(); updateARBtn(); }
+    // Nur pausieren, wenn nicht ohnehin (manuell) pausiert; die Pause als wizard-bedingt merken.
+    if (!arPaused) { arPaused = true; arPausedByWizard = true; updateARBtn(); }
+  } else if (arPausedByWizard) {
+    // Eine wizard-bedingte Pause beim Verlassen wieder aufheben; eine manuelle bleibt bestehen.
+    arPausedByWizard = false; arPaused = false;
+    if (!autoRefreshTimer) startAutoRefresh();
+    updateARBtn();
   }
 
   if      (view === 'dashboard') renderDashboard();
@@ -2997,7 +3001,6 @@ async function submitRequest() {
     btn.textContent = 'Anfrage wird angelegt…';
     const newItem = await gPost(`${listPath}/items`, { fields: { Title: allFields['Title'] } });
     const itemId  = newItem.id;
-    console.log('[submitRequest] item created, id=', itemId);
 
     // ── Schritt 2: Restliche Felder per PATCH nachpflegen ──
     // SP Online has a propagation delay: the new item may not be addressable via PATCH
@@ -3006,7 +3009,6 @@ async function submitRequest() {
     delete patchFields['Title'];
     if (Object.keys(patchFields).length) {
       btn.textContent = 'Felder werden gespeichert…';
-      console.log('[submitRequest] PATCH fields:', JSON.stringify(patchFields));
       try {
         const skipped = await patchRetry(`${listPath}/items/${itemId}/fields`, patchFields);
         if (skipped.length) console.warn('[submitRequest] übersprungene Felder (SP ablehnte):', skipped);
