@@ -370,14 +370,23 @@ async function getToken(forceRefresh = false) {
   }
 }
 
-// Authentifizierter fetch mit einmaligem Retry bei 401 (abgelaufenes/ungültiges Token).
-// Beim Retry wird ein frisches Token erzwungen (forceRefresh) – härtet lange Sitzungen.
-async function _authedFetch(url, opts = {}, _retry = true) {
+// Authentifizierter fetch mit Retry.
+//  • 401 (abgelaufenes/ungültiges Token): einmal mit frisch erzwungenem Token wiederholen.
+//  • 429/503/504 (Graph-Throttling bzw. kurzzeitige Serverfehler): die vom Dienst
+//    vorgegebene Retry-After-Wartezeit beachten und begrenzt wiederholen. Ohne das
+//    flog eine gedrosselte Anfrage (z. B. bei 20-s-Polling mehrerer Nutzer) als Fehler hoch.
+async function _authedFetch(url, opts = {}, retries = { auth: 1, throttle: 2 }) {
   const tok = await getToken();
   const r = await fetch(url, { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + tok } });
-  if (r.status === 401 && _retry) {
+  if (r.status === 401 && retries.auth > 0) {
     try { await getToken(true); } catch {}
-    return _authedFetch(url, opts, false);
+    return _authedFetch(url, opts, { ...retries, auth: retries.auth - 1 });
+  }
+  if ((r.status === 429 || r.status === 503 || r.status === 504) && retries.throttle > 0) {
+    const ra = parseInt(r.headers.get('Retry-After') || '', 10);
+    const waitMs = Math.min((Number.isFinite(ra) && ra > 0 ? ra : 2) * 1000, 30000);
+    await new Promise(res => setTimeout(res, waitMs));
+    return _authedFetch(url, opts, { ...retries, throttle: retries.throttle - 1 });
   }
   return r;
 }
@@ -1097,6 +1106,14 @@ function setDashWGFilter(val) {
 function setDashMAFilter(val) {
   dashMAFilter = val;
   filterDashboard();
+}
+
+// Entprellte Suche: die Liste erst nach kurzer Tipp-Pause neu bauen, nicht bei jedem
+// Tastendruck. Spart bei großen Listen das wiederholte Filtern, Sortieren und Neu-Rendern.
+let _searchTimer = null;
+function searchDebounced(fn) {
+  clearTimeout(_searchTimer);
+  _searchTimer = setTimeout(fn, 180);
 }
 
 function filterDashboard() {
@@ -2063,10 +2080,17 @@ function initTidAutocomplete(inputEl, getRelatedInput) {
   window.addEventListener('scroll', reposition, true);
   window.addEventListener('resize', reposition);
 
-  // Cleanup when input is removed from DOM (panel close/re-render)
-  new MutationObserver(() => {
-    if (!document.contains(inputEl)) { hide(); if (dropdown) dropdown.remove(); dropdown = null; }
-  }).observe(document.body, { childList: true, subtree: true });
+  // Cleanup, sobald das Feld aus dem DOM fliegt (Panel-Schließen/Neu-Rendern): Dropdown
+  // entfernen UND window-Listener + Observer abmelden, sonst sammeln sie sich bei
+  // wiederholtem Neu-Rendern (z. B. Sammelanfrage-Positionen) an.
+  const _mo = new MutationObserver(() => {
+    if (document.contains(inputEl)) return;
+    hide(); if (dropdown) dropdown.remove(); dropdown = null;
+    window.removeEventListener('scroll', reposition, true);
+    window.removeEventListener('resize', reposition);
+    _mo.disconnect();
+  });
+  _mo.observe(document.body, { childList: true, subtree: true });
 }
 
 // ── KOSTENSTELLEN AUTOCOMPLETE ────────────────────────────────────────────────
@@ -2153,9 +2177,15 @@ function initKostenstAuto(inputEl) {
   inputEl.addEventListener('blur', () => setTimeout(hide, 150));
   window.addEventListener('scroll', reposition, true);
   window.addEventListener('resize', reposition);
-  new MutationObserver(() => {
-    if (!document.contains(inputEl)) { hide(); if (dropdown) dropdown.remove(); dropdown = null; }
-  }).observe(document.body, { childList: true, subtree: true });
+  // Beim Entfernen des Felds Dropdown, window-Listener und Observer abmelden (kein Leck).
+  const _mo = new MutationObserver(() => {
+    if (document.contains(inputEl)) return;
+    hide(); if (dropdown) dropdown.remove(); dropdown = null;
+    window.removeEventListener('scroll', reposition, true);
+    window.removeEventListener('resize', reposition);
+    _mo.disconnect();
+  });
+  _mo.observe(document.body, { childList: true, subtree: true });
 }
 
 // ── WIZARD ────────────────────────────────────────────────────────────────────
