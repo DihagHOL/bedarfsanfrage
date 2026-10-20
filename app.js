@@ -137,6 +137,7 @@ let wizardFilesArr = []; // Drag-and-drop file store for wizard attachments
 let einzelLines = [{ stueck: '', preis: '' }];
 const _ezNum = v => parseFloat(String(v ?? '').replace(',', '.')) || 0;
 let panelItemId = null;
+let _panelRenderedLm = null; // lastModifiedDateTime des zuletzt gerenderten offenen Panels
 let panelEditMode = false; // true, solange ein Panel im Bearbeiten-Modus offen ist (pausiert Auto-Refresh)
 // SP column may be misspelled "Stauts" in some tenants → always try both
 const getStatusVal = item => getField(item,'Status') || getField(item,'Stauts') || '';
@@ -618,10 +619,15 @@ function _rerenderAfterData() {
   else if (currentView === 'mine')    renderList('mine', true);
   else if (currentView === 'all')     renderList('all', true);
   else if (currentView === 'reports') renderReportsTable();
-  // Offenes Panel aktualisieren – aber NICHT, solange bearbeitet wird
+  // Offenes Panel nur aktualisieren, wenn sich die geöffnete Anfrage wirklich geändert hat
+  // (sonst würden Kommentare/Anhänge bei jedem Refresh neu geladen und flackern) – und nie,
+  // solange bearbeitet wird.
   if (panelItemId && !panelEditMode && ['mine','all','dashboard'].includes(currentView)) {
     const pi = allItems.find(i => String(i.id) === panelItemId);
-    if (pi) { $id(`panel-${currentView}-content`).innerHTML = renderPanel(pi); bindPanelEvents(panelItemId); }
+    if (pi && String(pi.lastModifiedDateTime || '') !== _panelRenderedLm) {
+      _panelRenderedLm = String(pi.lastModifiedDateTime || '');
+      $id(`panel-${currentView}-content`).innerHTML = renderPanel(pi); bindPanelEvents(panelItemId);
+    }
   }
 }
 
@@ -4692,6 +4698,7 @@ async function openPanel(itemId) {
   const freshItem = allItems.find(i => String(i.id) === panelItemId) || item;
 
   $id(`panel-${currentView}-content`).innerHTML = renderPanel(freshItem);
+  _panelRenderedLm = String(freshItem.lastModifiedDateTime || '');
   $id(`panel-${currentView}`).classList.remove('hidden');
   $id(`split-${currentView}`).classList.add('has-panel');
 
