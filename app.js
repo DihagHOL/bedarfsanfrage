@@ -614,9 +614,9 @@ async function loadItems(showToast = true) {
 
 // Aktuelle Ansicht (+ offenes Panel) nach Datenänderung neu rendern
 function _rerenderAfterData() {
-  if (currentView === 'dashboard')    renderDashboard();
-  else if (currentView === 'mine')    renderList('mine');
-  else if (currentView === 'all')     renderList('all');
+  if (currentView === 'dashboard')    renderDashboard(true);
+  else if (currentView === 'mine')    renderList('mine', true);
+  else if (currentView === 'all')     renderList('all', true);
   else if (currentView === 'reports') renderReportsTable();
   // Offenes Panel aktualisieren – aber NICHT, solange bearbeitet wird
   if (panelItemId && !panelEditMode && ['mine','all','dashboard'].includes(currentView)) {
@@ -987,9 +987,9 @@ let dashSortOrder   = 'date-desc';
 let dashWGFilter = '';
 let dashMAFilter = '';
 
-function renderDashboard() {
+function renderDashboard(soft) {
   renderStatusChips();
-  filterDashboard();
+  filterDashboard(soft);
 }
 
 function setDashSort(val) {
@@ -1116,7 +1116,7 @@ function searchDebounced(fn) {
   _searchTimer = setTimeout(fn, 180);
 }
 
-function filterDashboard() {
+function filterDashboard(soft) {
   const search = ($id('search-dashboard')?.value || '').toLowerCase();
   let items = [...allItems];
   if (search) items = items.filter(i =>
@@ -1143,10 +1143,7 @@ function filterDashboard() {
       items.sort((a,b) => new Date(b.createdDateTime) - new Date(a.createdDateTime));
   }
 
-  const container = $id('list-dashboard');
-  if (container) container.innerHTML = items.length
-    ? _cardsHtml(items)
-    : emptyState('Keine Anfragen für diesen Status.');
+  _renderCards($id('list-dashboard'), items, soft, 'Keine Anfragen für diesen Status.');
 }
 
 // Render-Performance: nur die ersten LIST_ROW_CAP Karten darstellen
@@ -1158,6 +1155,61 @@ function _cardsHtml(items) {
     html += `<div class="list-cap-note">Erste ${LIST_ROW_CAP} von ${items.length} angezeigt – nutze Suche/Filter zum Eingrenzen.</div>`;
   }
   return html;
+}
+
+// Ein Karten-Element aus dem itemCard-HTML erzeugen.
+function _cardEl(item) {
+  const tmp = document.createElement('div');
+  tmp.innerHTML = itemCard(item);
+  return tmp.firstElementChild;
+}
+
+// Gezielter Abgleich der Kartenliste gegen die gewünschte (bereits gefilterte und
+// sortierte) Liste: nur geänderte Karten werden ersetzt, neue eingefügt, entfernte
+// gelöscht, die Reihenfolge angeglichen. Unveränderte Karten bleiben im DOM – dadurch
+// kein Scroll-Sprung und kein Flackern beim Auto-Refresh. Änderung wird am
+// lastModifiedDateTime (data-lm) erkannt.
+function _reconcileCards(container, items) {
+  const shown = items.slice(0, LIST_ROW_CAP);
+  const existing = new Map();
+  for (const el of container.querySelectorAll('.item-card[data-id]')) existing.set(el.dataset.id, el);
+  let prev = null;
+  for (const item of shown) {
+    const id = String(item.id);
+    let el = existing.get(id);
+    if (el) {
+      existing.delete(id);
+      if (el.dataset.lm !== String(item.lastModifiedDateTime || '')) {
+        const fresh = _cardEl(item);
+        el.replaceWith(fresh);
+        el = fresh;
+      }
+    } else {
+      el = _cardEl(item);
+    }
+    const ref = prev ? prev.nextElementSibling : container.firstElementChild;
+    if (el !== ref) container.insertBefore(el, ref);
+    prev = el;
+  }
+  for (const el of existing.values()) el.remove();
+  // Cap-Hinweis am Ende verwalten
+  let note = container.querySelector('.list-cap-note');
+  if (items.length > LIST_ROW_CAP) {
+    if (!note) { note = document.createElement('div'); note.className = 'list-cap-note'; }
+    note.textContent = `Erste ${LIST_ROW_CAP} von ${items.length} angezeigt – nutze Suche/Filter zum Eingrenzen.`;
+    container.appendChild(note);
+  } else if (note) {
+    note.remove();
+  }
+}
+
+// Kartenliste in den Container rendern. soft=true gleicht nur gezielt ab (Auto-Refresh),
+// sonst wird der Container komplett neu aufgebaut (Navigation, Suche, Filter, Sortierung).
+function _renderCards(container, items, soft, emptyMsg) {
+  if (!container) return;
+  if (!items.length) { container.innerHTML = emptyState(emptyMsg); return; }
+  if (soft && container.querySelector('.item-card')) _reconcileCards(container, items);
+  else container.innerHTML = _cardsHtml(items);
 }
 
 function isOpenStatus(s) {
@@ -1223,7 +1275,7 @@ function myItems() {
   );
 }
 
-function renderList(type) {
+function renderList(type, soft) {
   if (type === 'mine') {
     // Apply user's defaultSort on first load (not on every re-render so user can override)
     if (account) {
@@ -1231,7 +1283,7 @@ function renderList(type) {
       if (!_mineInitialized) { mineSortOrder = s.defaultSort || 'date-desc'; _mineInitialized = true; }
     }
     renderStatusChipsMine();
-    filterView('mine');
+    filterView('mine', soft);
     return;
   }
   const sel = $id(`filter-${type}-status`);
@@ -1239,7 +1291,7 @@ function renderList(type) {
     const statuses = [...new Set(allItems.map(i => getStatusVal(i)).filter(Boolean))];
     statuses.forEach(s => sel.add(new Option(s, s)));
   }
-  filterView(type);
+  filterView(type, soft);
 }
 
 function renderStatusChipsMine() {
@@ -1290,7 +1342,7 @@ function setMineSort(val) {
   filterView('mine');
 }
 
-function filterView(type) {
+function filterView(type, soft) {
   const search = ($id(`search-${type}`)?.value || '').toLowerCase();
   const priceKey = resolvedFields['GeschaetzterPreis'] || 'GeschaetzterPreis';
 
@@ -1328,9 +1380,7 @@ function filterView(type) {
   if (container) {
     // compactView: toggle dense layout class
     container.classList.toggle('compact-list', !!(userSettings.compactView));
-    container.innerHTML = items.length
-      ? _cardsHtml(items)
-      : emptyState(type === 'mine' ? 'Sie haben noch keine Anfragen erstellt.' : 'Keine Anfragen gefunden.');
+    _renderCards(container, items, soft, type === 'mine' ? 'Sie haben noch keine Anfragen erstellt.' : 'Keine Anfragen gefunden.');
   }
 }
 
@@ -4461,7 +4511,7 @@ function itemCard(item) {
   const sel     = panelItemId === String(item.id) ? ' selected' : '';
 
   return `
-    <div class="item-card${sel}" data-id="${item.id}" onclick="openPanel('${item.id}')">
+    <div class="item-card${sel}" data-id="${item.id}" data-lm="${item.lastModifiedDateTime||''}" onclick="openPanel('${item.id}')">
       <div class="ic-top">
         <div class="ic-title">${prioDot(prio)}${title}</div>
         <div class="ic-topright">
