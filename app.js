@@ -1519,36 +1519,37 @@ const STAGE_MAP = [
 // history needed.  A stage is "visible" if its approverField is non-empty
 // (meaning that stage was actually reached) or it is the current status.
 const TIMELINE_STAGES = [
-  { label: 'Eingereicht',
+  { label: 'Eingereicht', role: 'Antragsteller',
     test: v => /^eingereicht$/i.test(v),
     approverField: null, commentField: null },
-  { label: 'In Prüfung (Einkauf)',
+  { label: 'In Prüfung (Einkauf)', role: 'Einkauf',
     test: v => /pr[üu]fung/i.test(v) && /einkauf/i.test(v) && !/strategisch/i.test(v),
     approverField: 'Entscheider_x002a_in', commentField: 'Genehmigungskommentar' },
-  { label: 'Genehmigt (Einkauf)',
+  { label: 'Genehmigt (Einkauf)', role: 'Einkauf',
     test: v => /genehmigt/i.test(v) && /einkauf/i.test(v),
     approverField: 'Entscheider_x002a_in', commentField: 'Genehmigungskommentar' },
   // Reihenfolge laut Power Automate-Freigabeprozess:
   // Controlling (nur Dienstleistung) → Werkleitung (ab 1.500 €) → strategischer Einkauf (ab 10.000 €)
-  { label: 'In Prüfung (Controlling)',
+  { label: 'In Prüfung (Controlling)', role: 'Controlling',
     test: v => /controlling/i.test(v),
     approverField: 'Genehmiger2', commentField: 'Genehmigungskommentar2' },
-  { label: 'In Prüfung (Werkleitung)',
+  { label: 'In Prüfung (Werkleitung)', role: 'Werkleitung',
     test: v => /werkleitung/i.test(v),
     approverField: 'Genehmiger3', commentField: 'Genehmigungskommentar3' },
-  { label: 'In Prüfung (strategischer Einkauf)',
+  { label: 'In Prüfung (strategischer Einkauf)', role: 'Strategischer Einkauf',
     test: v => /strategisch/i.test(v),
     approverField: 'Genehmiger4', commentField: 'Genehmigungskommentar4' },
-  { label: 'Freigegeben',
+  { label: 'Freigegeben', role: null,
     test: v => /^freigegeben$/i.test(v),
     approverField: null, commentField: null },
-  { label: 'In Bestellung',
+  { label: 'In Bestellung', role: null,
     test: v => /in bestellung/i.test(v),
     approverField: null, commentField: null },
-  { label: 'Bestellt',
+  // Wer „Bestellt" setzt (Einkauf-Daten speichert), ist immer ein Einkäufer; aus lastModifiedBy.
+  { label: 'Bestellt', role: 'Einkauf',
     test: v => /^bestellt$/i.test(v),
     approverField: null, commentField: null },
-  { label: 'Abgelehnt',
+  { label: 'Abgelehnt', role: null,
     test: v => /^abgelehnt$/i.test(v),
     approverField: null, commentField: null },
 ];
@@ -1636,36 +1637,56 @@ function statusTimeline(statusVal, item) {
 
   const isRej = /^abgelehnt$/i.test(sv);
 
-  // Eine Zeitleisten-Zeile rendern (mit Genehmiger-Dedup gegen Doppelnennung)
+  // Antragsteller aus createdBy, Besteller aus lastModifiedBy (wer „Bestellt" gesetzt
+  // hat, indem er die Einkauf-Daten gespeichert hat – immer ein Einkäufer).
+  const creator   = item?.createdBy?.user?.displayName || item?.createdBy?.user?.email || null;
+  const besteller = item?.lastModifiedBy?.user?.displayName || item?.lastModifiedBy?.user?.email || null;
+  const actorFor = (st) => {
+    if (/^eingereicht$/i.test(st.label)) return creator;
+    if (/^bestellt$/i.test(st.label))    return besteller;
+    return resolvePersonField(fields, st.approverField);
+  };
+  // Immer anzeigen (nicht entdoppeln): Antragsteller und Besteller sind eigene Aktionen,
+  // auch wenn es derselbe Einkäufer ist, der auch geprüft hat.
+  const isFixedActor = st => /^(eingereicht|bestellt)$/i.test(st.label);
+
+  // Eine Zeitleisten-Zeile: Stufe und, wenn erreicht, wer sie mit welcher Rolle erledigt hat.
+  // Genehmiger werden entdoppelt (In Prüfung + Genehmigt = derselbe Einkäufer → einmal).
   let lastApprover = null;
-  const row = (label, dot, cls, approverField, commentField, bold) => {
-    let approverHtml = '';
-    const approver = resolvePersonField(fields, approverField);
-    const comment  = commentField ? String(fields[commentField] || '').trim() : '';
-    if (approver && approver !== lastApprover) {
-      lastApprover = approver;
+  const row = (label, dot, cls, role, actor, comment, bold, dedup) => {
+    let actorHtml = '';
+    if (actor && (!dedup || actor !== lastApprover)) {
+      if (dedup) lastApprover = actor;
       const commentHtml = comment ? `<div class="ap-inline-comment">💬 ${esc(comment)}</div>` : '';
-      const pastCls = cls === 'ap-ok' ? ' ap-approver-past' : '';
-      approverHtml = `<div class="ap-approver${pastCls}">👤 ${esc(approver)}${commentHtml}</div>`;
+      const pastCls  = cls === 'ap-ok' ? ' ap-approver-past' : '';
+      const rolePart = role ? `<span class="ap-role">${esc(role)}:</span> ` : '';
+      actorHtml = `<div class="ap-approver${pastCls}">👤 ${rolePart}${esc(actor)}${commentHtml}</div>`;
     }
     const boldAttr = bold ? ' style="font-weight:600"' : '';
     return `<div class="approval-stage"><div class="ap-dot ${cls}">${dot}</div>`
-         + `<div class="ap-body"><div class="ap-stage-label"${boldAttr}>${esc(label)}</div>${approverHtml}</div></div>`;
+         + `<div class="ap-body"><div class="ap-stage-label"${boldAttr}>${esc(label)}</div>${actorHtml}</div></div>`;
   };
 
   const out = [];
 
-  // Abgelehnt: erreichte Stufen (Genehmiger hinterlegt) als erledigt, dann „Abgelehnt"
+  // Abgelehnt: Antragsteller, die tatsächlich erteilten Freigaben (stufen-eigene
+  // Genehmiger), dann „Abgelehnt" mit Person und Begründung. Die Einkauf-Stufen werden
+  // NICHT als „genehmigt" ausgewiesen, denn ihr Entscheider-Feld trägt bei einer
+  // Ablehnung den Ablehner, nicht einen Genehmiger.
   if (isRej) {
+    out.push(row(spLabel(stages[0]), '✓', 'ap-ok', 'Antragsteller', creator, null, false, false));
     for (const st of stages) {
-      if (/^(freigegeben|bestellt)$/i.test(st.label)) continue;
-      if (/^eingereicht$/i.test(st.label)) { out.push(row(spLabel(st), '✓', 'ap-ok', null, null, false)); continue; }
-      if (resolvePersonField(fields, st.approverField)) {
-        out.push(row(spLabel(st), '✓', 'ap-ok', st.approverField, st.commentField, false));
+      if (!st.approverField || /entscheider/i.test(st.approverField)) continue;
+      const actor = resolvePersonField(fields, st.approverField);
+      if (actor) {
+        const comment = st.commentField ? String(fields[st.commentField] || '').trim() : '';
+        out.push(row(spLabel(st), '✓', 'ap-ok', st.role, actor, comment, false, true));
       }
     }
-    const rejLabel = (statusChoices.find(c => /^abgelehnt$/i.test(c.trim())) || 'Abgelehnt').trim();
-    out.push(row(rejLabel, '✗', 'ap-no', null, null, false));
+    const rejLabel   = (statusChoices.find(c => /^abgelehnt$/i.test(c.trim())) || 'Abgelehnt').trim();
+    const rejBy      = resolvePersonField(fields, 'Entscheider_x002a_in');
+    const rejComment = String(fields['Genehmigungskommentar'] || '').trim();
+    out.push(row(rejLabel, '✗', 'ap-no', null, rejBy, rejComment, false, false));
     return out.join('');
   }
 
@@ -1684,9 +1705,11 @@ function statusTimeline(statusVal, item) {
     } else {                                   // kommend
       dot = '○'; cls = 'ap-circle-future';
     }
-    // Genehmiger nur bei erledigten/aktuellen Stufen anzeigen (kommende noch ohne)
-    const show = curIdx !== -1 && i <= curIdx;
-    out.push(row(label, dot, cls, show ? st.approverField : null, show ? st.commentField : null, bold));
+    // Person nur bei erreichten/aktuellen Stufen anzeigen (kommende noch ohne)
+    const reached = curIdx !== -1 && i <= curIdx;
+    const actor   = reached ? actorFor(st) : null;
+    const comment = reached && st.commentField ? String(fields[st.commentField] || '').trim() : '';
+    out.push(row(label, dot, cls, st.role, actor, comment, bold, !isFixedActor(st)));
   });
 
   return out.join('');
