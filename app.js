@@ -1522,9 +1522,11 @@ const TIMELINE_STAGES = [
   { label: 'Eingereicht', role: 'Antragsteller',
     test: v => /^eingereicht$/i.test(v),
     approverField: null, commentField: null },
+  // In Prüfung zeigt noch keine Person; der genehmigende Einkäufer erscheint erst bei
+  // „Genehmigt (Einkauf)" (das Entscheider-Feld wird erst beim Genehmigen gesetzt).
   { label: 'In Prüfung (Einkauf)', role: 'Einkauf',
     test: v => /pr[üu]fung/i.test(v) && /einkauf/i.test(v) && !/strategisch/i.test(v),
-    approverField: 'Entscheider_x002a_in', commentField: 'Genehmigungskommentar' },
+    approverField: null, commentField: null },
   { label: 'Genehmigt (Einkauf)', role: 'Einkauf',
     test: v => /genehmigt/i.test(v) && /einkauf/i.test(v),
     approverField: 'Entscheider_x002a_in', commentField: 'Genehmigungskommentar' },
