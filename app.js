@@ -729,7 +729,7 @@ async function processAutoDrafts() {
 // ── ROUTING ──────────────────────────────────────────────────────────────────
 // Dashboard title differs by role: admins see "Dashboard (Alle)", others see "Meine Anfragen"
 function VIEW_TITLES(view) {
-  const map = { new:'Neue Bedarfsanfrage', multi:'Sammelanfrage', mine:'Meine Anfragen', all:'Alle Anfragen', detail:'Anfrage Details', importer:'Tabellen-Importer', reports:'Reports & Auswertungen', schulung:'Schulung (Beta)' };
+  const map = { new:'Neue Bedarfsanfrage', multi:'Sammelanfrage', mine:'Meine Anfragen', all:'Alle Anfragen', detail:'Anfrage Details', importer:'Tabellen-Importer', reports:'Reports & Auswertungen', schulung:'Schulung (Beta)', prozess:'Prozess' };
   if (view === 'dashboard') return canAccess('dashboard') ? 'Dashboard (Alle Anfragen)' : 'Meine Anfragen';
   return map[view] || view;
 }
@@ -951,6 +951,7 @@ function navigate(view, id) {
   else if (view === 'importer')  initImporter();
   else if (view === 'reports')   initReports();
   else if (view === 'schulung')  initSchulung();
+  else if (view === 'prozess')   initProzess();
   else if (view === 'detail' && id) renderDetail(id);
 }
 
@@ -3862,6 +3863,255 @@ async function exportReportsExcel() {
 }
 
 // ── SCHULUNG (BETA) ──────────────────────────────────────────────────────────
+// ── PROZESS (Prozessbeschreibung + Probelauf) ─────────────────────────────────
+// Reiter fuer die Praesentation: erklaert den Bedarfsanfrage-Prozess klar und
+// bietet am Ende einen interaktiven Probelauf, der den Freigabeweg mit eigenen
+// Werten durchspielt. Die Verzweigungen (Controlling nur bei Dienstleistung,
+// Werkleitung ab 1.500 EUR, strategischer Einkauf ab 10.000 EUR ohne Lead-Buyer)
+// entsprechen dem Freigabelauf im RMS und der Status-Timeline der App.
+const RMS_PROZESS_URL = 'https://rms.dihag.de/';
+
+function roleBadge(role) {
+  const map = {
+    'Fachbereich':'rb-fach', 'System':'rb-system', 'Einkauf':'rb-einkauf',
+    'Controlling':'rb-controlling', 'Werkleitung':'rb-werk',
+    'Strategischer Einkauf':'rb-strat', 'Cron':'rb-system'
+  };
+  return `<span class="role-badge ${map[role] || 'rb-system'}">${role}</span>`;
+}
+
+// Ein statischer Prozessschritt fuer die Beschreibung.
+function procStep(role, name, desc, kind) {
+  const cls = kind === 'cond' ? ' cond' : kind === 'ok' ? ' ok' : kind === 'auto' ? ' auto' : '';
+  let tag = '';
+  if (kind === 'auto') tag = `<span class="flow-tag auto-tag">automatisch</span>`;
+  else if (kind === 'ok') tag = `<span class="flow-tag ok-tag">Status</span>`;
+  return `
+    <div class="proc-step${cls}">
+      <div class="ps-head">${roleBadge(role)} <span class="ps-name">${name}</span> ${tag}</div>
+      <div class="flow-sub">${desc}</div>
+    </div>`;
+}
+
+function initProzess() {
+  plState = null;
+  const arrow = '<div class="flow-arrow">↓</div>';
+
+  const haupt = [
+    procStep('Fachbereich', 'Bedarfsanfrage erfassen', 'Der Fachbereich beschreibt den Bedarf im Assistenten (Artikel, Menge, Termin, Beschaffungsart, Lieferant) und reicht die Anfrage ein.', 'task'),
+    procStep('System', 'Anfrage anlegen, Einkauf benachrichtigen', 'Die Anfrage wird in SharePoint gespeichert. Der Einkauf wird sofort informiert.', 'auto'),
+    procStep('Einkauf', 'In Prüfung: Angebote einholen', 'Der Einkauf öffnet die Anfrage. Der Status wechselt automatisch auf „In Prüfung (Einkauf)".', 'task'),
+    procStep('Einkauf', 'Entscheidung: Bedarf freigeben?', 'Gibt der Einkauf frei, startet der Freigabelauf. Lehnt er ab, wird die Anfrage beendet.', 'task'),
+    procStep('System', 'Freigabelauf (Unterprozess)', 'Mehrstufige Freigabe über Power Automate. Welche Stufen greifen, hängt von Beschaffungsart und Bestellvolumen ab (siehe unten).', 'auto'),
+    procStep('System', 'Freigegeben', 'Alle erforderlichen Stufen haben zugestimmt.', 'ok'),
+    procStep('Einkauf', 'Bestellung auslösen, Einkauf-Daten erfassen', 'Bestellnummer, Lieferdatum und tatsächlicher Preis werden hinterlegt. Die Bestellnummer wird auf Dubletten geprüft.', 'task'),
+    procStep('System', 'Bestellt', 'Endstatus. Die Beschaffung ist ausgelöst.', 'ok'),
+  ].join(arrow);
+
+  const freigabe = [
+    procStep('System', 'Genehmigt in Einkauf: Workflow startet', 'Mit der Freigabe durch den Einkauf startet Power Automate den Genehmigungs-Workflow und benachrichtigt die Genehmiger.', 'auto'),
+    procStep('Controlling', 'Dienstleistung freigeben?', 'Diese Stufe greift nur, wenn es sich um eine Dienstleistung handelt.', 'cond'),
+    procStep('Werkleitung', 'Bestellvolumen freigeben?', 'Diese Stufe greift ab einem Bestellvolumen von 1.500 €.', 'cond'),
+    procStep('Strategischer Einkauf', 'Konzernrahmen freigeben?', 'Diese Stufe greift ab 10.000 € und entfällt beim Lead-Buyer-Abschluss.', 'cond'),
+    procStep('System', 'Freigabe dokumentieren, Status Freigegeben', 'Die Freigabe wird protokolliert, die Anfrage ist freigegeben.', 'ok'),
+  ].join(arrow);
+
+  const auto = [
+    procStep('Fachbereich', 'Datum zur automatischen Bedarfsanfrage', 'Beim Erfassen kann ein Wiedervorlage-Datum gesetzt werden, zu dem die Anfrage erneut vorgelegt werden soll.', 'task'),
+    procStep('Cron', 'Fällige Vorlagen ermitteln', 'Ein täglicher GitHub-Actions-Cron prüft, welche Vorlagen fällig sind.', 'auto'),
+    procStep('Cron', 'Entwurf anlegen', 'Für jede fällige Vorlage wird automatisch ein Entwurf erstellt.', 'auto'),
+    procStep('Cron', 'Quelldatum leeren', 'Das Wiedervorlage-Datum wird zurückgesetzt, damit kein Doppel-Entwurf entsteht.', 'auto'),
+    procStep('System', 'Entwurf liegt bereit', 'Der Fachbereich findet den vorbereiteten Entwurf in „Meine Anfragen".', 'ok'),
+  ].join(arrow);
+
+  $id('view-prozess').innerHTML = `
+    <div class="schulung-wrap">
+      <div class="schulung-hero">
+        <div class="schulung-badge">Prozess</div>
+        <h1>Der Bedarfsanfrage-Prozess</h1>
+        <p>Von der Bedarfsmeldung im Fachbereich bis zur ausgelösten Bestellung. Dieser Prozess ist im
+           Richtlinienmanagementsystem (RMS) als verbindliche Prozessbeschreibung hinterlegt. Diese Seite
+           erklärt ihn Schritt für Schritt und bietet am Ende einen Probelauf.</p>
+        <a class="hero-link" href="${RMS_PROZESS_URL}" target="_blank" rel="noopener">Prozess im RMS öffnen ↗</a>
+      </div>
+
+      <div class="schulung-sec">
+        <h2>So liest sich der Prozess</h2>
+        <div class="proc-legend">
+          <span class="pl-leg">${roleBadge('Fachbereich')} eine Rolle handelt</span>
+          <span class="pl-leg"><span class="flow-tag auto-tag">automatisch</span> System, Power Automate oder Cron</span>
+          <span class="pl-leg"><span class="flow-tag">bedingte Stufe</span> entfällt, wenn sie nicht zutrifft</span>
+          <span class="pl-leg"><span class="flow-tag ok-tag">Status</span> Zwischen- oder Endstatus</span>
+        </div>
+      </div>
+
+      <div class="schulung-sec">
+        <h2>1 · Hauptprozess</h2>
+        <p>Der durchgehende Weg einer Anfrage. Die Prüfung beginnt in der App beim Einkauf. Ab „Freigegeben"
+           übernimmt der Freigabelauf in Power Automate.</p>
+        <div class="proc-flow">${haupt}</div>
+      </div>
+
+      <div class="schulung-sec">
+        <h2>2 · Freigabelauf (Power Automate)</h2>
+        <p>Der Unterprozess hinter „Freigegeben". Jede Stufe hat eine Bedingung. Trifft sie nicht zu, wird die
+           Stufe übersprungen. Im „Verlauf" einer Anfrage erscheinen nur die Stufen, die tatsächlich durchlaufen wurden.</p>
+        <div class="proc-flow">${freigabe}</div>
+        <div class="schulung-tip">✗ Lehnt eine Stufe ab, wechselt die Anfrage sofort auf „Abgelehnt" und der
+           Antragsteller wird per E-Mail informiert. Die folgenden Stufen entfallen.</div>
+      </div>
+
+      <div class="schulung-sec">
+        <h2>3 · Automatischer Entwurf (Wiedervorlage)</h2>
+        <p>Für wiederkehrende Bedarfe legt ein Cron-Job automatisch einen Entwurf an, sobald das hinterlegte
+           Datum erreicht ist.</p>
+        <div class="proc-flow">${auto}</div>
+      </div>
+
+      <div class="schulung-sec">
+        <h2>Probelauf</h2>
+        <p>Spielen Sie den Freigabeweg mit eigenen Werten durch. Je nach Bestellvolumen und Beschaffungsart
+           entfallen einzelne Stufen. Genau diese Logik läuft später in Power Automate.</p>
+        <div class="pl-controls">
+          <div class="pl-field">
+            <label>Bestellvolumen</label>
+            <div class="pl-euro"><input type="number" id="pl-preis" min="0" step="100" value="3500"/><span>€</span></div>
+          </div>
+          <div class="pl-field">
+            <label>Beschaffungsart</label>
+            <select id="pl-art">
+              <option value="material">Material</option>
+              <option value="dienst">Dienstleistung</option>
+            </select>
+          </div>
+          <div class="pl-field pl-field-check">
+            <label><input type="checkbox" id="pl-lead"/> Lead-Buyer-Abschluss</label>
+          </div>
+          <button class="btn btn-primary" onclick="startProbelauf()">▶ Probelauf starten</button>
+        </div>
+        <div id="pl-stage"></div>
+      </div>
+    </div>`;
+}
+
+// ── Probelauf-Logik ───────────────────────────────────────────────────────────
+let plState = null;
+
+function plBuildStages(preis, art, lead) {
+  const dienst = art === 'dienst';
+  return [
+    { role:'Fachbereich', name:'Bedarfsanfrage erfassen', kind:'task', applies:true,
+      desc:'Der Fachbereich beschreibt den Bedarf im Assistenten und reicht die Anfrage ein.' },
+    { role:'System', name:'Anfrage anlegen, Einkauf benachrichtigen', kind:'auto', applies:true,
+      desc:'Die Anfrage wird in SharePoint gespeichert und der Einkauf automatisch informiert.' },
+    { role:'Einkauf', name:'In Prüfung (Einkauf)', kind:'decision', applies:true,
+      desc:'Der Einkauf holt Angebote ein, prüft und entscheidet direkt in der App.' },
+    { role:'System', name:'Genehmigt (Einkauf): Workflow startet', kind:'auto', applies:true,
+      desc:'Mit der Freigabe durch den Einkauf startet Power Automate den Freigabelauf.' },
+    { role:'Controlling', name:'Freigabe Controlling', kind:'decision', applies:dienst,
+      cond:'nur bei Dienstleistung', desc:'Das Controlling gibt die Dienstleistung frei.' },
+    { role:'Werkleitung', name:'Freigabe Werkleitung', kind:'decision', applies:preis >= 1500,
+      cond:'ab 1.500 € Bestellvolumen', desc:'Die Werkleitung gibt das Bestellvolumen frei.' },
+    { role:'Strategischer Einkauf', name:'Freigabe strategischer Einkauf', kind:'decision',
+      applies:preis >= 10000 && !lead, cond:'ab 10.000 € und ohne Lead-Buyer-Abschluss',
+      desc:'Der strategische Einkauf gibt den Konzernrahmen frei.' },
+    { role:'System', name:'Freigegeben', kind:'auto', applies:true,
+      desc:'Alle erforderlichen Stufen haben zugestimmt, die Freigabe wird dokumentiert.' },
+    { role:'Einkauf', name:'Bestellung auslösen (Bestellt)', kind:'task', applies:true,
+      desc:'Der Einkauf trägt die Bestellnummer ein. Sie wird auf Dubletten geprüft, dann ist die Anfrage bestellt.' },
+  ];
+}
+
+function plNextApplicable(from) {
+  for (let j = from; j < plState.stages.length; j++) if (plState.stages[j].applies) return j;
+  return -1;
+}
+
+function startProbelauf() {
+  const preis = Math.max(0, parseFloat(String($id('pl-preis').value).replace(',', '.')) || 0);
+  const art = $id('pl-art').value;
+  const lead = $id('pl-lead').checked;
+  plState = { stages: plBuildStages(preis, art, lead), idx: 0, rejected: null, done: false, preis, art, lead };
+  plState.idx = plNextApplicable(0);
+  renderProbelauf();
+}
+
+function plAdvance() {
+  if (!plState || plState.rejected !== null || plState.done) return;
+  const n = plNextApplicable(plState.idx + 1);
+  if (n === -1) { plState.done = true; plState.idx = plState.stages.length; }
+  else plState.idx = n;
+  renderProbelauf();
+}
+
+function plReject() {
+  if (!plState || plState.done || plState.rejected !== null) return;
+  // Ablehnen nur an Entscheidungsstufen (der Button erscheint ohnehin nur dort).
+  if (plState.stages[plState.idx]?.kind !== 'decision') return;
+  plState.rejected = plState.idx;
+  renderProbelauf();
+}
+
+function plReset() {
+  plState = null;
+  const el = $id('pl-stage');
+  if (el) el.innerHTML = '';
+}
+
+function renderProbelauf() {
+  if (!plState) return;
+  const S = plState;
+  const decisions = S.stages.filter(s => s.applies && s.kind === 'decision').length;
+  const skipped = S.stages.filter(s => !s.applies).map(s => s.role);
+
+  const steps = S.stages.map((st, i) => {
+    let status;
+    if (!st.applies) status = 'skip';
+    else if (S.rejected !== null) status = i < S.rejected ? 'done' : (i === S.rejected ? 'reject' : 'cancel');
+    else status = i < S.idx ? 'done' : (i === S.idx ? 'current' : 'pending');
+    const mark = status === 'done' ? '✓' : status === 'reject' ? '✗'
+      : status === 'skip' ? '–' : status === 'cancel' ? '·' : (i + 1);
+    const note = status === 'skip' ? ` <span class="pl-skip-note">entfällt für diese Werte</span>` : '';
+    const tag = st.cond ? ` <span class="flow-tag">${st.cond}</span>` : '';
+    return `
+      <div class="pl-step pl-${status}">
+        <div class="pl-mark">${mark}</div>
+        <div class="pl-body">
+          <div class="pl-head">${roleBadge(st.role)} <span class="pl-name">${st.name}</span>${note}</div>
+          <div class="pl-desc">${st.desc}${tag}</div>
+        </div>
+      </div>`;
+  }).join('<div class="flow-arrow">↓</div>');
+
+  let controls;
+  if (S.rejected !== null) {
+    const st = S.stages[S.rejected];
+    controls = `
+      <div class="pl-result pl-result-rej"><b>✗ Abgelehnt</b> durch ${st.role}. Die Anfrage wechselt sofort auf
+        „Abgelehnt", der Antragsteller wird per E-Mail informiert, die folgenden Stufen entfallen.</div>
+      <div class="pl-actions"><button class="btn btn-ghost" onclick="plReset()">Zurücksetzen</button></div>`;
+  } else if (S.done) {
+    controls = `
+      <div class="pl-result pl-result-ok"><b>📦 Bestellung ausgelöst.</b> Durchlaufen: ${decisions} Freigabestufe${decisions === 1 ? '' : 'n'}
+        bei ${fmtEuro(S.preis)}${S.art === 'dienst' ? ', Dienstleistung' : ''}${S.lead ? ', Lead-Buyer-Abschluss' : ''}.</div>
+      <div class="pl-actions"><button class="btn btn-ghost" onclick="plReset()">Nochmal</button></div>`;
+  } else {
+    const st = S.stages[S.idx];
+    const hint = st.kind === 'decision' ? 'diese Rolle entscheidet.'
+      : st.kind === 'auto' ? 'läuft automatisch.' : 'Aufgabe der Rolle.';
+    const btns = st.kind === 'decision'
+      ? `<button class="btn btn-success" onclick="plAdvance()">✓ Genehmigen</button>
+         <button class="btn btn-danger" onclick="plReject()">✗ Ablehnen</button>`
+      : `<button class="btn btn-primary" onclick="plAdvance()">Weiter →</button>`;
+    controls = `
+      <div class="pl-current-hint">Aktuell: <b>${st.name}</b> · ${hint}</div>
+      <div class="pl-actions">${btns} <button class="btn btn-ghost" onclick="plReset()">Zurücksetzen</button></div>`;
+  }
+
+  const summary = `<div class="pl-summary">${fmtEuro(S.preis)} · ${S.art === 'dienst' ? 'Dienstleistung' : 'Material'}${S.lead ? ' · Lead-Buyer' : ''} · ${decisions} Freigabestufe${decisions === 1 ? '' : 'n'}${skipped.length ? ` · entfällt: ${skipped.join(', ')}` : ''}</div>`;
+  $id('pl-stage').innerHTML = summary + `<div class="pl-steps">${steps}</div>` + controls;
+}
+
 function initSchulung() {
   $id('view-schulung').innerHTML = `
     <div class="schulung-wrap">
