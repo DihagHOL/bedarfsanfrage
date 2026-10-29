@@ -4194,6 +4194,19 @@ function initProzess() {
       </div>
 
       <div class="schulung-sec">
+        <h2>4 · Bearbeitung im Einkauf</h2>
+        <p>Neben dem Freigabeweg unterstützt die App den Einkauf bei der täglichen Bearbeitung.</p>
+        <div class="proc-flow">
+          ${procStep('Einkauf', 'Gemeinsame Anfragen je Abteilung', 'Der Reiter „Gemeinsame Anfragen" bündelt alle laufenden Anfragen nach Abteilung. Jeder Einkäufer sieht die Abteilungen, die ihm zugeordnet sind.', 'task')}
+          ${arrow}
+          ${procStep('Einkauf', 'Für sich reservieren', 'Mit „Für mich reservieren" belegt ein Einkäufer eine Anfrage zur Bearbeitung. Andere sehen die Reservierung und arbeiten nicht doppelt.', 'task')}
+          ${arrow}
+          ${procStep('System', 'Überfällig nach 48 Stunden', 'Anfragen, die seit über 48 Stunden offen sind, werden rot markiert und als vorrangig gekennzeichnet. Ein Filter zeigt nur diese.', 'auto')}
+        </div>
+        <div class="schulung-tip">💡 Die Abteilungen und die Zuordnung der Nutzer pflegt die Administration in den Einstellungen.</div>
+      </div>
+
+      <div class="schulung-sec">
         <h2>Probelauf</h2>
         <p>Spielen Sie den Freigabeweg mit eigenen Werten durch. Je nach Bestellvolumen und Beschaffungsart
            entfallen einzelne Stufen. Genau diese Logik läuft später in Power Automate.</p>
@@ -4357,7 +4370,8 @@ function initSchulung() {
         <a href="#sch-6">6 · Reports</a>
         <a href="#sch-7">7 · Wiedervorlage/Favoriten</a>
         <a href="#sch-8">8 · Tabellen-Importer</a>
-        <a href="#sch-9">9 · FAQ</a>
+        <a href="#sch-gem">9 · Gemeinsame Anfragen</a>
+        <a href="#sch-9">10 · FAQ</a>
       </div>
 
       <section class="schulung-sec" id="sch-1">
@@ -4368,7 +4382,9 @@ function initSchulung() {
           <li><b>Neue Anfrage</b> – Assistent für eine einzelne Position.</li>
           <li><b>Sammelanfrage</b> – Assistent für mehrere Positionen in einer Anfrage.</li>
           <li><b>Meine Anfragen</b> – nur Ihre eigenen Anfragen.</li>
+          <li><b>Gemeinsame Anfragen</b> – geteilte Übersicht der laufenden Anfragen je Abteilung (für den Einkauf).</li>
           <li><b>Reports</b> – Auswertungen mit vielen Filtern und Excel-Export.</li>
+          <li><b>Prozess</b> – Beschreibung des Freigabewegs mit interaktivem Probelauf.</li>
           <li><b>Tabellen-Importer</b> – Artikelnummern- und Kostenstellentabellen aktualisieren.</li>
         </ul>
         <div class="schulung-tip">💡 Die Liste aktualisiert sich automatisch alle 20 Sekunden.
@@ -4381,9 +4397,10 @@ function initSchulung() {
           <li><b>Bedarf:</b> Bezeichnung und Warengruppe (Pflicht). Geben Sie eine Artikelnummer
               ein – Bezeichnung und Warengruppe werden automatisch vorgeschlagen.</li>
           <li><b>Menge:</b> Menge, Mengeneinheit und „Benötigt bis"-Termin.</li>
-          <li><b>Beschaffung:</b> Beschaffungsart, Lieferant(en), Kostenstelle und
-              <b>Bestellvolumen in € (Pflicht)</b>. Anhand des Volumens zeigt das Tool den
-              erforderlichen Genehmigungsweg an (z. B. Anzahl Angebote).</li>
+          <li><b>Beschaffung:</b> Beschaffungsart, Lieferant(en), Kostenstelle, <b>Abteilung</b>
+              und <b>Bestellvolumen in € (Pflicht)</b>. Die Abteilung steuert, in welcher Gruppe
+              die Anfrage unter „Gemeinsame Anfragen" erscheint. Anhand des Volumens zeigt das Tool
+              den erforderlichen Genehmigungsweg an (z. B. Anzahl Angebote).</li>
           <li><b>Prüfen & Einreichen:</b> Zusammenfassung kontrollieren und absenden.</li>
         </ol>
         <div class="schulung-tip">💡 Über das Feld „Externe Artikelnummer" erfassen Sie bei
@@ -4399,7 +4416,7 @@ function initSchulung() {
               <b>Preis</b>, <b>Benötigt bis</b> und <b>Kostenstelle</b>. Mit „+ Position
               hinzufügen" beliebig erweitern.</li>
           <li>Das <b>Bestellvolumen</b> wird automatisch aus den Einzelpreisen summiert.</li>
-          <li>Warengruppe, Priorität und Beschaffungsart gelten für die gesamte Anfrage.</li>
+          <li>Warengruppe, Priorität, Abteilung und Beschaffungsart gelten für die gesamte Anfrage.</li>
         </ol>
       </section>
 
@@ -4516,8 +4533,28 @@ function initSchulung() {
         </ul>
       </section>
 
+      <section class="schulung-sec" id="sch-gem">
+        <h2>9 · Gemeinsame Anfragen &amp; Reservieren</h2>
+        <p>Der Reiter <b>Gemeinsame Anfragen</b> zeigt dem Einkauf alle laufenden Anfragen im
+           Überblick, nach <b>Abteilung</b> gruppiert und älteste zuerst. Sichtbar sind nur die
+           Anfragen der Abteilungen, die Ihnen zugeordnet sind.</p>
+        <ul>
+          <li><b>Abteilung wählen:</b> Beim Anlegen einer Anfrage wählen Sie im Schritt
+              „Beschaffung" die Abteilung. Danach erscheint die Anfrage hier bei den zuständigen
+              Kolleginnen und Kollegen.</li>
+          <li><b>Überfällig (48 h):</b> Anfragen, die seit über 48 Stunden offen sind, werden rot
+              markiert und als vorrangig gekennzeichnet. Mit dem Schalter „⚠ Überfällig" oben zeigen
+              Sie nur diese an. Denselben Filter gibt es im Dashboard und in „Meine Anfragen".</li>
+          <li><b>Reservieren:</b> Mit „🔑 Für mich reservieren" belegen Sie eine Anfrage zur
+              Bearbeitung für sich. Andere Einkäufer sehen dann, dass Sie daran arbeiten. Mit
+              „Reservierung aufheben" geben Sie sie wieder frei.</li>
+        </ul>
+        <div class="schulung-tip">💡 Die Abteilungen und die Zuordnung der Nutzer pflegt die
+          Administration in den Einstellungen.</div>
+      </section>
+
       <section class="schulung-sec" id="sch-9">
-        <h2>9 · Häufige Fragen</h2>
+        <h2>10 · Häufige Fragen</h2>
         <p><b>Warum sehe ich keine Genehmigungs-Buttons?</b><br>
            Die Genehmigungs-Aufforderung wird Ihnen <b>per Power Automate automatisch per
            E-Mail und Microsoft Teams</b> zugestellt – Sie müssen also nicht selbst danach suchen.
