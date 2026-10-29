@@ -745,10 +745,13 @@ function isAdmin() { return account?.username?.toLowerCase() === ADMIN_EMAIL; }
 // erstellung per Graph ist im Tenant gesperrt) – die App findet sie nur.
 const ACCESS_LIST_NAME  = 'BANF_Konfiguration';
 const ACCESS_ITEM_TITLE = 'access';
+const ABTEILUNG_ITEM_TITLE = 'abteilungen';
 const GATED_FEATURES    = ['dashboard', 'reports', 'importer', 'gemeinsame'];
 let accessListId        = null;
 let accessConfigItemId  = null;
 let accessUsers         = {}; // { 'upn@dihag.com': { dashboard:true, reports:true, importer:false } }
+let abteilungen         = []; // zentral gepflegte Abteilungsliste (Gruppierung in „Gemeinsame Anfragen")
+let abteilungenItemId   = null;
 
 function myUPN() { return (account?.username || '').trim().toLowerCase(); }
 
@@ -825,9 +828,58 @@ async function loadAccessConfig() {
       accessConfigItemId = item.id;
       try { accessUsers = JSON.parse(_decodeSpText(item.fields?.ConfigValue) || '{}').users || {}; } catch {}
     }
+    // Abteilungsliste aus demselben Config-Element-Satz
+    const abtItem = (res.value || []).find(it => (it.fields?.Title || '') === ABTEILUNG_ITEM_TITLE);
+    if (abtItem) {
+      abteilungenItemId = abtItem.id;
+      try { abteilungen = JSON.parse(_decodeSpText(abtItem.fields?.ConfigValue) || '{}').list || []; } catch {}
+    }
   } catch (e) {
     console.warn('[Zugriff] Konfiguration konnte nicht geladen werden:', e.message);
   }
+}
+// Zentral gepflegte Abteilungsliste speichern (nur Admin). Eigenes Element in
+// BANF_Konfiguration (Title='abteilungen'), ConfigValue = { list: [...] }.
+async function saveAbteilungen() {
+  if (!isAdmin()) { console.warn('[Abteilungen] Speichern abgelehnt – kein Admin.'); return; }
+  try {
+    const listId = await _findConfigList();
+    if (!listId) { toast("Liste 'BANF_Konfiguration' nicht gefunden – siehe Konsole.", 'error'); return; }
+    const fields = { Title: ABTEILUNG_ITEM_TITLE, ConfigValue: JSON.stringify({ list: abteilungen }) };
+    if (abteilungenItemId) {
+      await gPatch(`/sites/${siteId}/lists/${listId}/items/${abteilungenItemId}/fields`, fields);
+    } else {
+      const created = await gPost(`/sites/${siteId}/lists/${listId}/items`, { fields });
+      abteilungenItemId = created.id;
+    }
+    toast('Abteilungen gespeichert ✓', 'success');
+  } catch (e) {
+    const hint = /ConfigValue/i.test(e.message)
+      ? " – Spalte 'ConfigValue' (Mehrere Textzeilen) in der Liste anlegen." : '';
+    toast('Speichern der Abteilungen fehlgeschlagen: ' + e.message + hint, 'error');
+  }
+}
+// Admin-UI-Helfer für die Abteilungsliste
+function renderAbteilungRows() {
+  if (!abteilungen.length) return '<p class="su-empty">Noch keine Abteilungen angelegt.</p>';
+  return abteilungen.map(a =>
+    `<div class="access-row"><span class="su-email">${esc(a)}</span>` +
+    `<button class="su-del" title="Entfernen" onclick="removeAbteilung('${escJs(a)}')">✕</button></div>`).join('');
+}
+function addAbteilung() {
+  const inp = $id('abt-new');
+  const v = (inp?.value || '').trim();
+  if (!v) { toast('Bitte eine Abteilung eingeben.', 'error'); return; }
+  if (abteilungen.some(a => a.toLowerCase() === v.toLowerCase())) { toast('Diese Abteilung gibt es schon.', 'error'); return; }
+  abteilungen.push(v);
+  if (inp) inp.value = '';
+  saveAbteilungen();
+  const el = $id('abt-admin-list'); if (el) el.innerHTML = renderAbteilungRows();
+}
+function removeAbteilung(name) {
+  abteilungen = abteilungen.filter(a => a !== name);
+  saveAbteilungen();
+  const el = $id('abt-admin-list'); if (el) el.innerHTML = renderAbteilungRows();
 }
 
 // Leichte periodische Aktualisierung (an Auto-Refresh gekoppelt): liest die
@@ -3942,7 +3994,17 @@ function initGemeinsame() {
     const g = String(getField(it, abtKey) || '').trim() || 'Ohne Abteilung';
     (groups[g] = groups[g] || []).push(it);
   }
-  const names = Object.keys(groups).sort((a, b) => a.localeCompare(b, 'de'));
+  // Reihenfolge: konfigurierte Abteilungen zuerst (in konfigurierter Reihenfolge),
+  // dann übrige Werte alphabetisch, „Ohne Abteilung" ganz unten.
+  const order = a => {
+    if (a === 'Ohne Abteilung') return [2, ''];
+    const idx = abteilungen.indexOf(a);
+    return idx >= 0 ? [0, String(idx).padStart(4, '0')] : [1, a.toLowerCase()];
+  };
+  const names = Object.keys(groups).sort((a, b) => {
+    const oa = order(a), ob = order(b);
+    return oa[0] - ob[0] || oa[1].localeCompare(ob[1], 'de');
+  });
   for (const g of names) groups[g].sort((a, b) => new Date(a.createdDateTime) - new Date(b.createdDateTime));
 
   let html = `
@@ -6180,6 +6242,18 @@ function openSettings() {
   // Token-System entfällt – Zugriff wird zentral über die Zugriffsverwaltung gesteuert
   const syncBtn = '';
 
+  // Admin: zentrale Abteilungsliste (Gruppierung in „Gemeinsame Anfragen")
+  const abtSection = adminMode ? `
+    <hr class="modal-hr">
+    <div class="settings-section-title">🏷 Abteilungen</div>
+    <p class="su-hint">Lege die Abteilungen fest, nach denen „Gemeinsame Anfragen" gruppiert. Gilt zentral für alle.</p>
+    <div class="su-add">
+      <input type="text" id="abt-new" placeholder="z. B. Instandhaltung" class="su-input"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();addAbteilung();}">
+      <button class="btn btn-sm btn-primary" onclick="addAbteilung()">+ Hinzufügen</button>
+    </div>
+    <div id="abt-admin-list">${renderAbteilungRows()}</div>` : '';
+
   $id('settings-body').innerHTML = `
     <div class="settings-section-title">⚙️ Meine Einstellungen</div>
     ${arRow}
@@ -6219,7 +6293,8 @@ function openSettings() {
         <option value="price-asc"  ${s.defaultSort==='price-asc'  ? 'selected':''}>Preis aufsteigend</option>
       </select>
     </div>
-    ${adminSection}`;
+    ${adminSection}
+    ${abtSection}`;
 
   $id('settings-modal').classList.remove('hidden');
 }
