@@ -659,6 +659,16 @@ details#attach-extra-wrap[open] .attach-more-toggle { color:#374151; }
 .access-row { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid #f3f4f6; }
 .access-header { border-bottom: 2px solid #e5e7eb; margin-bottom: 2px; padding: 4px 0 2px; }
 .access-row .tgl-wrap { min-width: 38px; display: flex; justify-content: center; }
+/* Nutzerzeile mit Abteilungs-Zuordnung (zweizeilig) */
+.access-row-wrap { border-bottom: 1px solid #f3f4f6; }
+.access-row-wrap:last-child { border-bottom: none; }
+.access-row-wrap .access-row { border-bottom: none; }
+.access-abt { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 0 0 7px 4px; }
+.access-abt-lbl { font-size: .9rem; }
+.abt-chip { display: inline-flex; align-items: center; gap: 3px; background: #eef2ff; color: #3730a3; font-size: .72rem; font-weight: 600; padding: 2px 4px 2px 9px; border-radius: 999px; }
+.abt-chip-x { border: none; background: none; cursor: pointer; color: #6366f1; font-size: .8rem; line-height: 1; padding: 0 2px; }
+.abt-chip-x:hover { color: #312e81; }
+.abt-add-sel { font-size: .72rem; border: 1px solid #e5e7eb; border-radius: 6px; padding: 2px 4px; background: #fff; color: #4b5563; cursor: pointer; }
 
 /* ── Panel comments section ── */
 .pf-comment-row { padding: 8px 0; border-bottom: 1px solid #f1f5f9; }

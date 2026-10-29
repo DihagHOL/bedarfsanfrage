@@ -795,6 +795,19 @@ function canSeeDashboard() { return canAccess('dashboard'); }
 // Anfragen genehmigen/ablehnen. Admin immer; sonst per Zugriffsverwaltung (einkauf).
 function canApprove() { return isAdmin() || canAccess('einkauf'); }
 
+// Abteilungen, die der aktuelle Nutzer in „Gemeinsame Anfragen" sehen darf.
+// Admin sieht alle angelegten; sonst die ihm zugeordneten (mehrere möglich).
+function myAbteilungen() {
+  if (isAdmin()) return abteilungen.slice();
+  const set = new Set();
+  for (const id of _myIdentities()) {
+    const u = accessUsers[id];
+    if (u && Array.isArray(u.abteilungen)) u.abteilungen.forEach(a => set.add(a));
+  }
+  // Nur angelegte Abteilungen gelten (entfernte Zuordnungen fallen weg).
+  return abteilungen.filter(a => set.has(a));
+}
+
 // Rich-Text-Spalten liefern HTML zurück → Tags entfernen + Entities dekodieren,
 // damit das JSON unabhängig vom Spaltentyp (einfacher Text / Rich-Text) parsebar ist.
 function _decodeSpText(s) {
@@ -929,7 +942,7 @@ async function saveAccessConfig() {
 function setAccess(upn, feature, on) {
   upn = (upn || '').trim().toLowerCase();
   if (!upn) return;
-  if (!accessUsers[upn]) accessUsers[upn] = { dashboard: false, reports: false, importer: false, einkauf: false };
+  if (!accessUsers[upn]) accessUsers[upn] = { dashboard: false, reports: false, importer: false, gemeinsame: false, einkauf: false, abteilungen: [] };
   accessUsers[upn][feature] = !!on;
   saveAccessConfig();
   applyNavVisibility();
@@ -938,7 +951,7 @@ function addAccessUser() {
   const inp = $id('access-new-upn');
   const upn = (inp?.value || '').trim().toLowerCase();
   if (!upn || !/@/.test(upn)) { toast('Bitte gültige UPN/E-Mail angeben.', 'error'); return; }
-  if (!accessUsers[upn]) accessUsers[upn] = { dashboard: true, reports: false, importer: false, einkauf: true };
+  if (!accessUsers[upn]) accessUsers[upn] = { dashboard: true, reports: false, importer: false, gemeinsame: false, einkauf: true, abteilungen: [] };
   saveAccessConfig();
   openSettings();
 }
@@ -946,6 +959,18 @@ function removeAccessUser(upn) {
   delete accessUsers[(upn || '').trim().toLowerCase()];
   saveAccessConfig();
   applyNavVisibility();
+  openSettings();
+}
+// Einem Nutzer eine Abteilung zuordnen oder entziehen (mehrere je Nutzer möglich).
+// Steuert, welche Anfragen er in „Gemeinsame Anfragen" sieht.
+function toggleUserAbteilung(upn, dept, add) {
+  upn = (upn || '').trim().toLowerCase();
+  if (!upn || !dept) return;
+  if (!accessUsers[upn]) accessUsers[upn] = { dashboard:false, reports:false, importer:false, gemeinsame:false, einkauf:false, abteilungen:[] };
+  const arr = accessUsers[upn].abteilungen = accessUsers[upn].abteilungen || [];
+  const i = arr.indexOf(dept);
+  if (add) { if (i < 0) arr.push(dept); } else if (i >= 0) arr.splice(i, 1);
+  saveAccessConfig();
   openSettings();
 }
 
@@ -4023,10 +4048,12 @@ function initGemeinsame() {
   const abtKey   = resolvedFields['Abteilung'] || 'Abteilung';
   const priceKey = resolvedFields['GeschaetzterPreis'] || 'GeschaetzterPreis';
 
-  // Es werden nur Anfragen der angelegten Abteilungen gezeigt. Die Item-Abteilung
-  // wird dafür unabhängig von Groß-/Kleinschreibung auf die konfigurierte Schreibweise
-  // abgebildet; Anfragen ohne (oder mit nicht angelegter) Abteilung bleiben außen vor.
-  const byLower = new Map(abteilungen.map(a => [a.trim().toLowerCase(), a]));
+  // Es werden nur Anfragen der Abteilungen gezeigt, die dem Nutzer zugeordnet sind
+  // (Admin: alle angelegten). Die Item-Abteilung wird unabhängig von Groß-/Klein-
+  // schreibung auf die zugeordnete Schreibweise abgebildet; Anfragen ohne (oder mit
+  // nicht sichtbarer) Abteilung bleiben außen vor.
+  const myAbt   = myAbteilungen();
+  const byLower = new Map(myAbt.map(a => [a.trim().toLowerCase(), a]));
   const configuredOf = it => byLower.get(String(getField(it, abtKey) || '').trim().toLowerCase()) || null;
 
   const open    = (allItems || []).filter(i => isOffenStatus(getStatusVal(i)) && configuredOf(i));
@@ -4039,7 +4066,7 @@ function initGemeinsame() {
     (groups[g] = groups[g] || []).push(it);
   }
   // Gruppenreihenfolge wie in den Einstellungen angelegt.
-  const names = Object.keys(groups).sort((a, b) => abteilungen.indexOf(a) - abteilungen.indexOf(b));
+  const names = Object.keys(groups).sort((a, b) => myAbt.indexOf(a) - myAbt.indexOf(b));
   for (const g of names) groups[g].sort((a, b) => new Date(a.createdDateTime) - new Date(b.createdDateTime));
 
   const odToggle = (odCount || overdueOnly)
@@ -4052,13 +4079,15 @@ function initGemeinsame() {
         <h2 class="gem-title">Gemeinsame Anfragen</h2>
         ${odToggle}
       </div>
-      <p class="gem-sub">Laufende Anfragen der angelegten Abteilungen, nach Abteilung gruppiert, älteste zuerst.</p>
+      <p class="gem-sub">Laufende Anfragen deiner Abteilungen, nach Abteilung gruppiert, älteste zuerst.</p>
     </div>`;
 
   if (!abteilungen.length) {
     html += `<div class="gem-empty">Noch keine Abteilungen angelegt. Lege sie in den Einstellungen an, dann erscheinen hier die Anfragen dieser Abteilungen.</div>`;
+  } else if (!myAbt.length) {
+    html += `<div class="gem-empty">Dir ist noch keine Abteilung zugeordnet. Die Zuordnung erfolgt in den Einstellungen unter Zugriffsverwaltung.</div>`;
   } else if (!shown.length) {
-    html += `<div class="gem-empty">${overdueOnly ? 'Keine überfälligen Anfragen in den angelegten Abteilungen.' : 'Keine laufenden Anfragen in den angelegten Abteilungen.'}</div>`;
+    html += `<div class="gem-empty">${overdueOnly ? 'Keine überfälligen Anfragen in deinen Abteilungen.' : 'Keine laufenden Anfragen in deinen Abteilungen.'}</div>`;
   } else {
     for (const g of names) {
       const rows = groups[g];
@@ -6210,33 +6239,49 @@ function openSettings() {
   const adminMode = email === ADMIN_EMAIL;
 
   // ── Admin: Zugriffsverwaltung (zentral in SharePoint) ─────────────────────
-  const accessRow = (upn, p) => `
-    <div class="access-row">
-      <span class="su-email" title="${esc(upn)}">${esc(upn)}</span>
-      <label class="tgl-wrap" title="Dashboard">
-        <input type="checkbox" ${p.dashboard ? 'checked' : ''}
-          onchange="setAccess('${escJs(upn)}','dashboard',this.checked)"><span class="tgl"></span></label>
-      <label class="tgl-wrap" title="Reports">
-        <input type="checkbox" ${p.reports ? 'checked' : ''}
-          onchange="setAccess('${escJs(upn)}','reports',this.checked)"><span class="tgl"></span></label>
-      <label class="tgl-wrap" title="Tabellen-Importer">
-        <input type="checkbox" ${p.importer ? 'checked' : ''}
-          onchange="setAccess('${escJs(upn)}','importer',this.checked)"><span class="tgl"></span></label>
-      <label class="tgl-wrap" title="Gemeinsame Anfragen">
-        <input type="checkbox" ${p.gemeinsame ? 'checked' : ''}
-          onchange="setAccess('${escJs(upn)}','gemeinsame',this.checked)"><span class="tgl"></span></label>
-      <label class="tgl-wrap" title="Einkauf: Status setzen + genehmigen/ablehnen">
-        <input type="checkbox" ${p.einkauf ? 'checked' : ''}
-          onchange="setAccess('${escJs(upn)}','einkauf',this.checked)"><span class="tgl"></span></label>
-      <button class="su-del" title="UPN entfernen" onclick="removeAccessUser('${escJs(upn)}')">✕</button>
+  const accessRow = (upn, p) => {
+    const assigned = p.abteilungen || [];
+    const abtLine = abteilungen.length ? `
+      <div class="access-abt">
+        <span class="access-abt-lbl" title="Sichtbare Abteilungen in „Gemeinsame Anfragen">🏷</span>
+        ${assigned.map(a => `<span class="abt-chip">${esc(a)}<button class="abt-chip-x" title="Entfernen" onclick="toggleUserAbteilung('${escJs(upn)}','${escJs(a)}',false)">✕</button></span>`).join('')}
+        <select class="abt-add-sel" onchange="if(this.value){toggleUserAbteilung('${escJs(upn)}',this.value,true);}">
+          <option value="">+ Abteilung</option>
+          ${abteilungen.filter(a => !assigned.includes(a)).map(a => `<option value="${esc(a)}">${esc(a)}</option>`).join('')}
+        </select>
+      </div>` : '';
+    return `
+    <div class="access-row-wrap">
+      <div class="access-row">
+        <span class="su-email" title="${esc(upn)}">${esc(upn)}</span>
+        <label class="tgl-wrap" title="Dashboard">
+          <input type="checkbox" ${p.dashboard ? 'checked' : ''}
+            onchange="setAccess('${escJs(upn)}','dashboard',this.checked)"><span class="tgl"></span></label>
+        <label class="tgl-wrap" title="Reports">
+          <input type="checkbox" ${p.reports ? 'checked' : ''}
+            onchange="setAccess('${escJs(upn)}','reports',this.checked)"><span class="tgl"></span></label>
+        <label class="tgl-wrap" title="Tabellen-Importer">
+          <input type="checkbox" ${p.importer ? 'checked' : ''}
+            onchange="setAccess('${escJs(upn)}','importer',this.checked)"><span class="tgl"></span></label>
+        <label class="tgl-wrap" title="Gemeinsame Anfragen">
+          <input type="checkbox" ${p.gemeinsame ? 'checked' : ''}
+            onchange="setAccess('${escJs(upn)}','gemeinsame',this.checked)"><span class="tgl"></span></label>
+        <label class="tgl-wrap" title="Einkauf: Status setzen + genehmigen/ablehnen">
+          <input type="checkbox" ${p.einkauf ? 'checked' : ''}
+            onchange="setAccess('${escJs(upn)}','einkauf',this.checked)"><span class="tgl"></span></label>
+        <button class="su-del" title="UPN entfernen" onclick="removeAccessUser('${escJs(upn)}')">✕</button>
+      </div>
+      ${abtLine}
     </div>`;
+  };
 
   const adminSection = adminMode ? `
     <hr class="modal-hr">
     <div class="settings-section-title">🔐 Zugriffsverwaltung (UPN)</div>
-    <p class="su-hint">Lege fest, wer <b>Dashboard</b>, <b>Reports</b>, <b>Tabellen-Importer</b> sehen darf und wer
+    <p class="su-hint">Lege fest, wer <b>Dashboard</b>, <b>Reports</b>, <b>Tabellen-Importer</b>, <b>Gemeinsame Anfragen</b> sehen darf und wer
        als <b>Einkäufer</b> beim Öffnen den Status auf „In Prüfung (Einkauf)" setzen sowie
-       genehmigen/ablehnen darf. Als Administrator hast du immer alle Rechte. Gilt zentral für alle Geräte.</p>
+       genehmigen/ablehnen darf. In der Zeile 🏷 ordnest du dem Nutzer die Abteilungen zu, deren Anfragen er in „Gemeinsame Anfragen" sieht (mehrere möglich).
+       Als Administrator hast du immer alle Rechte. Gilt zentral für alle Geräte.</p>
     <div class="su-add">
       <input type="email" id="access-new-upn" placeholder="einkauf@dihag.com" class="su-input">
       <button class="btn btn-sm btn-primary" onclick="addAccessUser()">+ Hinzufügen</button>
