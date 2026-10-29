@@ -35,6 +35,7 @@ const FORM_FIELDS = [
   { key:'Lieferant4',            label:'Lieferant 4 (Alternative)',      step:3, alsoTry:['Vendor4','Supplier4','Lieferant_4'] },
   { key:'GeschaetzterPreis',     label:'Bestellvolumen in €',            step:3, alsoTry:['EstimatedPrice','Preis','Price','Gesch_x00e4_tzterPreisnetto_x002'] },
   { key:'Kostenstelle',          label:'Kostenstelle',                   step:3, alsoTry:['CostCenter'] },
+  { key:'Abteilung',             label:'Abteilung',                      step:3, alsoTry:['Department','Abteilungen'] },
   { key:'LeadBuyerAbschluss',    label:'Lead-Buyer-Abschluss',           step:3, alsoTry:['LeadBuyer','LeadBuyerAbschlus'] },
   { key:'Positionen',            label:'Positionen (JSON)',               step:1, alsoTry:['Positions'] },
 ];
@@ -2732,6 +2733,13 @@ function initWizard() {
    'Lieferant','Lieferant2','Lieferant3','Lieferant4',
    'GeschaetzterPreis','Kostenstelle']
     .forEach(k => { const el = $id('f-'+k); if(el) el.value = ''; });
+  // Abteilung-Dropdown aus der zentral gepflegten Liste füllen und zurücksetzen.
+  const abtEl = $id('f-Abteilung');
+  if (abtEl) {
+    abtEl.innerHTML = '<option value="">– bitte wählen –</option>'
+      + abteilungen.map(a => `<option value="${esc(a)}">${esc(a)}</option>`).join('');
+    abtEl.value = '';
+  }
   // Mengen×Einzelpreis-Zeilen zurücksetzen (Bestellvolumen bleibt schreibgeschützt)
   einzelLines = [{ stueck: '', preis: '' }];
   renderEinzelLines();
@@ -2854,6 +2862,7 @@ function wNext(step) {
       Lieferant4:        $id('f-Lieferant4').value.trim(),
       GeschaetzterPreis:  Math.round(total * 100) / 100,
       Kostenstelle:       $id('f-Kostenstelle').value.trim(),
+      Abteilung:          $id('f-Abteilung')?.value || '',
       LeadBuyerAbschluss: $id('f-LeadBuyerAbschluss')?.checked ?? false,
     };
     // Gesamtmenge aus den Zeilen übernehmen (überschreibt die Menge aus Schritt 2)
