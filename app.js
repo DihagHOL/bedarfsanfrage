@@ -1393,9 +1393,11 @@ function filterView(type, soft) {
 }
 
 // ── DETAIL VIEW ───────────────────────────────────────────────────────────────
+let _detailId = null; // aktuell in der Detail-Ansicht gezeigte Anfrage
 function renderDetail(id) {
   const item = allItems.find(i => String(i.id) === String(id));
   if (!item) { $id('detail-content').innerHTML = '<p>Eintrag nicht gefunden.</p>'; return; }
+  _detailId = String(id);
   const f = item.fields || {};
 
   // Group known fields
@@ -1472,6 +1474,13 @@ function renderDetail(id) {
          : '<span class="no-order">Keine Anhänge.</span>';
      })
      .catch(() => { attachEl.innerHTML = ''; });
+  }
+
+  // Einkäufer-Name ggf. aus der Versionshistorie nachladen und Ansicht aktualisieren.
+  if (item._einkaufApprover === undefined) {
+    resolveEinkaufApprover(item).then(name => {
+      if (name && currentView === 'detail' && String(_detailId) === String(id)) renderDetail(id);
+    });
   }
 }
 
@@ -1654,7 +1663,14 @@ function statusTimeline(statusVal, item) {
   const actorFor = (st) => {
     if (/^eingereicht$/i.test(st.label)) return creator;
     if (/^bestellt$/i.test(st.label))    return besteller;
-    return resolvePersonField(fields, st.approverField);
+    const direct = resolvePersonField(fields, st.approverField);
+    if (direct) return direct;
+    // Einkauf-Entscheider steht oft nicht im Feld, sondern nur in der Versionshistorie
+    // (wer den Status auf „Genehmigt (Einkauf)" gesetzt hat). Vorab via
+    // resolveEinkaufApprover() aufgelöst und auf dem Item zwischengespeichert.
+    if (/genehmigt/i.test(st.label) && /einkauf/i.test(st.label) && item && item._einkaufApprover)
+      return item._einkaufApprover;
+    return null;
   };
   // Immer anzeigen (nicht entdoppeln): Antragsteller und Besteller sind eigene Aktionen,
   // auch wenn es derselbe Einkäufer ist, der auch geprüft hat.
@@ -4985,6 +5001,28 @@ function compactRow(item) {
     </div>`;
 }
 
+// Einkäufer-Name für den „Genehmigt (Einkauf)"-Schritt aus der Versionshistorie
+// auflösen, wenn das Feld Entscheider_x002a_in leer ist (bei Freigaben über Power
+// Automate oder manuellen Statuswechseln der Fall). Ergebnis wird auf dem Item
+// zwischengespeichert; null = nichts gefunden oder nicht nötig.
+async function resolveEinkaufApprover(item) {
+  if (!item) return null;
+  if (item._einkaufApprover !== undefined) return item._einkaufApprover; // schon aufgelöst
+  const field = resolvedFields['Entscheider_x002a_in'] || 'Entscheider_x002a_in';
+  const sv    = (getStatusVal(item) || '').toLowerCase();
+  const past  = /(genehmigt.*einkauf|controlling|werkleitung|strateg|freigegeben|bestellt|in bestellung)/.test(sv);
+  if (resolvePersonField(item.fields || {}, field) || !past) { item._einkaufApprover = null; return null; }
+  item._einkaufApprover = null; // markiert: bereits versucht (kein Doppel-Request)
+  try {
+    const statusCol = resolvedFields['Status'] || 'Stauts';
+    const vs  = await gGet(`/sites/${siteId}/lists/${listId}/items/${item.id}/versions?$expand=fields($select=${statusCol})&$top=100`);
+    const arr = (vs.value || []).slice().sort((a, b) => parseFloat(a.id) - parseFloat(b.id));
+    const hit = arr.find(v => { const s = String(v.fields?.[statusCol] || '').toLowerCase(); return /genehmigt/.test(s) && /einkauf/.test(s); });
+    item._einkaufApprover = hit?.lastModifiedBy?.user?.displayName || hit?.lastModifiedBy?.user?.email || null;
+  } catch (e) { console.warn('[einkauf-approver] Historie fehlgeschlagen:', e.message); }
+  return item._einkaufApprover;
+}
+
 // ── SPLIT PANEL ───────────────────────────────────────────────────────────────
 async function openPanel(itemId) {
   if (!['mine','all','dashboard'].includes(currentView)) { navigate('detail', itemId); return; }
@@ -5048,6 +5086,14 @@ async function openPanel(itemId) {
     c.classList.toggle('selected', c.dataset.id === panelItemId));
 
   bindPanelEvents(itemId);
+
+  // Einkäufer-Name ggf. aus der Versionshistorie nachladen und Panel aktualisieren.
+  resolveEinkaufApprover(freshItem).then(name => {
+    if (name && String(panelItemId) === String(itemId) && !panelEditMode) {
+      const root = $id(`panel-${currentView}-content`);
+      if (root) { root.innerHTML = renderPanel(freshItem); bindPanelEvents(itemId); }
+    }
+  });
 }
 
 function closePanel() {
