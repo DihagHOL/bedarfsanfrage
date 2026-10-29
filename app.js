@@ -1324,6 +1324,7 @@ function renderKanban(items) {
 
 // ── LIST VIEWS ────────────────────────────────────────────────────────────────
 let mineStatusFilter  = '';
+let overdueOnly       = false; // Filter: nur Anfragen, die seit über 48 Std offen sind
 let _mineInitialized  = false; // so defaultSort only applies on first load
 let mineSortOrder    = 'date-desc';
 
@@ -1371,6 +1372,12 @@ function renderStatusChipsMine() {
   const allChip = `<button class="sc-chip${mineStatusFilter==='' ? ' active' : ''}" onclick="setMineFilter('')">
     <span class="sc-label">Alle</span><span class="sc-count">${mine.length}</span></button>`;
 
+  const odCount = mine.filter(isOverdue).length;
+  const odChip = (odCount || overdueOnly)
+    ? `<button class="sc-chip sc-chip-od${overdueOnly ? ' active' : ''}" onclick="toggleOverdueFilter('mine')" title="Nur Anfragen, die seit über 48 Std offen sind">
+        <span class="sc-icon">⚠</span><span class="sc-label">Überfällig</span><span class="sc-count">${odCount}</span></button>`
+    : '';
+
   const statusChips = Object.entries(counts).sort((a,b) => b[1]-a[1]).map(([s, n]) => {
     const sl = (s||'').toLowerCase().trim();
     let st = STATUS_STYLES[sl];
@@ -1388,11 +1395,20 @@ function renderStatusChipsMine() {
   }).join('');
 
   const vol = `<span class="sc-volume">${fmtEuro(filteredVol)}<small>Volumen</small></span>`;
-  el.innerHTML = allChip + statusChips + vol;
+  el.innerHTML = allChip + odChip + statusChips + vol;
 }
 
 function setMineFilter(status) {
   mineStatusFilter = (mineStatusFilter === status) ? '' : status;
+  renderStatusChipsMine();
+  filterView('mine');
+}
+
+// 48-Std-Filter umschalten. In „Meine Anfragen" über den Chip, in „Gemeinsame
+// Anfragen" über den Schalter oben.
+function toggleOverdueFilter(type) {
+  overdueOnly = !overdueOnly;
+  if (type === 'gemeinsame') { initGemeinsame(); return; }
   renderStatusChipsMine();
   filterView('mine');
 }
@@ -1425,6 +1441,9 @@ function filterView(type, soft) {
     const status = $id(`filter-${type}-status`)?.value || '';
     if (status) items = items.filter(i => (getStatusVal(i)||'') === status);
   }
+
+  // 48-Std-Filter: nur seit über 48 Std offene Anfragen
+  if (overdueOnly) items = items.filter(isOverdue);
 
   if (type === 'mine') {
     switch (mineSortOrder) {
@@ -3987,10 +4006,12 @@ function initGemeinsame() {
   if (!root) return;
   const abtKey   = resolvedFields['Abteilung'] || 'Abteilung';
   const priceKey = resolvedFields['GeschaetzterPreis'] || 'GeschaetzterPreis';
-  const open = (allItems || []).filter(i => isOffenStatus(getStatusVal(i)));
+  const open    = (allItems || []).filter(i => isOffenStatus(getStatusVal(i)));
+  const odCount = open.filter(isOverdue).length;
+  const shown   = overdueOnly ? open.filter(isOverdue) : open;
 
   const groups = {};
-  for (const it of open) {
+  for (const it of shown) {
     const g = String(getField(it, abtKey) || '').trim() || 'Ohne Abteilung';
     (groups[g] = groups[g] || []).push(it);
   }
@@ -4007,14 +4028,21 @@ function initGemeinsame() {
   });
   for (const g of names) groups[g].sort((a, b) => new Date(a.createdDateTime) - new Date(b.createdDateTime));
 
+  const odToggle = (odCount || overdueOnly)
+    ? `<button class="gem-od-toggle${overdueOnly ? ' active' : ''}" onclick="toggleOverdueFilter('gemeinsame')"
+        title="Nur Anfragen, die seit über 48 Std offen sind">⚠ Überfällig (48 h) · ${odCount}</button>`
+    : '';
   let html = `
     <div class="gem-head">
-      <h2 class="gem-title">Gemeinsame Anfragen</h2>
+      <div class="gem-head-row">
+        <h2 class="gem-title">Gemeinsame Anfragen</h2>
+        ${odToggle}
+      </div>
       <p class="gem-sub">Alle laufenden Anfragen im Überblick, nach Abteilung gruppiert, älteste zuerst.</p>
     </div>`;
 
-  if (!open.length) {
-    html += `<div class="gem-empty">Zurzeit keine laufenden Anfragen.</div>`;
+  if (!shown.length) {
+    html += `<div class="gem-empty">${overdueOnly ? 'Keine überfälligen Anfragen.' : 'Zurzeit keine laufenden Anfragen.'}</div>`;
   } else {
     for (const g of names) {
       const rows = groups[g];

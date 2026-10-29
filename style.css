@@ -331,6 +331,16 @@ body {
 }
 .gem-group-name { font-weight: 700; color: #1a2644; font-size: .9rem; }
 .gem-group-meta { font-size: .78rem; color: #6b7280; white-space: nowrap; }
+.gem-head-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.gem-od-toggle {
+  border: 1px solid #fecaca; background: #fff; color: #b91c1c; font-weight: 600;
+  font-size: .8rem; border-radius: 8px; padding: 6px 12px; cursor: pointer; white-space: nowrap;
+}
+.gem-od-toggle:hover { background: #fef2f2; }
+.gem-od-toggle.active { background: #fef2f2; box-shadow: 0 0 0 2px rgba(220,38,38,.15); }
+
+/* 48-Std-Filterchip (Meine Anfragen) */
+.sc-chip.sc-chip-od { --sc-bg: #fef2f2; --sc-color: #b91c1c; color: #b91c1c; }
 
 /* ── Panel ── */
 .panel-hdr {
