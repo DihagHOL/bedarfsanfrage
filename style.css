@@ -306,6 +306,15 @@ body {
 .ica-no      { color: #b91c1c; font-weight: 600; }
 .ica-pending { color: #b45309; font-weight: 600; }
 
+/* ── 48-Std-Markierung: laufende Anfrage seit über 48 Std offen ── */
+.item-card.is-overdue { border-color: #fecaca; background: #fef2f2; }
+.cr2.is-overdue       { background: #fef2f2; box-shadow: inset 3px 0 0 #dc2626; }
+.ic-overdue, .cr2-overdue {
+  font-size: .72rem; font-weight: 600; color: #b91c1c;
+  background: #fff; border: 1px solid #fecaca; border-radius: 6px;
+  padding: 3px 8px; margin-bottom: 6px; display: inline-block;
+}
+
 /* ── Panel ── */
 .panel-hdr {
   padding: 16px 18px 12px;

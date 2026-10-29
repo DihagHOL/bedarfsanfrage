@@ -4791,9 +4791,26 @@ function getApprovalSummary(item) {
   return `<span class="ica-pending">⏳ In Prüfung</span>`;
 }
 
+// Laufende Anfragen, die seit über 48 Std offen sind, werden rot markiert und als
+// vorrangig gekennzeichnet. Terminal-/Ruhe-Status (Bestellt, Abgelehnt, Erledigt,
+// Entwurf) zählen nicht als offen.
+const OVERDUE_HOURS = 48;
+const OVERDUE_HINT  = '⚠ Seit über 48 Std offen · wird vorrangig bearbeitet';
+function isOffenStatus(status) {
+  const v = (status || '').toLowerCase();
+  return !!v && !/(bestellt|abgelehnt|erledigt|abgeschlossen|entwurf|automatisch erstellt)/.test(v);
+}
+function isOverdue(item) {
+  if (!isOffenStatus(getStatusVal(item))) return false;
+  const t = item && item.createdDateTime ? Date.parse(item.createdDateTime) : NaN;
+  if (isNaN(t)) return false;
+  return (Date.now() - t) >= OVERDUE_HOURS * 36e5;
+}
+
 function itemCard(item) {
   const title   = esc(cleanTitle(getField(item,'Title')));
   const status  = getStatusVal(item);
+  const over    = isOverdue(item);
   const wg      = getField(item, resolvedFields['Warengruppe']    || 'Warengruppe')      || '';
   const preis   = parseFloat(getField(item, resolvedFields['GeschaetzterPreis'] || 'GeschaetzterPreis')) || null;
   const prio    = getField(item, resolvedFields['Prioritaet']     || 'Prioritaet')       || '';
@@ -4808,7 +4825,7 @@ function itemCard(item) {
   const sel     = panelItemId === String(item.id) ? ' selected' : '';
 
   return `
-    <div class="item-card${sel}" data-id="${item.id}" data-lm="${item.lastModifiedDateTime||''}" onclick="openPanel('${item.id}')">
+    <div class="item-card${sel}${over ? ' is-overdue' : ''}" data-id="${item.id}" data-lm="${item.lastModifiedDateTime||''}" onclick="openPanel('${item.id}')">
       <div class="ic-top">
         <div class="ic-title">${prioDot(prio)}${title}</div>
         <div class="ic-topright">
@@ -4816,6 +4833,7 @@ function itemCard(item) {
           ${statusBadge(status)}
         </div>
       </div>
+      ${over ? `<div class="ic-overdue">${OVERDUE_HINT}</div>` : ''}
       <div class="ic-tags">
         <span class="ic-tag ic-banf">#${item.id}</span>
         ${wg      ? `<span class="ic-tag ic-wg">${esc(wg)}</span>` : ''}
@@ -4884,6 +4902,7 @@ function compactRow(item) {
   const created = item.createdDateTime ? fmtDate(item.createdDateTime) : '';
   const creator = item.createdBy?.user?.displayName || item.createdBy?.user?.email || '';
   const apprSum = getApprovalSummary(item);
+  const over    = isOverdue(item);
 
   const tags = [
     wg     ? `<span class="cr2-tag cr2-wg">${esc(wg)}</span>` : '',
@@ -4893,7 +4912,7 @@ function compactRow(item) {
   ].filter(Boolean).join('');
 
   return `
-    <div class="cr2" onclick="navigate('detail','${item.id}')">
+    <div class="cr2${over ? ' is-overdue' : ''}" onclick="navigate('detail','${item.id}')">
       <div class="cr2-head">
         <div class="cr2-title">${prioDot(prio)}${esc(title)}</div>
         <div class="cr2-right">
@@ -4901,6 +4920,7 @@ function compactRow(item) {
           ${statusBadge(status)}
         </div>
       </div>
+      ${over ? `<div class="cr2-overdue">${OVERDUE_HINT}</div>` : ''}
       ${tags ? `<div class="cr2-tags">${tags}</div>` : ''}
       <div class="cr2-foot">
         <span class="cr2-meta">${creator ? `👤 ${esc(creator)}` : ''}${created ? ` · ${created}` : ''} · #${item.id}</span>
