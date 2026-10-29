@@ -1085,6 +1085,12 @@ function renderStatusChips() {
     <span class="sc-count">${total}</span>
   </button>`;
 
+  const odCountDash = baseItems.filter(isOverdue).length;
+  const odChip = (odCountDash || overdueOnly)
+    ? `<button class="sc-chip sc-chip-od${overdueOnly ? ' active' : ''}" onclick="toggleOverdueFilter('dashboard')" title="Nur Anfragen, die seit über 48 Std offen sind">
+        <span class="sc-icon">⚠</span><span class="sc-label">Überfällig</span><span class="sc-count">${odCountDash}</span></button>`
+    : '';
+
   const statusChips = Object.entries(counts).sort((a,b) => b[1]-a[1]).map(([s, n]) => {
     const sl = s.toLowerCase().trim();
     let st = STATUS_STYLES[sl];
@@ -1112,7 +1118,7 @@ function renderStatusChips() {
   }).join('');
 
   const vol = `<span class="sc-volume">${fmtEuro(volume)}<small>Volumen</small></span>`;
-  el.innerHTML = allChip + statusChips + vol;
+  el.innerHTML = allChip + odChip + statusChips + vol;
   renderExtraFilters();
 }
 
@@ -1183,6 +1189,7 @@ function filterDashboard(soft) {
     (getField(i,'Title')||'').toLowerCase().includes(search) || String(i.id||'').includes(search)
   );
   if (dashStatusFilter !== '') items = items.filter(i => (getStatusVal(i)||'') === dashStatusFilter);
+  if (overdueOnly) items = items.filter(isOverdue);
   if (dashWGFilter) items = items.filter(i => (getField(i, resolvedFields['Warengruppe']||'Warengruppe')||'') === dashWGFilter);
   if (dashMAFilter) items = items.filter(i => {
     const creator = i.createdBy?.user?.displayName || i.createdBy?.user?.email || '';
@@ -1409,6 +1416,7 @@ function setMineFilter(status) {
 function toggleOverdueFilter(type) {
   overdueOnly = !overdueOnly;
   if (type === 'gemeinsame') { initGemeinsame(); return; }
+  if (type === 'dashboard') { renderStatusChips(); filterDashboard(); return; }
   renderStatusChipsMine();
   filterView('mine');
 }
@@ -1725,6 +1733,14 @@ function statusTimeline(statusVal, item) {
   // Anzeige-Label aus echten SP-Choices (falls geladen), sonst aus TIMELINE_STAGES
   const spLabel = st => (statusChoices.find(c => st.test(c.trim())) || st.label).trim();
 
+  // Vergangene „In Prüfung (X)"-Stufen als „Genehmigt (X)" zeigen: die Stufe ist durch,
+  // die Anfrage steht schon weiter. Nur die aktuelle Stufe bleibt „In Prüfung (X)".
+  const displayLabel = (st, isPast) => {
+    const base = spLabel(st);
+    if (isPast) { const m = base.match(/^In Pr[üu]fung \((.+)\)$/i); if (m) return `Genehmigt (${m[1]})`; }
+    return base;
+  };
+
   const isRej = /^abgelehnt$/i.test(sv);
 
   // Antragsteller aus createdBy, Besteller aus lastModifiedBy (wer „Bestellt" gesetzt
@@ -1806,7 +1822,7 @@ function statusTimeline(statusVal, item) {
 
   displayStages.forEach(st => {
     const i            = stages.indexOf(st);   // Originalindex bestimmt den Zustand (erledigt/aktuell/kommend)
-    const label        = spLabel(st);
+    const label        = displayLabel(st, curIdx !== -1 && i < curIdx);
     const isTerminalOk = /^(freigegeben|bestellt)$/i.test(st.label);
     let dot, cls, bold = false;
     if (curIdx === -1) {                       // unbekannter Status → erste Stufe erledigt, Rest kommend
@@ -4006,26 +4022,24 @@ function initGemeinsame() {
   if (!root) return;
   const abtKey   = resolvedFields['Abteilung'] || 'Abteilung';
   const priceKey = resolvedFields['GeschaetzterPreis'] || 'GeschaetzterPreis';
-  const open    = (allItems || []).filter(i => isOffenStatus(getStatusVal(i)));
+
+  // Es werden nur Anfragen der angelegten Abteilungen gezeigt. Die Item-Abteilung
+  // wird dafür unabhängig von Groß-/Kleinschreibung auf die konfigurierte Schreibweise
+  // abgebildet; Anfragen ohne (oder mit nicht angelegter) Abteilung bleiben außen vor.
+  const byLower = new Map(abteilungen.map(a => [a.trim().toLowerCase(), a]));
+  const configuredOf = it => byLower.get(String(getField(it, abtKey) || '').trim().toLowerCase()) || null;
+
+  const open    = (allItems || []).filter(i => isOffenStatus(getStatusVal(i)) && configuredOf(i));
   const odCount = open.filter(isOverdue).length;
   const shown   = overdueOnly ? open.filter(isOverdue) : open;
 
   const groups = {};
   for (const it of shown) {
-    const g = String(getField(it, abtKey) || '').trim() || 'Ohne Abteilung';
+    const g = configuredOf(it);
     (groups[g] = groups[g] || []).push(it);
   }
-  // Reihenfolge: konfigurierte Abteilungen zuerst (in konfigurierter Reihenfolge),
-  // dann übrige Werte alphabetisch, „Ohne Abteilung" ganz unten.
-  const order = a => {
-    if (a === 'Ohne Abteilung') return [2, ''];
-    const idx = abteilungen.indexOf(a);
-    return idx >= 0 ? [0, String(idx).padStart(4, '0')] : [1, a.toLowerCase()];
-  };
-  const names = Object.keys(groups).sort((a, b) => {
-    const oa = order(a), ob = order(b);
-    return oa[0] - ob[0] || oa[1].localeCompare(ob[1], 'de');
-  });
+  // Gruppenreihenfolge wie in den Einstellungen angelegt.
+  const names = Object.keys(groups).sort((a, b) => abteilungen.indexOf(a) - abteilungen.indexOf(b));
   for (const g of names) groups[g].sort((a, b) => new Date(a.createdDateTime) - new Date(b.createdDateTime));
 
   const odToggle = (odCount || overdueOnly)
@@ -4038,11 +4052,13 @@ function initGemeinsame() {
         <h2 class="gem-title">Gemeinsame Anfragen</h2>
         ${odToggle}
       </div>
-      <p class="gem-sub">Alle laufenden Anfragen im Überblick, nach Abteilung gruppiert, älteste zuerst.</p>
+      <p class="gem-sub">Laufende Anfragen der angelegten Abteilungen, nach Abteilung gruppiert, älteste zuerst.</p>
     </div>`;
 
-  if (!shown.length) {
-    html += `<div class="gem-empty">${overdueOnly ? 'Keine überfälligen Anfragen.' : 'Zurzeit keine laufenden Anfragen.'}</div>`;
+  if (!abteilungen.length) {
+    html += `<div class="gem-empty">Noch keine Abteilungen angelegt. Lege sie in den Einstellungen an, dann erscheinen hier die Anfragen dieser Abteilungen.</div>`;
+  } else if (!shown.length) {
+    html += `<div class="gem-empty">${overdueOnly ? 'Keine überfälligen Anfragen in den angelegten Abteilungen.' : 'Keine laufenden Anfragen in den angelegten Abteilungen.'}</div>`;
   } else {
     for (const g of names) {
       const rows = groups[g];
