@@ -4549,6 +4549,13 @@ function initMultiWizard() {
     prioEl.value = normalOpt ? normalOpt.value : (prioOpts.find(o => o.value !== '')?.value || '');
   }
   const beschEl = $id('mf-Beschreibung'); if (beschEl) beschEl.value = '';
+  // Abteilung-Dropdown aus der zentral gepflegten Liste füllen und zurücksetzen.
+  const mAbtEl = $id('mf-Abteilung');
+  if (mAbtEl) {
+    mAbtEl.innerHTML = '<option value="">– bitte wählen –</option>'
+      + abteilungen.map(a => `<option value="${esc(a)}">${esc(a)}</option>`).join('');
+    mAbtEl.value = '';
+  }
   const terminEl = $id('mf-Termin'); if (terminEl) terminEl.value = '';
   // Reset Beschaffung fields
   ['mf-Lieferant','mf-Lieferant2','mf-Lieferant3','mf-Lieferant4','mf-GeschaetzterPreis']
@@ -4803,6 +4810,7 @@ function wMultiNext(step) {
       Warengruppe:  wg,
       Prioritaet:   $id('mf-Prioritaet').value,
       Beschreibung: $id('mf-Beschreibung').value.trim(),
+      Abteilung:    $id('mf-Abteilung')?.value || '',
     };
   } else if (step === 3) {
     const lieferant = $id('mf-Lieferant').value.trim();
@@ -4925,6 +4933,7 @@ async function submitMultiRequest() {
       Warengruppe:       s2.Warengruppe || '',
       Prioritaet:        s2.Prioritaet || '',
       Beschreibung:      s2.Beschreibung || '',
+      Abteilung:         s2.Abteilung || '',
       Termin:            '',
       Beschaffungslogik: s3.Beschaffungslogik || '',
       Lieferant:         s3.Lieferant || '',
