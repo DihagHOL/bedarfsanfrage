@@ -729,7 +729,7 @@ async function processAutoDrafts() {
 // ── ROUTING ──────────────────────────────────────────────────────────────────
 // Dashboard title differs by role: admins see "Dashboard (Alle)", others see "Meine Anfragen"
 function VIEW_TITLES(view) {
-  const map = { new:'Neue Bedarfsanfrage', multi:'Sammelanfrage', mine:'Meine Anfragen', all:'Alle Anfragen', detail:'Anfrage Details', importer:'Tabellen-Importer', reports:'Reports & Auswertungen', schulung:'Schulung (Beta)', prozess:'Prozess' };
+  const map = { new:'Neue Bedarfsanfrage', multi:'Sammelanfrage', mine:'Meine Anfragen', all:'Alle Anfragen', detail:'Anfrage Details', importer:'Tabellen-Importer', reports:'Reports & Auswertungen', schulung:'Schulung (Beta)', prozess:'Prozess', gemeinsame:'Gemeinsame Anfragen' };
   if (view === 'dashboard') return canAccess('dashboard') ? 'Dashboard (Alle Anfragen)' : 'Meine Anfragen';
   return map[view] || view;
 }
@@ -745,7 +745,7 @@ function isAdmin() { return account?.username?.toLowerCase() === ADMIN_EMAIL; }
 // erstellung per Graph ist im Tenant gesperrt) – die App findet sie nur.
 const ACCESS_LIST_NAME  = 'BANF_Konfiguration';
 const ACCESS_ITEM_TITLE = 'access';
-const GATED_FEATURES    = ['dashboard', 'reports', 'importer'];
+const GATED_FEATURES    = ['dashboard', 'reports', 'importer', 'gemeinsame'];
 let accessListId        = null;
 let accessConfigItemId  = null;
 let accessUsers         = {}; // { 'upn@dihag.com': { dashboard:true, reports:true, importer:false } }
@@ -950,6 +950,7 @@ function navigate(view, id) {
   else if (view === 'multi')     initMultiWizard();
   else if (view === 'importer')  initImporter();
   else if (view === 'reports')   initReports();
+  else if (view === 'gemeinsame') initGemeinsame();
   else if (view === 'schulung')  initSchulung();
   else if (view === 'prozess')   initProzess();
   else if (view === 'detail' && id) renderDetail(id);
@@ -3909,6 +3910,50 @@ function procStep(role, name, desc, kind) {
     </div>`;
 }
 
+// ── GEMEINSAME ANFRAGEN ───────────────────────────────────────────────────────
+// Geteilte Übersicht aller laufenden Anfragen für den Einkauf, nach Abteilung
+// gruppiert. Zeilen über compactRow, damit die 48-Std- und Reservierungs-Markierung
+// mitlaufen. Sichtbarkeit über die Berechtigung „gemeinsame" (Einstellungen).
+function initGemeinsame() {
+  const root = $id('view-gemeinsame');
+  if (!root) return;
+  const abtKey   = resolvedFields['Abteilung'] || 'Abteilung';
+  const priceKey = resolvedFields['GeschaetzterPreis'] || 'GeschaetzterPreis';
+  const open = (allItems || []).filter(i => isOffenStatus(getStatusVal(i)));
+
+  const groups = {};
+  for (const it of open) {
+    const g = String(getField(it, abtKey) || '').trim() || 'Ohne Abteilung';
+    (groups[g] = groups[g] || []).push(it);
+  }
+  const names = Object.keys(groups).sort((a, b) => a.localeCompare(b, 'de'));
+  for (const g of names) groups[g].sort((a, b) => new Date(a.createdDateTime) - new Date(b.createdDateTime));
+
+  let html = `
+    <div class="gem-head">
+      <h2 class="gem-title">Gemeinsame Anfragen</h2>
+      <p class="gem-sub">Alle laufenden Anfragen im Überblick, nach Abteilung gruppiert, älteste zuerst.</p>
+    </div>`;
+
+  if (!open.length) {
+    html += `<div class="gem-empty">Zurzeit keine laufenden Anfragen.</div>`;
+  } else {
+    for (const g of names) {
+      const rows = groups[g];
+      const sum  = rows.reduce((s, i) => s + (parseFloat(getField(i, priceKey)) || 0), 0);
+      html += `
+        <div class="gem-group">
+          <div class="gem-group-head">
+            <span class="gem-group-name">${esc(g)}</span>
+            <span class="gem-group-meta">${rows.length} ${rows.length === 1 ? 'Anfrage' : 'Anfragen'} · ${fmtEuro(sum)}</span>
+          </div>
+          <div class="gem-group-body">${rows.map(compactRow).join('')}</div>
+        </div>`;
+    }
+  }
+  root.innerHTML = html;
+}
+
 function initProzess() {
   plState = null;
   const arrow = '<div class="flow-arrow">↓</div>';
@@ -6025,6 +6070,9 @@ function openSettings() {
       <label class="tgl-wrap" title="Tabellen-Importer">
         <input type="checkbox" ${p.importer ? 'checked' : ''}
           onchange="setAccess('${escJs(upn)}','importer',this.checked)"><span class="tgl"></span></label>
+      <label class="tgl-wrap" title="Gemeinsame Anfragen">
+        <input type="checkbox" ${p.gemeinsame ? 'checked' : ''}
+          onchange="setAccess('${escJs(upn)}','gemeinsame',this.checked)"><span class="tgl"></span></label>
       <label class="tgl-wrap" title="Einkauf: Status setzen + genehmigen/ablehnen">
         <input type="checkbox" ${p.einkauf ? 'checked' : ''}
           onchange="setAccess('${escJs(upn)}','einkauf',this.checked)"><span class="tgl"></span></label>
@@ -6046,6 +6094,7 @@ function openSettings() {
       <span class="su-col-lbl" title="Dashboard">📊</span>
       <span class="su-col-lbl" title="Reports">📈</span>
       <span class="su-col-lbl" title="Tabellen-Importer">🗂</span>
+      <span class="su-col-lbl" title="Gemeinsame Anfragen">👥</span>
       <span class="su-col-lbl" title="Einkauf (genehmigen)">🛒</span>
       <span style="width:22px"></span>
     </div>
@@ -6072,7 +6121,7 @@ function openSettings() {
         ${roVal(s.autoRefresh && s.autoRefreshGranted, 'Aktiviert')}</div>`;
 
   // Zugriffs-Übersicht für den aktuellen Nutzer (zentral gesteuert, nur lesbar)
-  const featLabel = { dashboard:'Dashboard', reports:'Reports', importer:'Tabellen-Importer' };
+  const featLabel = { dashboard:'Dashboard', reports:'Reports', importer:'Tabellen-Importer', gemeinsame:'Gemeinsame Anfragen' };
   const myAreas = isAdmin()
     ? 'Alle Bereiche (Administrator)'
     : ([...GATED_FEATURES.filter(f => canAccess(f)).map(f => featLabel[f]),
