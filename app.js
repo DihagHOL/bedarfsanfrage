@@ -1701,7 +1701,23 @@ function statusTimeline(statusVal, item) {
 
   // Normaler Verlauf: erledigt (✓) / aktuell (●) / kommend (○)
   const curIdx = stages.findIndex(st => st.test(sv));
-  stages.forEach((st, i) => {
+
+  // Einkauf-Stufen zu einer zusammenfassen: „In Prüfung (Einkauf)" und
+  // „Genehmigt (Einkauf)" sollen nie gemeinsam erscheinen. Vor der Genehmigung
+  // zeigt die Leiste nur „In Prüfung (Einkauf)", ab „Genehmigt (Einkauf)" nur noch
+  // „Genehmigt (Einkauf)".
+  const genIdx    = stages.findIndex(st => /genehmigt/i.test(st.label) && /einkauf/i.test(st.label));
+  const einkaufOk = curIdx !== -1 && genIdx !== -1 && curIdx >= genIdx;
+  const displayStages = stages.filter(st => {
+    if (/pr[üu]fung/i.test(st.label) && /einkauf/i.test(st.label) && !/strategisch/i.test(st.label))
+      return !einkaufOk;                       // „In Prüfung (Einkauf)" nur solange nicht genehmigt
+    if (/genehmigt/i.test(st.label) && /einkauf/i.test(st.label))
+      return einkaufOk;                        // „Genehmigt (Einkauf)" erst ab der Genehmigung
+    return true;
+  });
+
+  displayStages.forEach(st => {
+    const i            = stages.indexOf(st);   // Originalindex bestimmt den Zustand (erledigt/aktuell/kommend)
     const label        = spLabel(st);
     const isTerminalOk = /^(freigegeben|bestellt)$/i.test(st.label);
     let dot, cls, bold = false;
