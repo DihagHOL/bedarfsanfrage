@@ -315,6 +315,10 @@ body {
   padding: 3px 8px; margin-bottom: 6px; display: inline-block;
 }
 
+/* ── Reservierung („Schlüssel") ── */
+.ic-tag.ic-reserved, .cr2-tag.cr2-reserved { background: #fef3c7; color: #92400e; font-weight: 600; }
+.panel-lock-badge.panel-lock-mine { background: #dbeafe; color: #1e40af; border-color: #93c5fd; }
+
 /* ── Panel ── */
 .panel-hdr {
   padding: 16px 18px 12px;
