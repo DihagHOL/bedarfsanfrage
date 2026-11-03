@@ -78,42 +78,130 @@ const SYSTEM_FIELDS = new Set([
   'OData__ColorTag','AppAuthorLookupId','AppEditorLookupId'
 ]);
 
-// ── ARTIKEL-STAMMDATEN (TID → Bezeichnung / Warengruppe) ─────────────────────
-const TID_MAP = {
-};
+// ── STAMMDATEN AUS SHAREPOINT ────────────────────────────────────────────────
+// Artikel- und Kostenstellen-Stammdaten liegen in SharePoint-Listen, nicht im Code.
+//   BANF_Artikelstamm:  Title = Artikelnummer, Bezeichnung, Warengruppe, Gruppe
+//   BANF_Kostenstellen: Title = Kostenstelle,  Bezeichnung
+// Gelesen wird aus SharePoint, mit localStorage-Cache für schnellen Start und Offline-Betrieb.
+const ARTIKEL_LIST_NAME  = 'BANF_Artikelstamm';
+const KOSTENST_LIST_NAME = 'BANF_Kostenstellen';
+let artikelListId  = null;
+let kostenstListId = null;
 
+// Aktive Nachschlagetabellen – werden aus SharePoint/Cache gefüllt.
+let TID_MAP_ACTIVE = {};   // { 'nr': {b,w,g} }
+let TID_ENTRIES    = [];   // Object.entries(TID_MAP_ACTIVE)
+let KOSTENST_DATA  = [];   // [ {nr,label} ]
 
-// ── KOSTENSTELLEN-STAMMDATEN ────────────────────────────────────────────────
-// Format: { nr: "10011", label: "Fertigungsleitung" }
-// Overrideable via localStorage key DIHAG_KOSTENST
-const KOSTENST_DEFAULT = [
-];
+const LS_TID_CACHE      = 'DIHAG_TID_CACHE';
+const LS_KOSTENST_CACHE = 'DIHAG_KOSTENST_CACHE';
 
-// Active lookup tables — reloaded from localStorage by reloadLookupData()
-let TID_MAP_ACTIVE = TID_MAP;         // may be replaced by imported data
-let TID_ENTRIES    = Object.entries(TID_MAP);
-let KOSTENST_DATA  = KOSTENST_DEFAULT; // may be replaced by imported data
-
-const LS_TID_KEY    = 'DIHAG_TID_DATA';
-const LS_KOSTENST_KEY = 'DIHAG_KOSTENST';
-
-function reloadLookupData() {
+// Cache sofort (synchron) laden – für den ersten Aufbau vor dem SharePoint-Abruf.
+function loadLookupCache() {
   try {
-    const rawTid = localStorage.getItem(LS_TID_KEY);
-    if (rawTid) {
-      const obj = JSON.parse(rawTid);
-      TID_MAP_ACTIVE = Object.assign({}, TID_MAP, obj); // merge: imported wins over default for same keys
-      TID_ENTRIES = Object.entries(TID_MAP_ACTIVE);
-    } else {
-      TID_MAP_ACTIVE = TID_MAP;
-      TID_ENTRIES = Object.entries(TID_MAP);
+    const raw = localStorage.getItem(LS_TID_CACHE);
+    if (raw) { TID_MAP_ACTIVE = JSON.parse(raw) || {}; TID_ENTRIES = Object.entries(TID_MAP_ACTIVE); }
+  } catch(e) { console.warn('loadLookupCache TID:', e); }
+  try {
+    const raw = localStorage.getItem(LS_KOSTENST_CACHE);
+    if (raw) KOSTENST_DATA = JSON.parse(raw) || [];
+  } catch(e) { console.warn('loadLookupCache KOSTENST:', e); }
+}
+
+// Liste per Anzeigename finden (case-insensitiv, wirft nicht).
+async function _findListByName(name) {
+  try {
+    const all = await gGet(`/sites/${siteId}/lists?$select=id,displayName&$top=500`);
+    const hit = (all.value || []).find(l => (l.displayName || '').trim().toLowerCase() === name.toLowerCase());
+    return hit?.id || null;
+  } catch { return null; }
+}
+
+// Liste anlegen. Bei fehlender Berechtigung (z. B. 403) leise null; Anlegen braucht Site-Owner-Rechte.
+async function _createList(name, columns) {
+  try {
+    const tok = await getToken();
+    const r = await fetch(API + `/sites/${siteId}/lists`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName: name, list: { template: 'genericList' }, columns }),
+    });
+    if (r.ok) return (await r.json()).id;
+    console.info(`[Stammdaten] Liste "${name}" nicht automatisch anlegbar (HTTP ${r.status}).`);
+    return null;
+  } catch { return null; }
+}
+
+// Stammdaten aus SharePoint laden; Listen bei Bedarf anlegen. Wirft nie (Fallback: Cache).
+async function loadLookupDataSP() {
+  if (!siteId) return;
+  try {
+    artikelListId = await _findListByName(ARTIKEL_LIST_NAME);
+    if (!artikelListId) artikelListId = await _createList(ARTIKEL_LIST_NAME,
+      [{ name:'Bezeichnung', text:{} }, { name:'Warengruppe', text:{} }, { name:'Gruppe', text:{} }]);
+    kostenstListId = await _findListByName(KOSTENST_LIST_NAME);
+    if (!kostenstListId) kostenstListId = await _createList(KOSTENST_LIST_NAME,
+      [{ name:'Bezeichnung', text:{} }]);
+
+    if (artikelListId) {
+      const items = await gGetAll(`/sites/${siteId}/lists/${artikelListId}/items?$expand=fields($select=Title,Bezeichnung,Warengruppe,Gruppe)&$top=500`);
+      const map = {};
+      for (const it of items) {
+        const f  = it.fields || {};
+        const nr = String(f.Title || '').trim();
+        if (nr) map[nr] = { b: f.Bezeichnung || '', w: f.Warengruppe || '', g: f.Gruppe || '' };
+      }
+      if (Object.keys(map).length) {
+        TID_MAP_ACTIVE = map; TID_ENTRIES = Object.entries(map);
+        try { localStorage.setItem(LS_TID_CACHE, JSON.stringify(map)); } catch {}
+      }
     }
-  } catch(e) { console.warn('reloadLookupData TID:', e); }
-  try {
-    const rawKst = localStorage.getItem(LS_KOSTENST_KEY);
-    if (rawKst) KOSTENST_DATA = JSON.parse(rawKst);
-    else        KOSTENST_DATA = KOSTENST_DEFAULT;
-  } catch(e) { console.warn('reloadLookupData KOSTENST:', e); }
+    if (kostenstListId) {
+      const items = await gGetAll(`/sites/${siteId}/lists/${kostenstListId}/items?$expand=fields($select=Title,Bezeichnung)&$top=500`);
+      const arr = items.map(it => ({ nr: String(it.fields?.Title || '').trim(), label: it.fields?.Bezeichnung || '' }))
+                       .filter(e => e.nr);
+      if (arr.length) {
+        KOSTENST_DATA = arr;
+        try { localStorage.setItem(LS_KOSTENST_CACHE, JSON.stringify(arr)); } catch {}
+      }
+    }
+    // Ist der Importer gerade offen, die Zähler aktualisieren.
+    if (currentView === 'importer' && typeof renderImporter === 'function') { try { renderImporter(); } catch {} }
+  } catch (e) {
+    console.warn('[Stammdaten] Laden aus SharePoint fehlgeschlagen, nutze Cache:', e.message);
+  }
+}
+
+// Graph-$batch (max. 20 Requests je Aufruf). Liefert die Teil-Responses.
+async function gBatch(requests) {
+  const out = [];
+  for (let i = 0; i < requests.length; i += 20) {
+    const chunk = requests.slice(i, i + 20).map((r, n) => ({ id: String(i + n), ...r }));
+    const res = await gPost('/$batch', { requests: chunk });
+    out.push(...(res.responses || []));
+  }
+  return out;
+}
+
+// Upsert per Title (Nummer): vorhandene Items patchen, neue anlegen – via $batch.
+async function upsertStamm(listId, listName, rows, toFields) {
+  if (!listId) listId = await _findListByName(listName);
+  if (!listId) throw new Error(`Liste "${listName}" nicht gefunden. Bitte die App neu laden, damit sie angelegt wird.`);
+  const existing = await gGetAll(`/sites/${siteId}/lists/${listId}/items?$expand=fields($select=Title)&$top=500`);
+  const idByTitle = {};
+  for (const it of existing) { const t = String(it.fields?.Title || '').trim().toUpperCase(); if (t) idByTitle[t] = it.id; }
+  const reqs = rows.map(r => {
+    const fields = toFields(r);
+    const key = String(fields.Title).trim().toUpperCase();
+    if (idByTitle[key]) {
+      return { method:'PATCH', url:`/sites/${siteId}/lists/${listId}/items/${idByTitle[key]}/fields`, headers:{ 'Content-Type':'application/json' }, body: fields };
+    }
+    return { method:'POST', url:`/sites/${siteId}/lists/${listId}/items`, headers:{ 'Content-Type':'application/json' }, body: { fields } };
+  });
+  const responses = await gBatch(reqs);
+  const failed = responses.filter(r => !(r.status >= 200 && r.status < 300));
+  if (failed.length) throw new Error(`${failed.length} von ${reqs.length} Einträgen fehlgeschlagen (HTTP ${failed[0].status}).`);
+  return { total: reqs.length };
 }
 
 // ── STATE ───────────────────────────────────────────────────────────────────
@@ -332,6 +420,9 @@ async function bootDone() {
     await loadAccessConfig();
     // Wiedervorlagen aus SharePoint laden (nicht blockierend für den Start)
     initFavorites().catch(() => {});
+    // Artikel-/Kostenstellen-Stammdaten aus SharePoint nachladen (nicht blockierend;
+    // der Cache steht bereits, der Abruf aktualisiert ihn und legt fehlende Listen an)
+    loadLookupDataSP().catch(() => {});
     // Hinweis: Automatische Entwürfe werden jetzt vom geplanten GitHub-Actions-Cron
     // (scripts/auto-drafts.mjs) angelegt – die App-seitige Erstellung ist deaktiviert,
     // um Doppelanlagen zu vermeiden.
@@ -1048,8 +1139,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Menu toggle
   $id('menu-toggle').addEventListener('click', () => $id('sidebar').classList.toggle('open'));
 
-  // Boot — load persisted lookup table overrides (TID + Kostenstellen)
-  reloadLookupData();
+  // Boot — Stammdaten zunächst aus dem localStorage-Cache (TID + Kostenstellen);
+  // der frische Abruf aus SharePoint folgt in bootDone über loadLookupDataSP().
+  loadLookupCache();
 
   $id('boot-spinner').style.display = 'block';
   try {
@@ -3363,9 +3455,9 @@ function downloadCSV(csvText, filename) {
 }
 
 function exportTidCSV() {
-  const rows = ['Artikelnummer;Bezeichnung;Warengruppe'];
+  const rows = ['Artikelnummer;Bezeichnung;Warengruppe;Gruppe'];
   for (const [nr, h] of Object.entries(TID_MAP_ACTIVE)) {
-    rows.push(`${nr};${(h.b||'').replace(/;/g,'')};${(h.w||'').replace(/;/g,'')}`);
+    rows.push(`${nr};${(h.b||'').replace(/;/g,'')};${(h.w||'').replace(/;/g,'')};${(h.g||'').replace(/;/g,'')}`);
   }
   downloadCSV(rows.join('\r\n'), 'Artikelnummern_Export.csv');
 }
@@ -3379,7 +3471,7 @@ function exportKstCSV() {
 }
 
 function downloadTidTemplate() {
-  downloadCSV('Artikelnummer;Bezeichnung;Warengruppe\r\n1234-00001;Beispielartikel;Ersatzteile', 'Artikelnummern_Vorlage.csv');
+  downloadCSV('Artikelnummer;Bezeichnung;Warengruppe;Gruppe\r\n1234-00001;Beispielartikel;Ersatzteile;Hilfs- und Betriebsstoffe', 'Artikelnummern_Vorlage.csv');
 }
 
 function downloadKstTemplate() {
@@ -3389,14 +3481,18 @@ function downloadKstTemplate() {
 function renderImporter() {
   const tidCount  = Object.keys(TID_MAP_ACTIVE).length;
   const kstCount  = KOSTENST_DATA.length;
-  const tidIsCustom = !!localStorage.getItem(LS_TID_KEY);
-  const kstIsCustom = !!localStorage.getItem(LS_KOSTENST_KEY);
+  const tidReady  = !!artikelListId;
+  const kstReady  = !!kostenstListId;
+  const badge = ok => ok
+    ? ' <span class="imp-badge-default">SharePoint</span>'
+    : ' <span class="imp-badge-custom">nur Cache</span>';
 
   $id('view-importer').innerHTML = `
     <div style="max-width:700px;margin:0 auto">
       <p style="color:#6b7280;margin-bottom:20px;font-size:.9rem">
         Laden Sie CSV- oder XLSX-Dateien hoch, um die Artikelnummer- und Kostenstellentabellen zu aktualisieren.
-        Die Daten werden lokal im Browser gespeichert.
+        Die Daten liegen in SharePoint (Listen <code>BANF_Artikelstamm</code> und <code>BANF_Kostenstellen</code>)
+        und gelten damit für alle Nutzer. Ein Upload wird direkt dorthin geschrieben.
       </p>
 
       <!-- Artikelnummern -->
@@ -3404,17 +3500,16 @@ function renderImporter() {
         <div class="imp-card-header">
           <div>
             <div class="imp-card-title">📦 Artikelnummern (TID-Tabelle)</div>
-            <div class="imp-card-sub">${tidCount} Einträge geladen${tidIsCustom ? ' <span class="imp-badge-custom">Angepasst</span>' : ' <span class="imp-badge-default">Standard</span>'}</div>
+            <div class="imp-card-sub">${tidCount} Einträge${badge(tidReady)}</div>
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             <button class="btn btn-sm btn-outline" onclick="exportTidCSV()" title="Aktuelle Tabelle als CSV herunterladen">⬇ Export</button>
             <button class="btn btn-sm btn-ghost" onclick="downloadTidTemplate()" title="Leere Vorlage herunterladen">📄 Vorlage</button>
-            ${tidIsCustom ? `<button class="btn btn-sm btn-ghost" onclick="resetTable('tid')">↺ Zurücksetzen</button>` : ''}
           </div>
         </div>
         <div class="imp-format-hint">
           Format: CSV mit Semikolon <code>Artikelnummer;Bezeichnung;Warengruppe</code><br>
-          oder XLSX mit denselben Spalten in Zeile 1. Bestehende Daten werden durch Import <strong>ergänzt</strong> (gleiche Nr. wird überschrieben).
+          oder XLSX mit denselben Spalten in Zeile 1. Der Upload <strong>ergänzt</strong> die SharePoint-Liste (gleiche Nr. wird aktualisiert).
         </div>
         <div class="imp-drop-zone" id="imp-drop-tid"
           ondragover="event.preventDefault();this.classList.add('drag-over')"
@@ -3434,17 +3529,16 @@ function renderImporter() {
         <div class="imp-card-header">
           <div>
             <div class="imp-card-title">🏢 Kostenstellen</div>
-            <div class="imp-card-sub">${kstCount} Einträge geladen${kstIsCustom ? ' <span class="imp-badge-custom">Angepasst</span>' : ' <span class="imp-badge-default">Standard</span>'}</div>
+            <div class="imp-card-sub">${kstCount} Einträge${badge(kstReady)}</div>
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             <button class="btn btn-sm btn-outline" onclick="exportKstCSV()" title="Aktuelle Tabelle als CSV herunterladen">⬇ Export</button>
             <button class="btn btn-sm btn-ghost" onclick="downloadKstTemplate()" title="Leere Vorlage herunterladen">📄 Vorlage</button>
-            ${kstIsCustom ? `<button class="btn btn-sm btn-ghost" onclick="resetTable('kst')">↺ Zurücksetzen</button>` : ''}
           </div>
         </div>
         <div class="imp-format-hint">
           Format: CSV mit Semikolon <code>Kostenstelle;Bezeichnung</code> oder eine Spalte <code>10011 Fertigungsleitung</code><br>
-          oder XLSX mit denselben Spalten. Hochladen <strong>ersetzt</strong> die gesamte Tabelle.
+          oder XLSX mit denselben Spalten. Der Upload <strong>ergänzt</strong> die SharePoint-Liste (gleiche Nr. wird aktualisiert).
         </div>
         <div class="imp-drop-zone" id="imp-drop-kst"
           ondragover="event.preventDefault();this.classList.add('drag-over')"
@@ -3572,58 +3666,60 @@ async function parseXlsxFile(file) {
   return result;
 }
 
-function applyTidImport(rows, resultEl) {
+async function applyTidImport(rows, resultEl) {
   // Detect header row: if first row looks like a header (non-numeric first cell)
   let start = 0;
   if (rows.length && !/^\d/.test(rows[0][0] || '')) start = 1;
-  const imported = {};
-  let count = 0;
+  const parsed = [];
   for (const row of rows.slice(start)) {
     const nr = String(row[0] || '').trim().toUpperCase();
     const b  = String(row[1] || '').trim();
     const w  = String(row[2] || '').trim();
     if (!nr || !b) continue;
-    imported[nr] = { b, w: w || 'Sonstiges', g: w || 'Sonstiges' };
-    count++;
+    parsed.push({ nr, b, w: w || 'Sonstiges', g: w || 'Sonstiges' });
   }
-  if (!count) { resultEl.innerHTML = '<span style="color:#ef4444">❌ Keine gültigen Zeilen gefunden. Prüfen Sie das Format.</span>'; return; }
-  const merged = Object.assign({}, TID_MAP, imported);
-  localStorage.setItem(LS_TID_KEY, JSON.stringify(imported)); // store only the delta
-  reloadLookupData();
-  resultEl.innerHTML = `<span style="color:#16a34a">✓ ${count} Artikelnummern importiert. Gesamt: ${Object.keys(TID_MAP_ACTIVE).length} Einträge.</span>`;
-  setTimeout(renderImporter, 800);
+  if (!parsed.length) { resultEl.innerHTML = '<span style="color:#ef4444">❌ Keine gültigen Zeilen gefunden. Prüfen Sie das Format.</span>'; return; }
+  resultEl.textContent = `⏳ ${parsed.length} Artikelnummern werden nach SharePoint geschrieben…`;
+  try {
+    await upsertStamm(artikelListId, ARTIKEL_LIST_NAME, parsed,
+      r => ({ Title: r.nr, Bezeichnung: r.b, Warengruppe: r.w, Gruppe: r.g }));
+    await loadLookupDataSP();
+    resultEl.innerHTML = `<span style="color:#16a34a">✓ ${parsed.length} Artikelnummern gespeichert. Gesamt: ${Object.keys(TID_MAP_ACTIVE).length} Einträge.</span>`;
+    setTimeout(renderImporter, 1000);
+  } catch (e) {
+    resultEl.innerHTML = `<span style="color:#ef4444">❌ Speichern fehlgeschlagen: ${esc(e.message)}</span>`;
+  }
 }
 
-function applyKstImport(rows, resultEl) {
+async function applyKstImport(rows, resultEl) {
   let start = 0;
   const firstCell = String(rows[0]?.[0] || '').trim().toLowerCase();
   if (!firstCell || /kostenstelle|nr|nummer/i.test(firstCell)) start = 1;
-  const result = [];
+  const parsed = [];
   for (const row of rows.slice(start)) {
     const col0 = String(row[0] || '').trim();
     const col1 = String(row[1] || '').trim();
     if (!col0) continue;
     if (col1) {
       // Two-column format: col0=nr, col1=label
-      result.push({ nr: col0, label: col1 });
+      parsed.push({ nr: col0, label: col1 });
     } else {
       // Single-column: "10011 Fertigungsleitung"
       const m = col0.match(/^(\d+)\s+(.+)$/);
-      if (m) result.push({ nr: m[1], label: m[2].trim() });
+      if (m) parsed.push({ nr: m[1], label: m[2].trim() });
     }
   }
-  if (!result.length) { resultEl.innerHTML = '<span style="color:#ef4444">❌ Keine gültigen Zeilen gefunden. Prüfen Sie das Format.</span>'; return; }
-  localStorage.setItem(LS_KOSTENST_KEY, JSON.stringify(result));
-  reloadLookupData();
-  resultEl.innerHTML = `<span style="color:#16a34a">✓ ${result.length} Kostenstellen importiert.</span>`;
-  setTimeout(renderImporter, 800);
-}
-
-function resetTable(type) {
-  if (type === 'tid')  localStorage.removeItem(LS_TID_KEY);
-  if (type === 'kst')  localStorage.removeItem(LS_KOSTENST_KEY);
-  reloadLookupData();
-  renderImporter();
+  if (!parsed.length) { resultEl.innerHTML = '<span style="color:#ef4444">❌ Keine gültigen Zeilen gefunden. Prüfen Sie das Format.</span>'; return; }
+  resultEl.textContent = `⏳ ${parsed.length} Kostenstellen werden nach SharePoint geschrieben…`;
+  try {
+    await upsertStamm(kostenstListId, KOSTENST_LIST_NAME, parsed,
+      r => ({ Title: r.nr, Bezeichnung: r.label }));
+    await loadLookupDataSP();
+    resultEl.innerHTML = `<span style="color:#16a34a">✓ ${parsed.length} Kostenstellen gespeichert. Gesamt: ${KOSTENST_DATA.length} Einträge.</span>`;
+    setTimeout(renderImporter, 1000);
+  } catch (e) {
+    resultEl.innerHTML = `<span style="color:#ef4444">❌ Speichern fehlgeschlagen: ${esc(e.message)}</span>`;
+  }
 }
 
 // ── REPORTS & AUSWERTUNGEN ───────────────────────────────────────────────────
