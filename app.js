@@ -1761,7 +1761,8 @@ const TIMELINE_STAGES = [
   { label: 'In Bestellung', role: null,
     test: v => /in bestellung/i.test(v),
     approverField: null, commentField: null },
-  // Wer „Bestellt" setzt (Einkauf-Daten speichert), ist immer ein Einkäufer; aus lastModifiedBy.
+  // Wer „Bestellt" setzt (Einkauf-Daten speichert), ist immer ein Einkäufer; Person
+  // aus der Versionshistorie (item._besteller), nicht aus lastModifiedBy.
   { label: 'Bestellt', role: 'Einkauf',
     test: v => /^bestellt$/i.test(v),
     approverField: null, commentField: null },
@@ -1861,13 +1862,19 @@ function statusTimeline(statusVal, item) {
 
   const isRej = /^abgelehnt$/i.test(sv);
 
-  // Antragsteller aus createdBy, Besteller aus lastModifiedBy (wer „Bestellt" gesetzt
-  // hat, indem er die Einkauf-Daten gespeichert hat – immer ein Einkäufer).
+  // Antragsteller aus createdBy. Besteller = wer die Einkauf-Daten (Bestellnummer)
+  // eingetragen und damit den Status auf „Bestellt" gesetzt hat. Quelle ist die
+  // Versionshistorie (item._besteller), NICHT lastModifiedBy: spätere Kommentare
+  // (z. B. „geliefert/erhalten") sind rein informativ und dürfen den Besteller nicht
+  // überschreiben. Fallback: Einkauf-Entscheider aus Feld bzw. Historie.
   const creator   = item?.createdBy?.user?.displayName || item?.createdBy?.user?.email || null;
-  const besteller = item?.lastModifiedBy?.user?.displayName || item?.lastModifiedBy?.user?.email || null;
   const actorFor = (st) => {
     if (/^eingereicht$/i.test(st.label)) return creator;
-    if (/^bestellt$/i.test(st.label))    return besteller;
+    if (/^bestellt$/i.test(st.label))
+      return (item && item._besteller)
+          || resolvePersonField(fields, 'Entscheider_x002a_in')
+          || (item && item._einkaufApprover)
+          || null;
     const direct = resolvePersonField(fields, st.approverField);
     if (direct) return direct;
     // Einkauf-Entscheider steht oft nicht im Feld, sondern nur in der Versionshistorie
@@ -5303,23 +5310,33 @@ async function resolveHistoryActors(item) {
   const hasField    = !!resolvePersonField(item.fields || {}, field);
   const sv          = (getStatusVal(item) || '').toLowerCase();
   const isRej       = /^abgelehnt$/.test(sv.trim());
+  const isBestellt  = /^bestellt$/.test(sv.trim());
   const einkaufPast = /(genehmigt.*einkauf|controlling|werkleitung|strateg|freigegeben|bestellt|in bestellung)/.test(sv);
-  if (hasField || (!einkaufPast && !isRej)) return false; // Feld gesetzt oder nichts nachzuladen
+  // Einkauf-Entscheider/Ablehner nur laden, wenn das Feld leer ist. Den Besteller
+  // dagegen IMMER bei Status „Bestellt" aus der Historie holen (wer die Bestellnummer
+  // eintrug und damit „Bestellt" setzte), unabhängig vom Entscheider-Feld.
+  const needHist = (!hasField && (einkaufPast || isRej)) || isBestellt;
+  if (!needHist) return false; // nichts nachzuladen
   try {
     const statusCol = resolvedFields['Status'] || 'Stauts';
     const vs  = await gGet(`/sites/${siteId}/lists/${listId}/items/${item.id}/versions?$expand=fields($select=${statusCol})&$top=100`);
     const arr = (vs.value || []).slice().sort((a, b) => parseFloat(a.id) - parseFloat(b.id));
     const nameOf = v => v?.lastModifiedBy?.user?.displayName || v?.lastModifiedBy?.user?.email || null;
-    if (einkaufPast) {
+    if (einkaufPast && !hasField) {
       const hit = arr.find(v => { const s = String(v.fields?.[statusCol] || '').toLowerCase(); return /genehmigt/.test(s) && /einkauf/.test(s); });
       item._einkaufApprover = nameOf(hit);
     }
-    if (isRej) {
+    if (isRej && !hasField) {
       const hit = arr.find(v => /^abgelehnt$/.test(String(v.fields?.[statusCol] || '').toLowerCase().trim()));
       item._rejectedBy = nameOf(hit);
     }
+    if (isBestellt) {
+      // Erste Version mit Status „Bestellt" = wer die Einkauf-Daten eintrug.
+      const hit = arr.find(v => /^bestellt$/.test(String(v.fields?.[statusCol] || '').toLowerCase().trim()));
+      item._besteller = nameOf(hit);
+    }
   } catch (e) { console.warn('[hist-actors] Historie fehlgeschlagen:', e.message); }
-  return !!(item._einkaufApprover || item._rejectedBy);
+  return !!(item._einkaufApprover || item._rejectedBy || item._besteller);
 }
 
 // ── SPLIT PANEL ───────────────────────────────────────────────────────────────
