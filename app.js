@@ -2752,7 +2752,7 @@ async function saveItemAsFavorite(itemId) {
   const data = {};
   ['Title','Beschreibung','Warengruppe','Prioritaet','Artikelnummer','ExterneArtikelnummer',
    'Menge','Mengeneinheit','Mindestlagermenge','Termin','Beschaffungslogik',
-   'Lieferant','Lieferant2','Lieferant3','Lieferant4','GeschaetzterPreis','Kostenstelle']
+   'Lieferant','Lieferant2','Lieferant3','Lieferant4','GeschaetzterPreis','LeadBuyerAbschluss','Kostenstelle']
     .forEach(k => { data[k] = k === 'Title' ? title : _rf(item, k); });
 
   if (favUseSP) {
@@ -2874,6 +2874,8 @@ function applyWizardPrefill(data) {
   setVal('f-Lieferant4', data.Lieferant4);
   setVal('f-GeschaetzterPreis', data.GeschaetzterPreis);
   setVal('f-Kostenstelle', data.Kostenstelle);
+  const lbaEl = $id('f-LeadBuyerAbschluss');
+  if (lbaEl) lbaEl.checked = data.LeadBuyerAbschluss === true || /^(true|ja|yes|1)$/i.test(String(data.LeadBuyerAbschluss || ''));
   // Beschaffungslogik: Radio + Zusatz-Karten
   _applyBeschaffungPrefill(data.Beschaffungslogik, 'Beschaffungslogik', 'beschaffungslogik-extra-cards');
   // Zusatz-Lieferanten einblenden, wenn befüllt
@@ -4785,6 +4787,7 @@ function initMultiWizard() {
     .forEach(k => { const el = $id(k); if (el) el.value = ''; });
   const firstRadio = document.querySelector('input[name=mBeschaffungslogik]');
   if (firstRadio) firstRadio.checked = true;
+  const mLba = $id('mf-LeadBuyerAbschluss'); if (mLba) mLba.checked = false;
   document.querySelectorAll('#m-beschaffungslogik-extra-cards .check-card').forEach(c => c.classList.remove('selected'));
   [2,3,4].forEach(n => {
     const grp = $id('m-lieferant-extra-' + n);
@@ -4818,6 +4821,8 @@ function applyMultiPrefill(fav) {
   setVal('mf-Lieferant3', data.Lieferant3);
   setVal('mf-Lieferant4', data.Lieferant4);
   setVal('mf-GeschaetzterPreis', data.GeschaetzterPreis);
+  const mLbaEl = $id('mf-LeadBuyerAbschluss');
+  if (mLbaEl) mLbaEl.checked = data.LeadBuyerAbschluss === true || /^(true|ja|yes|1)$/i.test(String(data.LeadBuyerAbschluss || ''));
   // Beschaffungslogik: Radio + Zusatz-Karten
   _applyBeschaffungPrefill(data.Beschaffungslogik, 'mBeschaffungslogik', 'm-beschaffungslogik-extra-cards');
   [2,3,4].forEach(n => {
@@ -5050,6 +5055,7 @@ function wMultiNext(step) {
       Lieferant3:        $id('mf-Lieferant3').value.trim(),
       Lieferant4:        $id('mf-Lieferant4').value.trim(),
       GeschaetzterPreis: $id('mf-GeschaetzterPreis').value ? parseFloat($id('mf-GeschaetzterPreis').value) : null,
+      LeadBuyerAbschluss: $id('mf-LeadBuyerAbschluss')?.checked ?? false,
     };
     buildMultiReview();
   }
@@ -5113,6 +5119,7 @@ function buildMultiReview() {
         <dt>Beschaffungsart</dt><dd>${esc(s3.Beschaffungslogik)}</dd>
         <dt>Lieferant(en)</dt><dd>${esc(liefs) || '–'}</dd>
         <dt>Bestellvolumen</dt><dd>${preis}</dd>
+        ${s3.LeadBuyerAbschluss ? `<dt>Lead-Buyer-Abschluss</dt><dd>Ja (Angebotspflicht entfällt)</dd>` : ''}
       </dl>
     </div>`;
 }
@@ -5164,6 +5171,7 @@ async function submitMultiRequest() {
       Lieferant3:        s3.Lieferant3 || '',
       Lieferant4:        s3.Lieferant4 || '',
       GeschaetzterPreis: totalPreis > 0 ? totalPreis : (s3.GeschaetzterPreis || null),
+      LeadBuyerAbschluss: s3.LeadBuyerAbschluss ?? false,
     };
 
     const allFields = buildFields(rawData, FORM_FIELDS);
