@@ -514,7 +514,16 @@ async function gGetAll(path, maxPages = 100) {
     if (Array.isArray(data.value)) out.push(...data.value);
     next = data['@odata.nextLink'] || null;
   }
-  return out;
+  // Sicherheitsnetz gegen doppelte Zeilen aus der Seiten-Token-Paginierung: nach id
+  // entdoppeln. Einträge ohne id bleiben erhalten.
+  const seen = new Set();
+  return out.filter(it => {
+    const id = it && it.id != null ? String(it.id) : null;
+    if (id == null) return true;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
 }
 async function gPost(path, body) {
   const r = await _authedFetch(API + path, {
@@ -693,8 +702,12 @@ async function loadItems(showToast = true) {
     // Vollständig laden: allen Seiten folgen (Graph max. 200/Seite), nicht nur die ersten N
     const ps  = account ? (getSettings(account.username).pageSize || 100) : 100;
     const top = Math.min(Math.max(ps, 50), 200);
+    // Kein serverseitiges $orderby: bei Seiten-Token-Paginierung über mehrere Seiten
+    // liefert SharePoint mit $orderby auf einer Nicht-Schlüsselspalte überlappende (und
+    // teils fehlende) Zeilen, dadurch erschienen Anfragen doppelt. Die Standardreihenfolge
+    // (nach ID) paginiert stabil; sortiert wird ohnehin clientseitig je Ansicht.
     allItems = await gGetAll(
-      `/sites/${siteId}/lists/${listId}/items?$expand=fields($select=*)&$top=${top}&$orderby=createdDateTime desc`
+      `/sites/${siteId}/lists/${listId}/items?$expand=fields($select=*)&$top=${top}`
     );
     if (showToast) toast('Daten aktualisiert', 'success');
     _rerenderAfterData();
