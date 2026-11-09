@@ -887,6 +887,53 @@ function canSeeDashboard() { return canAccess('dashboard'); }
 // Anfragen genehmigen/ablehnen. Admin immer; sonst per Zugriffsverwaltung (einkauf).
 function canApprove() { return isAdmin() || canAccess('einkauf'); }
 
+// Warengruppen-Beschränkung je Einkäufer. Ein Einkäufer mit nicht-leerer Liste darf nur
+// Anfragen dieser Materialgruppen (Warengruppen-Codes, z. B. "4333") öffnen, genehmigen,
+// ablehnen und bestellen. Leere Liste = keine Beschränkung (alle Warengruppen). Admin
+// nie beschränkt. Gepflegt in BANF_Konfiguration je Nutzer unter "warengruppen".
+// Fallback-Warengruppen (Materialgruppen), falls die SP-Choice-Spalte nicht geladen ist.
+// Gleiche Liste für das Anlageformular und die Warengruppen-Beschränkung.
+const WG_FALLBACK = ['4001 – Schrott','4002 – Legierungen','4103 – Bleche','4116 – Kaufteile','4211 – Kaufteile Formerei (Kühlm. ..)','4304 – Strahlmittel','4305 – Modellbaumaterial','4306 – Formstoffkomponenten','4307 – Eingußsysteme','4308 – exotherme Kappen (Speiser)','4309 – Gießfilter','4310 – Kerne (bez. Kerne f. Gießerei)','4311 – metallurgische Zusatzstoffe','4312 – Hilfsstoffe Gießerei','4313 – Feuerfestmaterial Ofen/Pfannen','4314 – Kohleprodukte (Grafitelektr., Aufk...)','4317 – externer Modellbau','4318 – Befestigungsteile','4319 – WENDESCHNEIDPLATTE','4320 – Ersatzteile','4321 – Schleif- und Fräsmittel','4322 – Arbeitsschutzmittel','4323 – Schweißbedarf','4324 – Gemeinkostenmaterial','4325 – Technische Gase','4326 – Treibstoffe, Öle, Fette','4328 – Werkzeug','4329 – sonst. Hilfs- u. Betriebsstoffe','4333 – Kooperation','4334 – Reparatur','4335 – Serviceleistung','4336 – Entsorgung','4337 – Büromaterial','4338 – Mieten','4340 – Investitionen','4333 – Transporte','4335 – Leiharbeiter','2000 – Frachtkosten, sonstiges'];
+
+function wgCodeOf(v) {
+  const m = String(v == null ? '' : v).trim().match(/^(\d+)/); // führender Zahlencode der Warengruppe
+  return m ? m[1] : '';
+}
+// Verfügbare Warengruppen als {code,label}, nach Code eindeutig und sortiert.
+// Quelle: SP-Choice-Spalte, sonst Fallback-Liste. Für die Zugriffsverwaltung.
+function warengruppenOptions() {
+  const sp = resolvedFields['Warengruppe'] || 'Warengruppe';
+  const choices = (colByKey[sp]?.choice?.choices || []).length ? colByKey[sp].choice.choices : WG_FALLBACK;
+  const byCode = new Map();
+  choices.forEach(c => { const code = wgCodeOf(c); if (code && !byCode.has(code)) byCode.set(code, String(c)); });
+  return [...byCode.entries()].map(([code, label]) => ({ code, label })).sort((a, b) => a.code.localeCompare(b.code));
+}
+// Label einer Warengruppe zu einem Code (für die Chips), sonst der Code selbst.
+function wgLabelForCode(code) {
+  const hit = warengruppenOptions().find(o => o.code === code);
+  return hit ? hit.label : code;
+}
+function myWarengruppen() {
+  if (isAdmin()) return [];
+  const set = new Set();
+  for (const id of _myIdentities()) {
+    const u = accessUsers[id];
+    if (u && Array.isArray(u.warengruppen)) u.warengruppen.forEach(w => { const c = String(w).trim(); if (c) set.add(c); });
+  }
+  return [...set];
+}
+// Darf der aktuelle Nutzer DIESE Anfrage als Einkauf bearbeiten? Admin immer; Nicht-
+// Einkäufer nie; Einkäufer ohne Warengruppen-Liste alle; mit Liste nur passende Warengruppe.
+function canApproveItem(item) {
+  if (isAdmin()) return true;
+  if (!canAccess('einkauf')) return false;
+  const allowed = myWarengruppen();
+  if (!allowed.length) return true;
+  if (!item) return false;
+  const wgVal = getField(item, resolvedFields['Warengruppe'] || 'Warengruppe') || '';
+  return allowed.includes(wgCodeOf(wgVal));
+}
+
 // Abteilungen, die der aktuelle Nutzer in „Gemeinsame Anfragen" sehen darf.
 // Admin sieht alle angelegten; sonst die ihm zugeordneten (mehrere möglich).
 function myAbteilungen() {
@@ -1034,7 +1081,7 @@ async function saveAccessConfig() {
 function setAccess(upn, feature, on) {
   upn = (upn || '').trim().toLowerCase();
   if (!upn) return;
-  if (!accessUsers[upn]) accessUsers[upn] = { dashboard: false, reports: false, importer: false, gemeinsame: false, einkauf: false, abteilungen: [] };
+  if (!accessUsers[upn]) accessUsers[upn] = { dashboard: false, reports: false, importer: false, gemeinsame: false, einkauf: false, abteilungen: [], warengruppen: [] };
   accessUsers[upn][feature] = !!on;
   saveAccessConfig();
   applyNavVisibility();
@@ -1043,7 +1090,7 @@ function addAccessUser() {
   const inp = $id('access-new-upn');
   const upn = (inp?.value || '').trim().toLowerCase();
   if (!upn || !/@/.test(upn)) { toast('Bitte gültige UPN/E-Mail angeben.', 'error'); return; }
-  if (!accessUsers[upn]) accessUsers[upn] = { dashboard: true, reports: false, importer: false, gemeinsame: false, einkauf: true, abteilungen: [] };
+  if (!accessUsers[upn]) accessUsers[upn] = { dashboard: true, reports: false, importer: false, gemeinsame: false, einkauf: true, abteilungen: [], warengruppen: [] };
   saveAccessConfig();
   openSettings();
 }
@@ -1058,10 +1105,23 @@ function removeAccessUser(upn) {
 function toggleUserAbteilung(upn, dept, add) {
   upn = (upn || '').trim().toLowerCase();
   if (!upn || !dept) return;
-  if (!accessUsers[upn]) accessUsers[upn] = { dashboard:false, reports:false, importer:false, gemeinsame:false, einkauf:false, abteilungen:[] };
+  if (!accessUsers[upn]) accessUsers[upn] = { dashboard:false, reports:false, importer:false, gemeinsame:false, einkauf:false, abteilungen:[], warengruppen:[] };
   const arr = accessUsers[upn].abteilungen = accessUsers[upn].abteilungen || [];
   const i = arr.indexOf(dept);
   if (add) { if (i < 0) arr.push(dept); } else if (i >= 0) arr.splice(i, 1);
+  saveAccessConfig();
+  openSettings();
+}
+// Einem Einkäufer eine Warengruppe (Materialgruppen-Code) zuordnen oder entziehen.
+// Nicht-leere Liste = der Einkäufer darf nur diese Warengruppen bearbeiten. Leer = alle.
+function toggleUserWarengruppe(upn, code, add) {
+  upn  = (upn || '').trim().toLowerCase();
+  code = (code || '').trim();
+  if (!upn || !code) return;
+  if (!accessUsers[upn]) accessUsers[upn] = { dashboard:false, reports:false, importer:false, gemeinsame:false, einkauf:false, abteilungen:[], warengruppen:[] };
+  const arr = accessUsers[upn].warengruppen = accessUsers[upn].warengruppen || [];
+  const i = arr.indexOf(code);
+  if (add) { if (i < 0) arr.push(code); } else if (i >= 0) arr.splice(i, 1);
   saveAccessConfig();
   openSettings();
 }
@@ -1614,7 +1674,7 @@ function renderDetail(id) {
   const statusVal    = getStatusVal(item) || 'Eingereicht';
   const preis        = parseFloat(getField(item,'GeschaetzterPreis') || getField(item, resolvedFields['GeschaetzterPreis'])) || null;
   const menge        = getField(item,'Menge') || getField(item, resolvedFields['Menge']);
-  const isEinkauf    = true; // for now, all logged-in users can add order info (adjust if needed)
+  const isEinkauf    = canApproveItem(item); // nur zuständige Einkäufer (inkl. Warengruppe) erfassen Einkauf-Daten
 
   $id('detail-content').innerHTML = `
     <div class="detail-header">
@@ -2128,6 +2188,12 @@ function addAttachInput() {
 }
 
 async function saveOrderData(itemId) {
+  const _it = allItems.find(i => String(i.id) === String(itemId));
+  if (!canApproveItem(_it)) {
+    toast(canApprove() ? 'Diese Warengruppe liegt außerhalb deiner Einkauf-Zuständigkeit.'
+                       : 'Keine Berechtigung für Einkauf-Daten.', 'error');
+    return;
+  }
   const orderNr  = $id('m-ordernr').value.trim();
   const delivery = $id('m-delivery').value;
   const price    = $id('m-price').value;
@@ -5347,10 +5413,10 @@ async function openPanel(itemId) {
   if (!item) return;
 
   // Auto-advance: Statuswechsel Eingereicht → In Prüfung (Einkauf) beim Öffnen.
-  // Nur Einkäufer/Admin lösen ihn aus (canApprove). Auch bei EIGENEN Anfragen erlaubt –
-  // ein Einkäufer darf seine eigene Anfrage in die Prüfung nehmen. Normale Antragsteller
-  // sind durch canApprove() ohnehin ausgeschlossen.
-  if (canApprove()) {
+  // Nur zuständige Einkäufer/Admin lösen ihn aus (canApproveItem, inkl. Warengruppe).
+  // Auch bei EIGENEN Anfragen erlaubt. Normale Antragsteller und Einkäufer außerhalb
+  // ihrer Warengruppe sind ausgeschlossen.
+  if (canApproveItem(item)) {
     const sv        = (getStatusVal(item) || 'Eingereicht').trim(); // leeres Feld = Eingereicht
     const statusCol = resolvedFields['Status'] || 'Status';
     let   advanced  = false;
@@ -5707,7 +5773,12 @@ async function saveEdits(itemId) {
 // ── GENEHMIGUNG IM DASHBOARD ─────────────────────────────────────────────────
 
 async function doApprove(itemId) {
-  if (!canApprove()) { toast('Keine Berechtigung zum Genehmigen.', 'error'); return; }
+  const _it = allItems.find(i => String(i.id) === String(itemId));
+  if (!canApproveItem(_it)) {
+    toast(canApprove() ? 'Diese Warengruppe liegt außerhalb deiner Einkauf-Zuständigkeit.'
+                       : 'Keine Berechtigung zum Genehmigen.', 'error');
+    return;
+  }
   const banner = document.querySelector('#approval-action-banner');
   if (banner) banner.innerHTML = '<div class="aab-hint">⏳ Wird gespeichert…</div>';
 
@@ -5754,7 +5825,12 @@ async function doApprove(itemId) {
 }
 
 async function doReject(itemId, comment) {
-  if (!canApprove()) { toast('Keine Berechtigung zum Ablehnen.', 'error'); return; }
+  const _it = allItems.find(i => String(i.id) === String(itemId));
+  if (!canApproveItem(_it)) {
+    toast(canApprove() ? 'Diese Warengruppe liegt außerhalb deiner Einkauf-Zuständigkeit.'
+                       : 'Keine Berechtigung zum Ablehnen.', 'error');
+    return;
+  }
   const banner = document.querySelector('#approval-action-banner');
   if (banner) banner.innerHTML = '<div class="aab-hint">⏳ Wird gespeichert…</div>';
 
@@ -5889,7 +5965,7 @@ function renderPanel(item, editMode = false) {
     return colByKey[sp]?.choice?.choices || null;
   };
 
-  const WG_OPTS   = choices('Warengruppe')      || ['4001 – Schrott','4002 – Legierungen','4103 – Bleche','4116 – Kaufteile','4211 – Kaufteile Formerei (Kühlm. ..)','4304 – Strahlmittel','4305 – Modellbaumaterial','4306 – Formstoffkomponenten','4307 – Eingußsysteme','4308 – exotherme Kappen (Speiser)','4309 – Gießfilter','4310 – Kerne (bez. Kerne f. Gießerei)','4311 – metallurgische Zusatzstoffe','4312 – Hilfsstoffe Gießerei','4313 – Feuerfestmaterial Ofen/Pfannen','4314 – Kohleprodukte (Grafitelektr., Aufk...)','4317 – externer Modellbau','4318 – Befestigungsteile','4319 – WENDESCHNEIDPLATTE','4320 – Ersatzteile','4321 – Schleif- und Fräsmittel','4322 – Arbeitsschutzmittel','4323 – Schweißbedarf','4324 – Gemeinkostenmaterial','4325 – Technische Gase','4326 – Treibstoffe, Öle, Fette','4328 – Werkzeug','4329 – sonst. Hilfs- u. Betriebsstoffe','4333 – Kooperation','4334 – Reparatur','4335 – Serviceleistung','4336 – Entsorgung','4337 – Büromaterial','4338 – Mieten','4340 – Investitionen','4333 – Transporte','4335 – Leiharbeiter','2000 – Frachtkosten, sonstiges'];
+  const WG_OPTS   = choices('Warengruppe')      || WG_FALLBACK;
   const PRIO_OPTS = choices('Prioritaet')       || ['Normal','Hoch','Dringend'];
   const ME_OPTS   = choices('Mengeneinheit')    || ['Lagereinheiten','kg','Stück','Anzahl','m','Paar','Liter'];
   const BL_OPTS   = choices('Beschaffungslogik')|| ['Bestandsmaterial (bestandsgeführt)','Neues Material (nicht-bestandsgeführt)','Dienstleistung'];
@@ -5945,7 +6021,7 @@ function renderPanel(item, editMode = false) {
   const tatPreis = gv('TatsaechlicherPreis');
 
   const isFreigegeben = /^freigegeben$/i.test((statusVal || '').trim());
-  const orderBtn = isMineView ? '' : isFreigegeben
+  const orderBtn = (isMineView || !canApproveItem(item)) ? '' : isFreigegeben
     ? `<button class="btn btn-outline btn-sm" id="panel-order">📦 Einkauf-Daten</button>`
     : `<button class="btn btn-outline btn-sm" id="panel-order" disabled title="Nur bei Status 'Freigegeben' möglich">📦 Einkauf-Daten</button>`;
 
@@ -5965,7 +6041,7 @@ function renderPanel(item, editMode = false) {
 
   // Einkäufer/Admin dürfen jederzeit bearbeiten (z. B. Titel/Bezeichnung ändern, auch bei
   // Auto-Entwürfen). Alle anderen nur im Status „In Prüfung (Einkauf)".
-  const canEdit = canApprove() || (/pr[üu]fung/i.test(statusVal) && /einkauf/i.test(statusVal) && !/strategisch/i.test(statusVal));
+  const canEdit = canApproveItem(item) || (/pr[üu]fung/i.test(statusVal) && /einkauf/i.test(statusVal) && !/strategisch/i.test(statusVal));
   const editBtn = isMineView ? '' : (isLocked && !lockedByMe)
     ? `<button class="btn btn-outline btn-sm" disabled title="Gesperrt von ${esc(lockData.by)}">🔒 Gesperrt</button>`
     : canEdit
@@ -5976,7 +6052,7 @@ function renderPanel(item, editMode = false) {
 
   // Reservieren: Einkäufer kann eine laufende Anfrage für sich belegen. Von anderen
   // belegte Anfragen zeigen nur das Badge, keinen Button.
-  const canReserve = !isMineView && canApprove() && isOffenStatus(statusVal);
+  const canReserve = !isMineView && canApproveItem(item) && isOffenStatus(statusVal);
   const reserveBtn = !canReserve ? ''
     : reservedByMe            ? `<button class="btn btn-outline btn-sm" id="panel-unreserve" title="Deine Reservierung aufheben">🔑 Reservierung aufheben</button>`
     : (isLocked && !lockedByMe) ? ''
@@ -5994,7 +6070,7 @@ function renderPanel(item, editMode = false) {
   const approvalInner = buildApprovalInner(item, statusVal);
 
   // Genehmigungsaktion-Banner: sichtbar für alle im Dashboard/All-View (nicht in eigener Mine-Ansicht)
-  const needsApproval = !editMode && !isMineView && canApprove()
+  const needsApproval = !editMode && !isMineView && canApproveItem(item)
     && /pr[üu]fung/i.test(statusVal) && /einkauf/i.test(statusVal) && !/strategisch/i.test(statusVal);
   const approvalActionBanner = needsApproval ? `
     <div class="approval-action-banner" id="approval-action-banner">
@@ -6422,6 +6498,20 @@ function openSettings() {
   // ── Admin: Zugriffsverwaltung (zentral in SharePoint) ─────────────────────
   const accessRow = (upn, p) => {
     const assigned = p.abteilungen || [];
+    const wgAssigned = p.warengruppen || [];
+    const wgOptsList = warengruppenOptions();
+    // Warengruppen-Beschränkung nur für Einkäufer sinnvoll. Leer = alle Warengruppen.
+    const wgLine = p.einkauf ? `
+      <div class="access-abt access-wg">
+        <span class="access-abt-lbl" title="Einkauf nur für diese Materialgruppen (leer = alle)">🛒</span>
+        ${wgAssigned.length
+          ? wgAssigned.map(c => `<span class="abt-chip">${esc(wgLabelForCode(c))}<button class="abt-chip-x" title="Entfernen" onclick="toggleUserWarengruppe('${escJs(upn)}','${escJs(c)}',false)">✕</button></span>`).join('')
+          : `<span class="wg-all-hint">alle Warengruppen</span>`}
+        <select class="abt-add-sel" onchange="if(this.value){toggleUserWarengruppe('${escJs(upn)}',this.value,true);}">
+          <option value="">+ Warengruppe</option>
+          ${wgOptsList.filter(o => !wgAssigned.includes(o.code)).map(o => `<option value="${esc(o.code)}">${esc(o.label)}</option>`).join('')}
+        </select>
+      </div>` : '';
     const abtLine = abteilungen.length ? `
       <div class="access-abt">
         <span class="access-abt-lbl" title="Sichtbare Abteilungen in „Gemeinsame Anfragen">🏷</span>
@@ -6453,6 +6543,7 @@ function openSettings() {
         <button class="su-del" title="UPN entfernen" onclick="removeAccessUser('${escJs(upn)}')">✕</button>
       </div>
       ${abtLine}
+      ${wgLine}
     </div>`;
   };
 
@@ -6462,6 +6553,7 @@ function openSettings() {
     <p class="su-hint">Lege fest, wer <b>Dashboard</b>, <b>Reports</b>, <b>Tabellen-Importer</b>, <b>Gemeinsame Anfragen</b> sehen darf und wer
        als <b>Einkäufer</b> beim Öffnen den Status auf „In Prüfung (Einkauf)" setzen sowie
        genehmigen/ablehnen darf. In der Zeile 🏷 ordnest du dem Nutzer die Abteilungen zu, deren Anfragen er in „Gemeinsame Anfragen" sieht (mehrere möglich).
+       In der Zeile 🛒 (nur bei Einkäufern) schränkst du ihn auf bestimmte Materialgruppen/Warengruppen ein: ist dort mindestens eine gesetzt, darf er nur Anfragen dieser Warengruppen öffnen, genehmigen, ablehnen und bestellen. Leer = alle Warengruppen.
        Als Administrator hast du immer alle Rechte. Gilt zentral für alle Geräte.</p>
     <div class="su-add">
       <input type="email" id="access-new-upn" placeholder="einkauf@dihag.com" class="su-input">
