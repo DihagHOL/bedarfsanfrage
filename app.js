@@ -5976,6 +5976,26 @@ async function panelPosSave(itemId) {
   }
 }
 
+// Hat der aktuelle Nutzer diese Anfrage selbst erstellt? Robust über alle seine
+// Identitäten (UPN/Mail/Aliasse) plus Anzeigename.
+function isMyItem(item) {
+  const e = (item?.createdBy?.user?.email || '').trim().toLowerCase();
+  if (e && _myIdentities().has(e)) return true;
+  const n = (item?.createdBy?.user?.displayName || '').trim().toLowerCase();
+  const myName = (account?.name || '').trim().toLowerCase();
+  return !!(n && myName && n === myName);
+}
+// Status vor der Einkauf-Entscheidung: solange darf der Antragsteller seine eigene
+// Anfrage noch bearbeiten (bis der Einkauf genehmigt oder abgelehnt hat). Das sind
+// „Eingereicht" und „In Prüfung (Einkauf)". Alles danach (genehmigt, abgelehnt,
+// Controlling/Werkleitung/strategisch, freigegeben, bestellt) ist gesperrt.
+function isPreEinkaufDecision(statusVal) {
+  const s = String(statusVal || '').toLowerCase().trim();
+  if (/^eingereicht$/.test(s)) return true;
+  if (/pr[üu]fung/.test(s) && /einkauf/.test(s) && !/strategisch/.test(s)) return true;
+  return false;
+}
+
 function renderPanel(item, editMode = false) {
   const isMineView = currentView === 'mine';
   const statusVal  = getStatusVal(item) || 'Eingereicht';
@@ -6067,11 +6087,16 @@ function renderPanel(item, editMode = false) {
   // Einkäufer/Admin dürfen jederzeit bearbeiten (z. B. Titel/Bezeichnung ändern, auch bei
   // Auto-Entwürfen). Alle anderen nur im Status „In Prüfung (Einkauf)".
   const canEdit = canApproveItem(item) || (/pr[üu]fung/i.test(statusVal) && /einkauf/i.test(statusVal) && !/strategisch/i.test(statusVal));
-  const editBtn = isMineView ? '' : (isLocked && !lockedByMe)
-    ? `<button class="btn btn-outline btn-sm" disabled title="Gesperrt von ${esc(lockData.by)}">🔒 Gesperrt</button>`
-    : canEdit
-      ? `<button class="btn btn-outline btn-sm" id="panel-edit">✏️ Bearbeiten</button>`
-      : `<button class="btn btn-outline btn-sm" disabled title="Nur bei Status 'In Prüfung (Einkauf)' möglich">✏️ Bearbeiten</button>`;
+  // In „Meine Anfragen" darf der Antragsteller die eigene Anfrage bis zur Einkauf-
+  // Entscheidung bearbeiten (Status „Eingereicht" oder „In Prüfung (Einkauf)").
+  // Außerhalb der eigenen Ansicht bleibt es beim Einkauf-/Admin-Recht (unverändert).
+  const canEditAsRequester = isMyItem(item) && isPreEinkaufDecision(statusVal);
+  const mayEdit = isMineView ? canEditAsRequester : canEdit;
+  const editBtn = !mayEdit
+    ? (isMineView ? '' : `<button class="btn btn-outline btn-sm" disabled title="Nur bei Status 'In Prüfung (Einkauf)' möglich">✏️ Bearbeiten</button>`)
+    : (isLocked && !lockedByMe)
+      ? `<button class="btn btn-outline btn-sm" disabled title="Gesperrt von ${esc(lockData.by)}">🔒 Gesperrt</button>`
+      : `<button class="btn btn-outline btn-sm" id="panel-edit">✏️ Bearbeiten</button>`;
 
   const favBtn = `<button class="btn btn-outline btn-sm" id="panel-fav" title="Als Wiedervorlage / Favorit speichern">⭐ Als Wiedervorlage</button>`;
 
