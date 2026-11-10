@@ -893,6 +893,10 @@ function canAccess(feature) {
     const u = accessUsers[id];
     if (u && u[feature]) return true;
   }
+  // „Gemeinsame Anfragen" ist gruppengesteuert: wer mindestens einer Abteilung
+  // (gemeinsamen Gruppe) zugeordnet ist, sieht deren gemeinsame Anfragen automatisch,
+  // auch ohne eigenes Flag. Das bestehende Flag bleibt als zusätzliche Freigabe bestehen.
+  if (feature === 'gemeinsame' && myAbteilungen().length > 0) return true;
   return false;
 }
 function canSeeDashboard() { return canAccess('dashboard'); }
@@ -6571,9 +6575,9 @@ function openSettings() {
   const adminSection = adminMode ? `
     <hr class="modal-hr">
     <div class="settings-section-title">🔐 Zugriffsverwaltung (UPN)</div>
-    <p class="su-hint">Lege fest, wer <b>Dashboard</b>, <b>Reports</b>, <b>Tabellen-Importer</b>, <b>Gemeinsame Anfragen</b> sehen darf und wer
+    <p class="su-hint">Lege fest, wer <b>Dashboard</b>, <b>Reports</b> und <b>Tabellen-Importer</b> sehen darf und wer
        als <b>Einkäufer</b> beim Öffnen den Status auf „In Prüfung (Einkauf)" setzen sowie
-       genehmigen/ablehnen darf. In der Zeile 🏷 ordnest du dem Nutzer die Abteilungen zu, deren Anfragen er in „Gemeinsame Anfragen" sieht (mehrere möglich).
+       genehmigen/ablehnen darf. In der Zeile 🏷 ordnest du dem Nutzer die Abteilungen zu, deren Anfragen er in „Gemeinsame Anfragen" sieht (mehrere möglich). Wer mindestens eine Abteilung hat, sieht „Gemeinsame Anfragen" automatisch. Der Schalter 👥 ist nur eine zusätzliche Freigabe für Nutzer ohne Abteilung.
        In der Zeile 🛒 (nur bei Einkäufern) schränkst du ihn auf bestimmte Materialgruppen/Warengruppen ein: ist dort mindestens eine gesetzt, darf er nur Anfragen dieser Warengruppen öffnen, genehmigen, ablehnen und bestellen. Leer = alle Warengruppen.
        Als Administrator hast du immer alle Rechte. Gilt zentral für alle Geräte.</p>
     <div class="su-add">
