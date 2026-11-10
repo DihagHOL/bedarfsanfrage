@@ -598,9 +598,17 @@ textarea.pf-input { resize: vertical; min-height: 52px; }
 }
 .ap-ok      { background: #dcfce7; color: #15803d; }
 .ap-no      { background: #fee2e2; color: #b91c1c; }
+.ap-cancel  { background: #f3f4f6; color: #6b7280; }
 .ap-pending { background: #dbeafe; color: #1d4ed8; font-weight: 700; }
 .ap-circle        { background: #eff6ff; color: #1d4ed8; font-size: 1rem; }
 .ap-circle-future { background: #f3f4f6; color: #9ca3af; font-size: 1rem; }
+
+/* Zurückziehen-Banner (Antragsteller, nur in „Meine Anfragen") */
+.withdraw-banner { margin: 10px 14px 0; padding: 10px 12px; background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 8px; }
+.wb-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.wb-hint { font-size: .8rem; color: #6b7280; }
+.wb-confirm { margin-top: 8px; font-size: .82rem; color: #374151; }
+.wb-buttons { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
 .ap-neutral { background: #f3f4f6; color: #9ca3af; border: 1px solid #e5e7eb; }
 /* Einkauf modal – collapsible extra Angebote */
 .attach-more-toggle { font-size:.82rem; color:#1a56db; cursor:pointer; list-style:none; }

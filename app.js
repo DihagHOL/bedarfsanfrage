@@ -64,6 +64,8 @@ const STATUS_STYLES = {
   'abgelehnt':                          { bg:'#f3f4f6', color:'#374151' },
   'bestellt':                           { bg:'#dbeafe', color:'#1d4ed8' },
   'erledigt':                           { bg:'#f3f4f6', color:'#374151' },
+  'zurückgezogen':                      { bg:'#f3f4f6', color:'#6b7280' },
+  'abgebrochen':                        { bg:'#f3f4f6', color:'#6b7280' },
   // ── Generische Fallbacks (Teilübereinstimmung) ──
   'in prüfung':                         { bg:'#ccfbf1', color:'#0f766e' },
   'angefragt':                          { bg:'#f0f9ff', color:'#0369a1' },
@@ -1884,6 +1886,7 @@ const WORKFLOW_STAGES = [
 function statusColorFor(val) {
   const v = (val || '').toLowerCase();
   if (/entwurf|automatisch erstellt/.test(v)) return { bg:'#f1f5f9', color:'#64748b' }; // grau
+  if (/zur[üu]ckgezogen|abgebrochen|storniert/.test(v)) return { bg:'#f3f4f6', color:'#6b7280' }; // grau (beendet)
   if (/eingereicht/.test(v))            return { bg:'#fce7f3', color:'#be185d' };
   if (/werkleitung/.test(v))            return { bg:'#ffe4e6', color:'#be123c' };
   if (/prüf|pruef|prüf/.test(v))        return { bg:'#ccfbf1', color:'#0f766e' };
@@ -1938,6 +1941,7 @@ function statusTimeline(statusVal, item) {
   };
 
   const isRej = /^abgelehnt$/i.test(sv);
+  const isWithdrawn = /zur[üu]ckgezogen|abgebrochen|storniert|zur[üu]ckgenommen/i.test(sv);
 
   // Antragsteller aus createdBy. Besteller = wer die Einkauf-Daten (Bestellnummer)
   // eingetragen und damit den Status auf „Bestellt" gesetzt hat. Quelle ist die
@@ -2006,6 +2010,15 @@ function statusTimeline(statusVal, item) {
     const rejBy      = resolvePersonField(fields, 'Entscheider_x002a_in') || (item && item._rejectedBy) || null;
     const rejComment = String(fields['Genehmigungskommentar'] || '').trim();
     out.push(row(rejLabel, '✗', 'ap-no', null, rejBy, rejComment, false, false));
+    return out.join('');
+  }
+
+  // Zurückgezogen/abgebrochen durch den Antragsteller: Eingereicht erledigt, dann die
+  // Anfrage als beendet markieren. Keine weiteren Stufen.
+  if (isWithdrawn) {
+    out.push(row(spLabel(stages[0]), '✓', 'ap-ok', 'Antragsteller', creator, null, false, false));
+    const wLabel = (statusChoices.find(c => /zur[üu]ckgezogen|abgebrochen|storniert|zur[üu]ckgenommen/i.test(String(c).trim())) || sv || 'Zurückgezogen').trim();
+    out.push(row(wLabel, '↩', 'ap-cancel', null, null, null, false, false));
     return out.join('');
   }
 
@@ -5546,6 +5559,17 @@ function bindPanelEvents(itemId) {
   });
   pq('#btn-reject-confirm')?.addEventListener('click', () =>
     doReject(itemId, pq('#aab-reject-comment')?.value?.trim() || ''));
+
+  // Zurückziehen (Antragsteller): erst Inline-Bestätigung, dann doWithdraw
+  pq('#btn-withdraw')?.addEventListener('click', () => {
+    const c = pq('#wb-confirm'); if (c) c.style.display = '';
+    const b = pq('#btn-withdraw'); if (b) b.style.display = 'none';
+  });
+  pq('#btn-withdraw-cancel')?.addEventListener('click', () => {
+    const c = pq('#wb-confirm'); if (c) c.style.display = 'none';
+    const b = pq('#btn-withdraw'); if (b) b.style.display = '';
+  });
+  pq('#btn-withdraw-confirm')?.addEventListener('click', () => doWithdraw(itemId));
   pq('#panel-save')?.addEventListener('click', () => savePanelEdits(itemId, panelRoot));
   pq('#panel-cancel')?.addEventListener('click', async () => {
     panelEditMode = false;
@@ -5796,6 +5820,37 @@ async function saveEdits(itemId) {
 
 // Build the inner HTML for the "Status & Genehmigung" approval section.
 // ── GENEHMIGUNG IM DASHBOARD ─────────────────────────────────────────────────
+
+// Antragsteller zieht die eigene Anfrage zurück (vor der Einkauf-Entscheidung). Setzt den
+// Status auf den Zurückgezogen-Wert der SP-Spalte. Die Statusspalte erlaubt keine freien
+// Werte, der Status muss also als Auswahl in SharePoint existieren.
+async function doWithdraw(itemId) {
+  const item = allItems.find(i => String(i.id) === String(itemId));
+  if (!item) return;
+  if (!isMyItem(item) || !isPreEinkaufDecision(getStatusVal(item) || 'Eingereicht')) {
+    toast('Zurückziehen ist nur bis zur Einkauf-Entscheidung möglich.', 'error');
+    return;
+  }
+  const withdrawChoice = statusChoices.find(c => /zur[üu]ckgezogen|abgebrochen|storniert|zur[üu]ckgenommen/i.test(String(c).trim()));
+  if (!withdrawChoice) {
+    toast('Status „Zurückgezogen" fehlt noch in der SharePoint-Liste.', 'error');
+    return;
+  }
+  const statusCol = resolvedFields['Status'] || 'Status';
+  const btn = document.querySelector('#btn-withdraw-confirm');
+  if (btn) { btn.disabled = true; btn.textContent = 'Wird zurückgezogen…'; }
+  try {
+    await gPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, { [statusCol]: withdrawChoice });
+    const cached = allItems.find(i => String(i.id) === String(itemId));
+    if (cached?.fields) cached.fields[statusCol] = withdrawChoice;
+    toast('Anfrage zurückgezogen.', 'success');
+    await loadItems(false);
+  } catch(e) {
+    const denied = /\b403\b|accessdenied|denied/i.test(e.message);
+    toast('Zurückziehen fehlgeschlagen: ' + e.message + (denied ? '. Eventuell fehlen Schreibrechte auf der Liste.' : ''), 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '↩ Ja, zurückziehen'; }
+  }
+}
 
 async function doApprove(itemId) {
   const _it = allItems.find(i => String(i.id) === String(itemId));
@@ -6087,16 +6142,32 @@ function renderPanel(item, editMode = false) {
   // Einkäufer/Admin dürfen jederzeit bearbeiten (z. B. Titel/Bezeichnung ändern, auch bei
   // Auto-Entwürfen). Alle anderen nur im Status „In Prüfung (Einkauf)".
   const canEdit = canApproveItem(item) || (/pr[üu]fung/i.test(statusVal) && /einkauf/i.test(statusVal) && !/strategisch/i.test(statusVal));
-  // In „Meine Anfragen" darf der Antragsteller die eigene Anfrage bis zur Einkauf-
-  // Entscheidung bearbeiten (Status „Eingereicht" oder „In Prüfung (Einkauf)").
-  // Außerhalb der eigenen Ansicht bleibt es beim Einkauf-/Admin-Recht (unverändert).
-  const canEditAsRequester = isMyItem(item) && isPreEinkaufDecision(statusVal);
-  const mayEdit = isMineView ? canEditAsRequester : canEdit;
-  const editBtn = !mayEdit
-    ? (isMineView ? '' : `<button class="btn btn-outline btn-sm" disabled title="Nur bei Status 'In Prüfung (Einkauf)' möglich">✏️ Bearbeiten</button>`)
-    : (isLocked && !lockedByMe)
-      ? `<button class="btn btn-outline btn-sm" disabled title="Gesperrt von ${esc(lockData.by)}">🔒 Gesperrt</button>`
-      : `<button class="btn btn-outline btn-sm" id="panel-edit">✏️ Bearbeiten</button>`;
+  const editBtn = isMineView ? '' : (isLocked && !lockedByMe)
+    ? `<button class="btn btn-outline btn-sm" disabled title="Gesperrt von ${esc(lockData.by)}">🔒 Gesperrt</button>`
+    : canEdit
+      ? `<button class="btn btn-outline btn-sm" id="panel-edit">✏️ Bearbeiten</button>`
+      : `<button class="btn btn-outline btn-sm" disabled title="Nur bei Status 'In Prüfung (Einkauf)' möglich">✏️ Bearbeiten</button>`;
+
+  // Antragsteller darf die eigene Anfrage zurückziehen, solange der Einkauf noch nicht
+  // entschieden hat (Status „Eingereicht" oder „In Prüfung (Einkauf)"). Nur in der eigenen
+  // Ansicht und nur, wenn die SP-Statusspalte einen Zurückgezogen-Status als Auswahl kennt
+  // (die Spalte erlaubt keine freien Werte).
+  const withdrawChoice = statusChoices.find(c => /zur[üu]ckgezogen|abgebrochen|storniert|zur[üu]ckgenommen/i.test(String(c).trim()));
+  const canWithdraw = !editMode && isMineView && isMyItem(item) && isPreEinkaufDecision(statusVal) && !!withdrawChoice;
+  const withdrawBanner = canWithdraw ? `
+    <div class="withdraw-banner" id="withdraw-banner">
+      <div class="wb-row">
+        <span class="wb-hint">Solange der Einkauf noch nicht entschieden hat, kannst du diese Anfrage zurückziehen.</span>
+        <button class="btn btn-outline btn-sm" id="btn-withdraw">↩ Zurückziehen</button>
+      </div>
+      <div class="wb-confirm" id="wb-confirm" style="display:none">
+        Anfrage wirklich zurückziehen? Sie wird aus der Bearbeitung genommen und erscheint als „${esc(String(withdrawChoice))}".
+        <div class="wb-buttons">
+          <button class="btn btn-danger btn-sm" id="btn-withdraw-confirm">↩ Ja, zurückziehen</button>
+          <button class="btn btn-ghost btn-sm" id="btn-withdraw-cancel">Abbrechen</button>
+        </div>
+      </div>
+    </div>` : '';
 
   const favBtn = `<button class="btn btn-outline btn-sm" id="panel-fav" title="Als Wiedervorlage / Favorit speichern">⭐ Als Wiedervorlage</button>`;
 
@@ -6157,6 +6228,7 @@ function renderPanel(item, editMode = false) {
     </div>
 
     ${approvalActionBanner}
+    ${withdrawBanner}
     <div class="panel-body">
       <div class="pf-section">
         <div class="pf-sec-title">Bedarf</div>
