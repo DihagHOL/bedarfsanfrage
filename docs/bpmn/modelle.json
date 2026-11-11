@@ -1,0 +1,107 @@
+{
+  "hinweis": "Erzeugt von scripts/bpmn/generate-bpmn.js. Führend sind die Modelle im RMS.",
+  "rms": {
+    "url": "https://rms.dihag.de",
+    "ablage": "Prozesse/SHB",
+    "driveId": "b!mHt0ojDvMUO2CASB1CYZ7LZfHr-4oQxOpM8lU-BHkQAn6GWLTefSRpGSUcefMjhL"
+  },
+  "richtlinien": {
+    "111": "ISMS-Richtlinie Sichere Softwareentwicklung",
+    "119": "ISMS-Richtlinie Aufbewahrungsfristen und -pflichten",
+    "120": "Konzernfachregelung Prozessmanagement"
+  },
+  "modelle": [
+    {
+      "key": "haupt",
+      "name": "Bedarfsanfrage",
+      "kennung": "Process_Bedarfsanfrage",
+      "datei": "docs/bpmn/01-bedarfsanfrage.bpmn",
+      "rmsDatei": "Bedarfsanfrage.bpmn",
+      "tab": "haupt",
+      "haupt": true,
+      "von": "",
+      "unter": [
+        "erfassen",
+        "pruefen",
+        "freigabe"
+      ],
+      "neben": [
+        "autoentwurf"
+      ],
+      "policies": [
+        "120",
+        "119",
+        "111"
+      ],
+      "itemId": "01NH6NP5DKYW2SVIV5G5BJOOUWU6PPLIYV"
+    },
+    {
+      "key": "erfassen",
+      "name": "Anfrage erfassen und einreichen",
+      "kennung": "Process_Bedarfsanfrage_Erfassen",
+      "datei": "docs/bpmn/01a-anfrage-erfassen.bpmn",
+      "rmsDatei": "Bedarfsanfrage-Erfassen.bpmn",
+      "tab": "haupt",
+      "haupt": false,
+      "von": "haupt",
+      "unter": [],
+      "neben": [],
+      "policies": [
+        "120",
+        "119"
+      ],
+      "itemId": "01NH6NP5HUHMSE6LKN6FBZHNXAX5S2VXPO"
+    },
+    {
+      "key": "pruefen",
+      "name": "Anfrage prüfen und entscheiden",
+      "kennung": "Process_Bedarfsanfrage_Einkauf",
+      "datei": "docs/bpmn/01b-anfrage-pruefen.bpmn",
+      "rmsDatei": "Bedarfsanfrage-Einkaufsprüfung.bpmn",
+      "tab": "haupt",
+      "haupt": false,
+      "von": "haupt",
+      "unter": [],
+      "neben": [],
+      "policies": [
+        "120",
+        "119"
+      ],
+      "itemId": "01NH6NP5CT3ID7HZMK4JBYSAHRU34JWGMB"
+    },
+    {
+      "key": "freigabe",
+      "name": "Freigabelauf (Power Automate)",
+      "kennung": "Process_Bedarfsanfrage_Freigabelauf",
+      "datei": "docs/bpmn/02-freigabelauf.bpmn",
+      "rmsDatei": "Bedarfsanfrage-Freigabelauf.bpmn",
+      "tab": "haupt",
+      "haupt": false,
+      "von": "haupt",
+      "unter": [],
+      "neben": [],
+      "policies": [
+        "120",
+        "119"
+      ],
+      "itemId": "01NH6NP5AOD65CF4LUVRCLFWHE6BBQWOI4"
+    },
+    {
+      "key": "autoentwurf",
+      "name": "Auto-Entwurf (Wiedervorlage)",
+      "kennung": "Process_Bedarfsanfrage_AutoEntwurf",
+      "datei": "docs/bpmn/03-auto-entwurf.bpmn",
+      "rmsDatei": "Bedarfsanfrage-AutoEntwurf.bpmn",
+      "tab": "autoentwurf",
+      "haupt": true,
+      "von": "",
+      "unter": [],
+      "neben": [],
+      "policies": [
+        "120",
+        "111"
+      ],
+      "itemId": "01NH6NP5DFYDNIEQOLAJHZNZT3627RDOSI"
+    }
+  ]
+}

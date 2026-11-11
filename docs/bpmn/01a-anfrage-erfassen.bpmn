@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:bioc="http://bpmn.io/schema/bpmn/biocolor/1.0" xmlns:color="http://www.omg.org/spec/BPMN/non-normative/color/1.0" id="Definitions_erfassen" targetNamespace="https://bedarfsanfrage.dihag-extern.com/bpmn" exporter="DIHAG BPMN-Generator (scripts/bpmn/generate-bpmn.js)" exporterVersion="2.0">
+  <bpmn:collaboration id="Collab_erfassen">
+    <bpmn:participant id="P_Erf" name="DIHAG SHB · Anfrage erfassen" processRef="Process_Bedarfsanfrage_Erfassen" />
+  </bpmn:collaboration>
+  <bpmn:process id="Process_Bedarfsanfrage_Erfassen" name="Anfrage erfassen und einreichen" isExecutable="false">
+    <bpmn:documentation>Der Antragsteller erfasst den Bedarf im Assistenten der App, als Einzelanfrage oder als Sammelanfrage mit mehreren Positionen. Favoriten und Wiedervorlagen füllen den Assistenten vor. Aus Menge und Einzelpreis rechnet die App das Bestellvolumen und zeigt den Genehmigungsweg nach Regelwerk. Ab 500 € verlangt das Regelwerk Angebote, beim Lead-Buyer-Abschluss entfällt die Pflicht. Mit dem Einreichen speichert die App die Anfrage mit dem Status Eingereicht.
+Eingebunden in: Bedarfsanfrage.
+Anwender-Ansicht: https://bedarfsanfrage.dihag-extern.com/?ansicht=prozess&amp;modell=erfassen
+Im Einklang mit den Richtlinien: Konzernfachregelung Prozessmanagement; ISMS-Richtlinie Aufbewahrungsfristen und -pflichten
+[[rms:policies=120,119]]</bpmn:documentation>
+    <bpmn:laneSet id="LaneSet_P_Erf">
+      <bpmn:lane id="LA" name="Antragsteller (Fachbereich)"><bpmn:flowNodeRef>A_start</bpmn:flowNodeRef><bpmn:flowNodeRef>A_gw1</bpmn:flowNodeRef><bpmn:flowNodeRef>A_einzel</bpmn:flowNodeRef><bpmn:flowNodeRef>A_sammel</bpmn:flowNodeRef><bpmn:flowNodeRef>A_besch</bpmn:flowNodeRef><bpmn:flowNodeRef>A_gw2</bpmn:flowNodeRef><bpmn:flowNodeRef>A_ang</bpmn:flowNodeRef><bpmn:flowNodeRef>A_send</bpmn:flowNodeRef></bpmn:lane>
+      <bpmn:lane id="LB" name="Bedarfsanfrage-App"><bpmn:flowNodeRef>B_vol</bpmn:flowNodeRef><bpmn:flowNodeRef>B_save</bpmn:flowNodeRef><bpmn:flowNodeRef>B_end</bpmn:flowNodeRef></bpmn:lane>
+    </bpmn:laneSet>
+      <bpmn:startEvent id="A_start" name="Bedarf soll angefragt werden"><bpmn:outgoing>Flow_A_start_A_gw1</bpmn:outgoing></bpmn:startEvent>
+      <bpmn:exclusiveGateway id="A_gw1" name="Mehrere Positionen?"><bpmn:incoming>Flow_A_start_A_gw1</bpmn:incoming><bpmn:outgoing>Flow_A_gw1_A_einzel</bpmn:outgoing><bpmn:outgoing>Flow_A_gw1_A_sammel</bpmn:outgoing></bpmn:exclusiveGateway>
+      <bpmn:userTask id="A_einzel" name="Einzelanfrage erfassen"><bpmn:incoming>Flow_A_gw1_A_einzel</bpmn:incoming><bpmn:outgoing>Flow_A_einzel_A_besch</bpmn:outgoing></bpmn:userTask>
+      <bpmn:userTask id="A_sammel" name="Sammelanfrage mit Positionen erfassen"><bpmn:incoming>Flow_A_gw1_A_sammel</bpmn:incoming><bpmn:outgoing>Flow_A_sammel_A_besch</bpmn:outgoing></bpmn:userTask>
+      <bpmn:userTask id="A_besch" name="Beschaffung, Lieferant und Abteilung angeben"><bpmn:incoming>Flow_A_einzel_A_besch</bpmn:incoming><bpmn:incoming>Flow_A_sammel_A_besch</bpmn:incoming><bpmn:outgoing>Flow_A_besch_B_vol</bpmn:outgoing></bpmn:userTask>
+      <bpmn:serviceTask id="B_vol" name="Bestellvolumen und Genehmigungsweg anzeigen"><bpmn:incoming>Flow_A_besch_B_vol</bpmn:incoming><bpmn:outgoing>Flow_B_vol_A_gw2</bpmn:outgoing></bpmn:serviceTask>
+      <bpmn:exclusiveGateway id="A_gw2" name="Angebote nötig?"><bpmn:incoming>Flow_B_vol_A_gw2</bpmn:incoming><bpmn:outgoing>Flow_A_gw2_A_ang</bpmn:outgoing><bpmn:outgoing>Flow_A_gw2_A_send</bpmn:outgoing></bpmn:exclusiveGateway>
+      <bpmn:userTask id="A_ang" name="Vorhandene Angebote anhängen"><bpmn:incoming>Flow_A_gw2_A_ang</bpmn:incoming><bpmn:outgoing>Flow_A_ang_A_send</bpmn:outgoing></bpmn:userTask>
+      <bpmn:userTask id="A_send" name="Zusammenfassung prüfen und einreichen"><bpmn:incoming>Flow_A_gw2_A_send</bpmn:incoming><bpmn:incoming>Flow_A_ang_A_send</bpmn:incoming><bpmn:outgoing>Flow_A_send_B_save</bpmn:outgoing></bpmn:userTask>
+      <bpmn:serviceTask id="B_save" name="Anfrage mit Status Eingereicht speichern"><bpmn:incoming>Flow_A_send_B_save</bpmn:incoming><bpmn:outgoing>Flow_B_save_B_end</bpmn:outgoing></bpmn:serviceTask>
+      <bpmn:endEvent id="B_end" name="Anfrage eingereicht"><bpmn:incoming>Flow_B_save_B_end</bpmn:incoming></bpmn:endEvent>
+      <bpmn:sequenceFlow id="Flow_A_start_A_gw1" sourceRef="A_start" targetRef="A_gw1" />
+      <bpmn:sequenceFlow id="Flow_A_gw1_A_einzel" sourceRef="A_gw1" targetRef="A_einzel" name="nein" />
+      <bpmn:sequenceFlow id="Flow_A_gw1_A_sammel" sourceRef="A_gw1" targetRef="A_sammel" name="ja" />
+      <bpmn:sequenceFlow id="Flow_A_einzel_A_besch" sourceRef="A_einzel" targetRef="A_besch" />
+      <bpmn:sequenceFlow id="Flow_A_sammel_A_besch" sourceRef="A_sammel" targetRef="A_besch" />
+      <bpmn:sequenceFlow id="Flow_A_besch_B_vol" sourceRef="A_besch" targetRef="B_vol" />
+      <bpmn:sequenceFlow id="Flow_B_vol_A_gw2" sourceRef="B_vol" targetRef="A_gw2" />
+      <bpmn:sequenceFlow id="Flow_A_gw2_A_ang" sourceRef="A_gw2" targetRef="A_ang" name="ja" />
+      <bpmn:sequenceFlow id="Flow_A_gw2_A_send" sourceRef="A_gw2" targetRef="A_send" name="nein" />
+      <bpmn:sequenceFlow id="Flow_A_ang_A_send" sourceRef="A_ang" targetRef="A_send" />
+      <bpmn:sequenceFlow id="Flow_A_send_B_save" sourceRef="A_send" targetRef="B_save" />
+      <bpmn:sequenceFlow id="Flow_B_save_B_end" sourceRef="B_save" targetRef="B_end" />
+      <bpmn:textAnnotation id="An_fav"><bpmn:text>Favoriten und Wiedervorlagen füllen den Assistenten vor.</bpmn:text></bpmn:textAnnotation>
+      <bpmn:association id="Assoc_An_fav" associationDirection="None" sourceRef="A_start" targetRef="An_fav" />
+      <bpmn:textAnnotation id="An_ang"><bpmn:text>Der Genehmigungsweg nennt die Angebote nach Regelwerk: ab 500 € 2 bis 5, beim Lead-Buyer-Abschluss keine.</bpmn:text></bpmn:textAnnotation>
+      <bpmn:association id="Assoc_An_ang" associationDirection="None" sourceRef="B_vol" targetRef="An_ang" />
+      <bpmn:textAnnotation id="An_save"><bpmn:text>Ein Datum zur automatischen Bedarfsanfrage merkt die Anfrage für den Auto-Entwurf vor.</bpmn:text></bpmn:textAnnotation>
+      <bpmn:association id="Assoc_An_save" associationDirection="None" sourceRef="B_save" targetRef="An_save" />
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_erfassen">
+    <bpmndi:BPMNPlane id="Plane_erfassen" bpmnElement="Collab_erfassen">
+      <bpmndi:BPMNShape id="P_Erf_di" bpmnElement="P_Erf" isHorizontal="true" bioc:stroke="#1A2644" bioc:fill="#FFFFFF" color:background-color="#FFFFFF" color:border-color="#1A2644"><dc:Bounds x="100" y="60" width="1810" height="520" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="LA_di" bpmnElement="LA" isHorizontal="true" bioc:stroke="#C2410C" bioc:fill="#FFF8F1" color:background-color="#FFF8F1" color:border-color="#C2410C"><dc:Bounds x="130" y="60" width="1780" height="260" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="LB_di" bpmnElement="LB" isHorizontal="true" bioc:stroke="#1A2644" bioc:fill="#F3F6FB" color:background-color="#F3F6FB" color:border-color="#1A2644"><dc:Bounds x="130" y="320" width="1780" height="260" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_start_di" bpmnElement="A_start" bioc:stroke="#1E7B3A" bioc:fill="#DDF3E4" color:background-color="#DDF3E4" color:border-color="#1E7B3A"><dc:Bounds x="247" y="112" width="36" height="36" /><bpmndi:BPMNLabel><dc:Bounds x="205" y="79" width="120" height="28" /></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_gw1_di" bpmnElement="A_gw1" isMarkerVisible="true" bioc:stroke="#8A6100" bioc:fill="#FFF8DB" color:background-color="#FFF8DB" color:border-color="#8A6100"><dc:Bounds x="410" y="105" width="50" height="50" /><bpmndi:BPMNLabel><dc:Bounds x="335" y="73" width="96" height="28" /></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_einzel_di" bpmnElement="A_einzel" bioc:stroke="#C2410C" bioc:fill="#FFE3C8" color:background-color="#FFE3C8" color:border-color="#C2410C"><dc:Bounds x="539" y="88" width="132" height="84" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_sammel_di" bpmnElement="A_sammel" bioc:stroke="#C2410C" bioc:fill="#FFE3C8" color:background-color="#FFE3C8" color:border-color="#C2410C"><dc:Bounds x="539" y="208" width="132" height="84" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_besch_di" bpmnElement="A_besch" bioc:stroke="#C2410C" bioc:fill="#FFE3C8" color:background-color="#FFE3C8" color:border-color="#C2410C"><dc:Bounds x="709" y="88" width="132" height="84" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="B_vol_di" bpmnElement="B_vol" bioc:stroke="#1A2644" bioc:fill="#DCE5F2" color:background-color="#DCE5F2" color:border-color="#1A2644"><dc:Bounds x="879" y="348" width="132" height="84" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_gw2_di" bpmnElement="A_gw2" isMarkerVisible="true" bioc:stroke="#8A6100" bioc:fill="#FFF8DB" color:background-color="#FFF8DB" color:border-color="#8A6100"><dc:Bounds x="1090" y="105" width="50" height="50" /><bpmndi:BPMNLabel><dc:Bounds x="1015" y="86" width="96" height="15" /></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_ang_di" bpmnElement="A_ang" bioc:stroke="#C2410C" bioc:fill="#FFE3C8" color:background-color="#FFE3C8" color:border-color="#C2410C"><dc:Bounds x="1219" y="208" width="132" height="84" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_send_di" bpmnElement="A_send" bioc:stroke="#C2410C" bioc:fill="#FFE3C8" color:background-color="#FFE3C8" color:border-color="#C2410C"><dc:Bounds x="1389" y="88" width="132" height="84" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="B_save_di" bpmnElement="B_save" bioc:stroke="#1A2644" bioc:fill="#DCE5F2" color:background-color="#DCE5F2" color:border-color="#1A2644"><dc:Bounds x="1559" y="348" width="132" height="84" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="B_end_di" bpmnElement="B_end" bioc:stroke="#1E7B3A" bioc:fill="#DDF3E4" color:background-color="#DDF3E4" color:border-color="#1E7B3A"><dc:Bounds x="1777" y="372" width="36" height="36" /><bpmndi:BPMNLabel><dc:Bounds x="1735" y="413" width="120" height="15" /></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_A_start_A_gw1_di" bpmnElement="Flow_A_start_A_gw1"><di:waypoint x="283" y="130" /><di:waypoint x="410" y="130" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_A_gw1_A_einzel_di" bpmnElement="Flow_A_gw1_A_einzel"><di:waypoint x="460" y="130" /><di:waypoint x="539" y="130" /><bpmndi:BPMNLabel><dc:Bounds x="466" y="113" width="38" height="14" /></bpmndi:BPMNLabel></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_A_gw1_A_sammel_di" bpmnElement="Flow_A_gw1_A_sammel"><di:waypoint x="435" y="155" /><di:waypoint x="435" y="250" /><di:waypoint x="539" y="250" /><bpmndi:BPMNLabel><dc:Bounds x="443" y="233" width="25" height="14" /></bpmndi:BPMNLabel></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_A_einzel_A_besch_di" bpmnElement="Flow_A_einzel_A_besch"><di:waypoint x="671" y="130" /><di:waypoint x="709" y="130" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_A_sammel_A_besch_di" bpmnElement="Flow_A_sammel_A_besch"><di:waypoint x="671" y="250" /><di:waypoint x="690" y="250" /><di:waypoint x="690" y="130" /><di:waypoint x="709" y="130" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_A_besch_B_vol_di" bpmnElement="Flow_A_besch_B_vol"><di:waypoint x="841" y="130" /><di:waypoint x="860" y="130" /><di:waypoint x="860" y="390" /><di:waypoint x="879" y="390" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_B_vol_A_gw2_di" bpmnElement="Flow_B_vol_A_gw2"><di:waypoint x="1011" y="390" /><di:waypoint x="1051" y="390" /><di:waypoint x="1051" y="130" /><di:waypoint x="1090" y="130" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_A_gw2_A_ang_di" bpmnElement="Flow_A_gw2_A_ang"><di:waypoint x="1115" y="155" /><di:waypoint x="1115" y="250" /><di:waypoint x="1219" y="250" /><bpmndi:BPMNLabel><dc:Bounds x="1123" y="233" width="25" height="14" /></bpmndi:BPMNLabel></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_A_gw2_A_send_di" bpmnElement="Flow_A_gw2_A_send"><di:waypoint x="1140" y="130" /><di:waypoint x="1389" y="130" /><bpmndi:BPMNLabel><dc:Bounds x="1146" y="113" width="38" height="14" /></bpmndi:BPMNLabel></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_A_ang_A_send_di" bpmnElement="Flow_A_ang_A_send"><di:waypoint x="1351" y="250" /><di:waypoint x="1370" y="250" /><di:waypoint x="1370" y="130" /><di:waypoint x="1389" y="130" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_A_send_B_save_di" bpmnElement="Flow_A_send_B_save"><di:waypoint x="1521" y="130" /><di:waypoint x="1540" y="130" /><di:waypoint x="1540" y="390" /><di:waypoint x="1559" y="390" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_B_save_B_end_di" bpmnElement="Flow_B_save_B_end"><di:waypoint x="1691" y="390" /><di:waypoint x="1777" y="390" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNShape id="An_fav_di" bpmnElement="An_fav" bioc:stroke="#6B7280" bioc:fill="#FFFFFF" color:background-color="#FFFFFF" color:border-color="#6B7280"><dc:Bounds x="190" y="219" width="150" height="62" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Assoc_An_fav_di" bpmnElement="Assoc_An_fav"><di:waypoint x="265" y="148" /><di:waypoint x="265" y="219" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNShape id="An_ang_di" bpmnElement="An_ang" bioc:stroke="#6B7280" bioc:fill="#FFFFFF" color:background-color="#FFFFFF" color:border-color="#6B7280"><dc:Bounds x="870" y="479" width="200" height="62" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Assoc_An_ang_di" bpmnElement="Assoc_An_ang"><di:waypoint x="945" y="432" /><di:waypoint x="945" y="479" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNShape id="An_save_di" bpmnElement="An_save" bioc:stroke="#6B7280" bioc:fill="#FFFFFF" color:background-color="#FFFFFF" color:border-color="#6B7280"><dc:Bounds x="1550" y="479" width="200" height="62" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Assoc_An_save_di" bpmnElement="Assoc_An_save"><di:waypoint x="1625" y="432" /><di:waypoint x="1625" y="479" /></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

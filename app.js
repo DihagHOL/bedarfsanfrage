@@ -438,7 +438,7 @@ async function bootDone() {
     $id('hdr-av').textContent   = name.split(' ').map(p=>p[0]||'').join('').substring(0,2).toUpperCase();
     $id('hdr-name').textContent = name;
     $id('hdr-mail').textContent = account?.username || '';
-    navigate('dashboard');
+    navigate(startansichtHolen());
   } catch(e) {
     $id('boot-sub').textContent = 'Fehler beim Laden: ' + e.message;
     $id('boot-spinner').style.display = 'none';
@@ -447,6 +447,30 @@ async function bootDone() {
     $id('boot-btn').textContent = 'Erneut versuchen';
     $id('boot-btn').onclick = bootDone;
   }
+}
+
+// Direktlink auf einen Reiter, etwa die „Anwender-Ansicht" aus einem RMS-Modell:
+// ?ansicht=prozess&modell=freigabe. Die Rückkehr-Adresse der Anmeldung hat keine
+// Parameter, deshalb merkt sich die Seite den Wunsch bis nach der Anmeldung.
+const START_ANSICHTEN = ['dashboard', 'new', 'multi', 'mine', 'gemeinsame', 'reports', 'prozess', 'importer', 'schulung'];
+function merkeStartansicht() {
+  try {
+    const q = new URLSearchParams(location.search);
+    const ansicht = (q.get('ansicht') || '').trim().toLowerCase();
+    if (!START_ANSICHTEN.includes(ansicht)) return;
+    sessionStorage.setItem('banf_startansicht', JSON.stringify({ ansicht, modell: (q.get('modell') || '').slice(0, 60) }));
+    history.replaceState(null, '', location.pathname);
+  } catch { /* ohne sessionStorage startet die App wie immer im Dashboard */ }
+}
+function startansichtHolen() {
+  let s = null;
+  try {
+    s = JSON.parse(sessionStorage.getItem('banf_startansicht') || 'null');
+    sessionStorage.removeItem('banf_startansicht');
+  } catch { s = null; }
+  if (!s || !START_ANSICHTEN.includes(s.ansicht)) return 'dashboard';
+  if (s.ansicht === 'prozess' && s.modell && typeof prozessStartModell === 'function') prozessStartModell(s.modell);
+  return s.ansicht;
 }
 
 function doLogout() {
@@ -1221,6 +1245,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Boot — Stammdaten zunächst aus dem localStorage-Cache (TID + Kostenstellen);
   // der frische Abruf aus SharePoint folgt in bootDone über loadLookupDataSP().
   loadLookupCache();
+  // Direktlink (z. B. aus dem RMS): ?ansicht=prozess&modell=<key>
+  merkeStartansicht();
 
   $id('boot-spinner').style.display = 'block';
   try {
@@ -3282,7 +3308,7 @@ function buildReview() {
     </div>
     ${d.GeschaetzterPreis ? `<div class="info-box info" style="margin-top:12px">${genehmigungsweg(d.GeschaetzterPreis, d.LeadBuyerAbschluss === true || /^(true|ja|yes|1)$/i.test(String(d.LeadBuyerAbschluss || '')))}</div>` : ''}
     <div class="info-box info" style="margin-top:10px">
-      Nach dem Einreichen wird <strong>Power Automate</strong> automatisch den Genehmigungsprozess starten und den zuständigen Genehmiger per E-Mail / Teams benachrichtigen.
+      Nach dem Einreichen prüft der <strong>Einkauf</strong> die Anfrage in der App. Genehmigt er, holt <strong>Power Automate</strong> die weiteren Freigaben ein und informiert Sie per Mail über das Ergebnis.
     </div>`;
 
   const mw = $id('missing-cols-warn');
@@ -3532,7 +3558,7 @@ async function submitRequest() {
       if (errors.length) toast(`Anfrage erstellt. Anhänge fehlgeschlagen: ${errors.join(', ')}`, 'error');
       else toast(`Anfrage eingereicht! ${wizardFiles.length} Angebot(e) angehängt.`, 'success');
     } else {
-      toast('Anfrage eingereicht! Power Automate startet den Genehmigungsprozess.', 'success');
+      toast('Anfrage eingereicht. Als Nächstes prüft der Einkauf.', 'success');
     }
 
     await loadItems(false);
@@ -4221,37 +4247,6 @@ async function exportReportsExcel() {
   }
 }
 
-// ── SCHULUNG (BETA) ──────────────────────────────────────────────────────────
-// ── PROZESS (Prozessbeschreibung + Probelauf) ─────────────────────────────────
-// Reiter fuer die Praesentation: erklaert den Bedarfsanfrage-Prozess klar und
-// bietet am Ende einen interaktiven Probelauf, der den Freigabeweg mit eigenen
-// Werten durchspielt. Die Verzweigungen (Controlling nur bei Dienstleistung,
-// Werkleitung ab 1.500 EUR, strategischer Einkauf ab 10.000 EUR ohne Lead-Buyer)
-// entsprechen dem Freigabelauf im RMS und der Status-Timeline der App.
-const RMS_PROZESS_URL = 'https://rms.dihag.de/';
-
-function roleBadge(role) {
-  const map = {
-    'Fachbereich':'rb-fach', 'System':'rb-system', 'Einkauf':'rb-einkauf',
-    'Controlling':'rb-controlling', 'Werkleitung':'rb-werk',
-    'Strategischer Einkauf':'rb-strat', 'Cron':'rb-system'
-  };
-  return `<span class="role-badge ${map[role] || 'rb-system'}">${role}</span>`;
-}
-
-// Ein statischer Prozessschritt fuer die Beschreibung.
-function procStep(role, name, desc, kind) {
-  const cls = kind === 'cond' ? ' cond' : kind === 'ok' ? ' ok' : kind === 'auto' ? ' auto' : '';
-  let tag = '';
-  if (kind === 'auto') tag = `<span class="flow-tag auto-tag">automatisch</span>`;
-  else if (kind === 'ok') tag = `<span class="flow-tag ok-tag">Status</span>`;
-  return `
-    <div class="proc-step${cls}">
-      <div class="ps-head">${roleBadge(role)} <span class="ps-name">${name}</span> ${tag}</div>
-      <div class="flow-sub">${desc}</div>
-    </div>`;
-}
-
 // ── GEMEINSAME ANFRAGEN ───────────────────────────────────────────────────────
 // Geteilte Übersicht aller laufenden Anfragen für den Einkauf, nach Abteilung
 // gruppiert. Zeilen über compactRow, damit die 48-Std- und Reservierungs-Markierung
@@ -4319,238 +4314,9 @@ function initGemeinsame() {
   root.innerHTML = html;
 }
 
-function initProzess() {
-  plState = null;
-  const arrow = '<div class="flow-arrow">↓</div>';
+// Der Reiter „Prozess" (BPMN-Modelle, Probelauf) steht in prozess.js.
 
-  const haupt = [
-    procStep('Fachbereich', 'Bedarfsanfrage erfassen', 'Der Fachbereich beschreibt den Bedarf im Assistenten (Artikel, Menge, Termin, Beschaffungsart, Lieferant) und reicht die Anfrage ein.', 'task'),
-    procStep('System', 'Anfrage anlegen, Einkauf benachrichtigen', 'Die Anfrage wird in SharePoint gespeichert. Der Einkauf wird sofort informiert.', 'auto'),
-    procStep('Einkauf', 'In Prüfung: Angebote einholen', 'Der Einkauf öffnet die Anfrage. Der Status wechselt automatisch auf „In Prüfung (Einkauf)".', 'task'),
-    procStep('Einkauf', 'Entscheidung: Bedarf freigeben?', 'Gibt der Einkauf frei, startet der Freigabelauf. Lehnt er ab, wird die Anfrage beendet.', 'task'),
-    procStep('System', 'Freigabelauf (Unterprozess)', 'Mehrstufige Freigabe über Power Automate. Welche Stufen greifen, hängt von Beschaffungsart und Bestellvolumen ab (siehe unten).', 'auto'),
-    procStep('System', 'Freigegeben', 'Alle erforderlichen Stufen haben zugestimmt.', 'ok'),
-    procStep('Einkauf', 'Bestellung auslösen, Einkauf-Daten erfassen', 'Bestellnummer, Lieferdatum und tatsächlicher Preis werden hinterlegt. Die Bestellnummer wird auf Dubletten geprüft.', 'task'),
-    procStep('System', 'Bestellt', 'Endstatus. Die Beschaffung ist ausgelöst.', 'ok'),
-  ].join(arrow);
-
-  const freigabe = [
-    procStep('System', 'Genehmigt in Einkauf: Workflow startet', 'Mit der Freigabe durch den Einkauf startet Power Automate den Genehmigungs-Workflow und benachrichtigt die Genehmiger.', 'auto'),
-    procStep('Controlling', 'Dienstleistung freigeben?', 'Diese Stufe greift nur, wenn es sich um eine Dienstleistung handelt.', 'cond'),
-    procStep('Werkleitung', 'Bestellvolumen freigeben?', 'Diese Stufe greift ab einem Bestellvolumen von 1.500 €.', 'cond'),
-    procStep('Strategischer Einkauf', 'Konzernrahmen freigeben?', 'Diese Stufe greift ab 10.000 € und entfällt beim Lead-Buyer-Abschluss.', 'cond'),
-    procStep('System', 'Freigabe dokumentieren, Status Freigegeben', 'Die Freigabe wird protokolliert, die Anfrage ist freigegeben.', 'ok'),
-  ].join(arrow);
-
-  const auto = [
-    procStep('Fachbereich', 'Datum zur automatischen Bedarfsanfrage', 'Beim Erfassen kann ein Wiedervorlage-Datum gesetzt werden, zu dem die Anfrage erneut vorgelegt werden soll.', 'task'),
-    procStep('Cron', 'Fällige Vorlagen ermitteln', 'Ein täglicher GitHub-Actions-Cron prüft, welche Vorlagen fällig sind.', 'auto'),
-    procStep('Cron', 'Entwurf anlegen', 'Für jede fällige Vorlage wird automatisch ein Entwurf erstellt.', 'auto'),
-    procStep('Cron', 'Quelldatum leeren', 'Das Wiedervorlage-Datum wird zurückgesetzt, damit kein Doppel-Entwurf entsteht.', 'auto'),
-    procStep('System', 'Entwurf liegt bereit', 'Der Fachbereich findet den vorbereiteten Entwurf in „Meine Anfragen".', 'ok'),
-  ].join(arrow);
-
-  $id('view-prozess').innerHTML = `
-    <div class="schulung-wrap">
-      <div class="schulung-hero">
-        <div class="schulung-badge">Prozess</div>
-        <h1>Der Bedarfsanfrage-Prozess</h1>
-        <p>Von der Bedarfsmeldung im Fachbereich bis zur ausgelösten Bestellung. Dieser Prozess ist im
-           Richtlinienmanagementsystem (RMS) als verbindliche Prozessbeschreibung hinterlegt. Diese Seite
-           erklärt ihn Schritt für Schritt und bietet am Ende einen Probelauf.</p>
-        <a class="hero-link" href="${RMS_PROZESS_URL}" target="_blank" rel="noopener">Prozess im RMS öffnen ↗</a>
-      </div>
-
-      <div class="schulung-sec">
-        <h2>So liest sich der Prozess</h2>
-        <div class="proc-legend">
-          <span class="pl-leg">${roleBadge('Fachbereich')} eine Rolle handelt</span>
-          <span class="pl-leg"><span class="flow-tag auto-tag">automatisch</span> System, Power Automate oder Cron</span>
-          <span class="pl-leg"><span class="flow-tag">bedingte Stufe</span> entfällt, wenn sie nicht zutrifft</span>
-          <span class="pl-leg"><span class="flow-tag ok-tag">Status</span> Zwischen- oder Endstatus</span>
-        </div>
-      </div>
-
-      <div class="schulung-sec">
-        <h2>1 · Hauptprozess</h2>
-        <p>Der durchgehende Weg einer Anfrage. Die Prüfung beginnt in der App beim Einkauf. Ab „Freigegeben"
-           übernimmt der Freigabelauf in Power Automate.</p>
-        <div class="proc-flow">${haupt}</div>
-      </div>
-
-      <div class="schulung-sec">
-        <h2>2 · Freigabelauf (Power Automate)</h2>
-        <p>Der Unterprozess hinter „Freigegeben". Jede Stufe hat eine Bedingung. Trifft sie nicht zu, wird die
-           Stufe übersprungen. Im „Verlauf" einer Anfrage erscheinen nur die Stufen, die tatsächlich durchlaufen wurden.</p>
-        <div class="proc-flow">${freigabe}</div>
-        <div class="schulung-tip">✗ Lehnt eine Stufe ab, wechselt die Anfrage sofort auf „Abgelehnt" und der
-           Antragsteller wird per E-Mail informiert. Die folgenden Stufen entfallen.</div>
-      </div>
-
-      <div class="schulung-sec">
-        <h2>3 · Automatischer Entwurf (Wiedervorlage)</h2>
-        <p>Für wiederkehrende Bedarfe legt ein Cron-Job automatisch einen Entwurf an, sobald das hinterlegte
-           Datum erreicht ist.</p>
-        <div class="proc-flow">${auto}</div>
-      </div>
-
-      <div class="schulung-sec">
-        <h2>4 · Bearbeitung im Einkauf</h2>
-        <p>Neben dem Freigabeweg unterstützt die App den Einkauf bei der täglichen Bearbeitung.</p>
-        <div class="proc-flow">
-          ${procStep('Einkauf', 'Gemeinsame Anfragen je Abteilung', 'Der Reiter „Gemeinsame Anfragen" bündelt alle laufenden Anfragen nach Abteilung. Jeder Einkäufer sieht die Abteilungen, die ihm zugeordnet sind.', 'task')}
-          ${arrow}
-          ${procStep('Einkauf', 'Für sich reservieren', 'Mit „Für mich reservieren" belegt ein Einkäufer eine Anfrage zur Bearbeitung. Andere sehen die Reservierung und arbeiten nicht doppelt.', 'task')}
-          ${arrow}
-          ${procStep('System', 'Überfällig nach 48 Stunden', 'Anfragen, die seit über 48 Stunden offen sind, werden rot markiert und als vorrangig gekennzeichnet. Ein Filter zeigt nur diese.', 'auto')}
-        </div>
-        <div class="schulung-tip">💡 Die Abteilungen und die Zuordnung der Nutzer pflegt die Administration in den Einstellungen.</div>
-      </div>
-
-      <div class="schulung-sec">
-        <h2>Probelauf</h2>
-        <p>Spielen Sie den Freigabeweg mit eigenen Werten durch. Je nach Bestellvolumen und Beschaffungsart
-           entfallen einzelne Stufen. Genau diese Logik läuft später in Power Automate.</p>
-        <div class="pl-controls">
-          <div class="pl-field">
-            <label>Bestellvolumen</label>
-            <div class="pl-euro"><input type="number" id="pl-preis" min="0" step="100" value="3500"/><span>€</span></div>
-          </div>
-          <div class="pl-field">
-            <label>Beschaffungsart</label>
-            <select id="pl-art">
-              <option value="material">Material</option>
-              <option value="dienst">Dienstleistung</option>
-            </select>
-          </div>
-          <div class="pl-field pl-field-check">
-            <label><input type="checkbox" id="pl-lead"/> Lead-Buyer-Abschluss</label>
-          </div>
-          <button class="btn btn-primary" onclick="startProbelauf()">▶ Probelauf starten</button>
-        </div>
-        <div id="pl-stage"></div>
-      </div>
-    </div>`;
-}
-
-// ── Probelauf-Logik ───────────────────────────────────────────────────────────
-let plState = null;
-
-function plBuildStages(preis, art, lead) {
-  const dienst = art === 'dienst';
-  return [
-    { role:'Fachbereich', name:'Bedarfsanfrage erfassen', kind:'task', applies:true,
-      desc:'Der Fachbereich beschreibt den Bedarf im Assistenten und reicht die Anfrage ein.' },
-    { role:'System', name:'Anfrage anlegen, Einkauf benachrichtigen', kind:'auto', applies:true,
-      desc:'Die Anfrage wird in SharePoint gespeichert und der Einkauf automatisch informiert.' },
-    { role:'Einkauf', name:'In Prüfung (Einkauf)', kind:'decision', applies:true,
-      desc:'Der Einkauf holt Angebote ein, prüft und entscheidet direkt in der App.' },
-    { role:'System', name:'Genehmigt (Einkauf): Workflow startet', kind:'auto', applies:true,
-      desc:'Mit der Freigabe durch den Einkauf startet Power Automate den Freigabelauf.' },
-    { role:'Controlling', name:'Freigabe Controlling', kind:'decision', applies:dienst,
-      cond:'nur bei Dienstleistung', desc:'Das Controlling gibt die Dienstleistung frei.' },
-    { role:'Werkleitung', name:'Freigabe Werkleitung', kind:'decision', applies:preis >= 1500,
-      cond:'ab 1.500 € Bestellvolumen', desc:'Die Werkleitung gibt das Bestellvolumen frei.' },
-    { role:'Strategischer Einkauf', name:'Freigabe strategischer Einkauf', kind:'decision',
-      applies:preis >= 10000 && !lead, cond:'ab 10.000 € und ohne Lead-Buyer-Abschluss',
-      desc:'Der strategische Einkauf gibt den Konzernrahmen frei.' },
-    { role:'System', name:'Freigegeben', kind:'auto', applies:true,
-      desc:'Alle erforderlichen Stufen haben zugestimmt, die Freigabe wird dokumentiert.' },
-    { role:'Einkauf', name:'Bestellung auslösen (Bestellt)', kind:'task', applies:true,
-      desc:'Der Einkauf trägt die Bestellnummer ein. Sie wird auf Dubletten geprüft, dann ist die Anfrage bestellt.' },
-  ];
-}
-
-function plNextApplicable(from) {
-  for (let j = from; j < plState.stages.length; j++) if (plState.stages[j].applies) return j;
-  return -1;
-}
-
-function startProbelauf() {
-  const preis = Math.max(0, parseFloat(String($id('pl-preis').value).replace(',', '.')) || 0);
-  const art = $id('pl-art').value;
-  const lead = $id('pl-lead').checked;
-  plState = { stages: plBuildStages(preis, art, lead), idx: 0, rejected: null, done: false, preis, art, lead };
-  plState.idx = plNextApplicable(0);
-  renderProbelauf();
-}
-
-function plAdvance() {
-  if (!plState || plState.rejected !== null || plState.done) return;
-  const n = plNextApplicable(plState.idx + 1);
-  if (n === -1) { plState.done = true; plState.idx = plState.stages.length; }
-  else plState.idx = n;
-  renderProbelauf();
-}
-
-function plReject() {
-  if (!plState || plState.done || plState.rejected !== null) return;
-  // Ablehnen nur an Entscheidungsstufen (der Button erscheint ohnehin nur dort).
-  if (plState.stages[plState.idx]?.kind !== 'decision') return;
-  plState.rejected = plState.idx;
-  renderProbelauf();
-}
-
-function plReset() {
-  plState = null;
-  const el = $id('pl-stage');
-  if (el) el.innerHTML = '';
-}
-
-function renderProbelauf() {
-  if (!plState) return;
-  const S = plState;
-  const decisions = S.stages.filter(s => s.applies && s.kind === 'decision').length;
-  const skipped = S.stages.filter(s => !s.applies).map(s => s.role);
-
-  const steps = S.stages.map((st, i) => {
-    let status;
-    if (!st.applies) status = 'skip';
-    else if (S.rejected !== null) status = i < S.rejected ? 'done' : (i === S.rejected ? 'reject' : 'cancel');
-    else status = i < S.idx ? 'done' : (i === S.idx ? 'current' : 'pending');
-    const mark = status === 'done' ? '✓' : status === 'reject' ? '✗'
-      : status === 'skip' ? '–' : status === 'cancel' ? '·' : (i + 1);
-    const note = status === 'skip' ? ` <span class="pl-skip-note">entfällt für diese Werte</span>` : '';
-    const tag = st.cond ? ` <span class="flow-tag">${st.cond}</span>` : '';
-    return `
-      <div class="pl-step pl-${status}">
-        <div class="pl-mark">${mark}</div>
-        <div class="pl-body">
-          <div class="pl-head">${roleBadge(st.role)} <span class="pl-name">${st.name}</span>${note}</div>
-          <div class="pl-desc">${st.desc}${tag}</div>
-        </div>
-      </div>`;
-  }).join('<div class="flow-arrow">↓</div>');
-
-  let controls;
-  if (S.rejected !== null) {
-    const st = S.stages[S.rejected];
-    controls = `
-      <div class="pl-result pl-result-rej"><b>✗ Abgelehnt</b> durch ${st.role}. Die Anfrage wechselt sofort auf
-        „Abgelehnt", der Antragsteller wird per E-Mail informiert, die folgenden Stufen entfallen.</div>
-      <div class="pl-actions"><button class="btn btn-ghost" onclick="plReset()">Zurücksetzen</button></div>`;
-  } else if (S.done) {
-    controls = `
-      <div class="pl-result pl-result-ok"><b>📦 Bestellung ausgelöst.</b> Durchlaufen: ${decisions} Freigabestufe${decisions === 1 ? '' : 'n'}
-        bei ${fmtEuro(S.preis)}${S.art === 'dienst' ? ', Dienstleistung' : ''}${S.lead ? ', Lead-Buyer-Abschluss' : ''}.</div>
-      <div class="pl-actions"><button class="btn btn-ghost" onclick="plReset()">Nochmal</button></div>`;
-  } else {
-    const st = S.stages[S.idx];
-    const hint = st.kind === 'decision' ? 'diese Rolle entscheidet.'
-      : st.kind === 'auto' ? 'läuft automatisch.' : 'Aufgabe der Rolle.';
-    const btns = st.kind === 'decision'
-      ? `<button class="btn btn-success" onclick="plAdvance()">✓ Genehmigen</button>
-         <button class="btn btn-danger" onclick="plReject()">✗ Ablehnen</button>`
-      : `<button class="btn btn-primary" onclick="plAdvance()">Weiter →</button>`;
-    controls = `
-      <div class="pl-current-hint">Aktuell: <b>${st.name}</b> · ${hint}</div>
-      <div class="pl-actions">${btns} <button class="btn btn-ghost" onclick="plReset()">Zurücksetzen</button></div>`;
-  }
-
-  const summary = `<div class="pl-summary">${fmtEuro(S.preis)} · ${S.art === 'dienst' ? 'Dienstleistung' : 'Material'}${S.lead ? ' · Lead-Buyer' : ''} · ${decisions} Freigabestufe${decisions === 1 ? '' : 'n'}${skipped.length ? ` · entfällt: ${skipped.join(', ')}` : ''}</div>`;
-  $id('pl-stage').innerHTML = summary + `<div class="pl-steps">${steps}</div>` + controls;
-}
-
+// ── SCHULUNG (BETA) ──────────────────────────────────────────────────────────
 function initSchulung() {
   $id('view-schulung').innerHTML = `
     <div class="schulung-wrap">
@@ -4558,8 +4324,8 @@ function initSchulung() {
         <div class="schulung-badge">Beta</div>
         <h1>Willkommen im DIHAG Bedarfsanfragen-Tool</h1>
         <p>Diese Schulung erklärt Schritt für Schritt, wie Sie Bedarfsanfragen erstellen,
-           verfolgen und genehmigen. Die Anwendung ist mit SharePoint verbunden – alle
-           Eingaben werden zentral gespeichert und über Power Automate weitergeleitet.</p>
+           verfolgen und genehmigen. Die Anwendung ist mit SharePoint verbunden, alle
+           Eingaben werden zentral gespeichert. Nach dem Einkauf holt Power Automate die weiteren Freigaben ein.</p>
       </div>
 
       <div class="schulung-toc">
@@ -4585,7 +4351,7 @@ function initSchulung() {
           <li><b>Meine Anfragen</b> – nur Ihre eigenen Anfragen.</li>
           <li><b>Gemeinsame Anfragen</b> – geteilte Übersicht der laufenden Anfragen je Abteilung (für den Einkauf).</li>
           <li><b>Reports</b> – Auswertungen mit vielen Filtern und Excel-Export.</li>
-          <li><b>Prozess</b> – Beschreibung des Freigabewegs mit interaktivem Probelauf.</li>
+          <li><b>Prozess</b> – der Ablauf als BPMN-Diagramm aus dem RMS, mit Probelauf des Freigabewegs.</li>
           <li><b>Tabellen-Importer</b> – Artikelnummern- und Kostenstellentabellen aktualisieren.</li>
         </ul>
         <div class="schulung-tip">💡 Die Liste aktualisiert sich automatisch alle 20 Sekunden.
@@ -4680,13 +4446,16 @@ function initSchulung() {
         </div>
 
         <p style="margin-top:14px"><b>Ablehnung:</b> Lehnt eine Stufe ab, wechselt die Anfrage
-           sofort auf <b>Abgelehnt</b> und der Antragsteller wird per E-Mail informiert –
-           die nachfolgenden Stufen entfallen.</p>
+           sofort auf <b>Abgelehnt</b>, die folgenden Stufen entfallen. Lehnt Controlling,
+           Werkleitung oder strategischer Einkauf ab, bekommen Sie eine Mail. Lehnt der Einkauf ab,
+           sehen Sie den Grund in „Meine Anfragen".</p>
+        <div class="schulung-tip">↩ Solange der Einkauf noch nicht entschieden hat, können Sie Ihre
+          Anfrage in „Meine Anfragen" zurückziehen. Sie steht dann auf <b>Zurückgezogen</b>.</div>
         <div class="schulung-tip">💡 Im „Verlauf" einer Anfrage sehen Sie nur die Stufen, die für
           diese Anfrage tatsächlich durchlaufen wurden – inklusive Genehmiger und Kommentar.</div>
-        <div class="schulung-tip">📨 Sobald Ihre Genehmigung erforderlich ist, werden Sie
-          <b>automatisch über Power Automate per E-Mail und Microsoft Teams</b> benachrichtigt.
-          Sie müssen die App also nicht ständig offen halten – die Aufforderung kommt zu Ihnen.</div>
+        <div class="schulung-tip">📨 Controlling, Werkleitung und strategischer Einkauf bekommen ihre
+          Genehmigung <b>automatisch über Power Automate per Mail und in Microsoft Teams</b>. Der Einkauf
+          sieht neue Anfragen in der App, im Dashboard und unter Gemeinsame Anfragen.</div>
         <div class="schulung-tip">💡 In „Meine Anfragen" sehen Sie nur den Fortschritt – die
           Genehmigungsschaltflächen erscheinen dort nicht.</div>
       </section>
@@ -4716,7 +4485,7 @@ function initSchulung() {
         <p>Wiederkehrende Anfragen müssen Sie nicht neu tippen:</p>
         <ul>
           <li>In einer geöffneten Anfrage auf <b>„⭐ Als Wiedervorlage"</b> klicken.</li>
-          <li>Die Anfrage wird als Favorit gespeichert (lokal in Ihrem Browser).</li>
+          <li>Die Anfrage wird als Favorit in SharePoint gespeichert und steht Ihnen auf jedem Rechner zur Verfügung.</li>
           <li>Oben in <b>Neue Anfrage</b> bzw. <b>Sammelanfrage</b> erscheinen Ihre Favoriten –
               ein Klick füllt den Assistenten automatisch aus. Sammelanfragen landen dabei
               automatisch im richtigen Assistenten.</li>
@@ -4757,15 +4526,15 @@ function initSchulung() {
       <section class="schulung-sec" id="sch-9">
         <h2>10 · Häufige Fragen</h2>
         <p><b>Warum sehe ich keine Genehmigungs-Buttons?</b><br>
-           Die Genehmigungs-Aufforderung wird Ihnen <b>per Power Automate automatisch per
-           E-Mail und Microsoft Teams</b> zugestellt – Sie müssen also nicht selbst danach suchen.
-           In der App erscheinen die Schaltflächen „Genehmigen / Ablehnen" zusätzlich im
-           <b>Dashboard / „Alle Anfragen"</b>, jedoch nicht in „Meine Anfragen".</p>
+           Die Schaltflächen „Genehmigen / Ablehnen" sieht nur der zuständige Einkauf, im
+           <b>Dashboard / „Alle Anfragen"</b>, nicht in „Meine Anfragen". Controlling, Werkleitung
+           und strategischer Einkauf genehmigen über die Aufforderung von <b>Power Automate</b>
+           per Mail oder in Microsoft Teams.</p>
         <p><b>Meine Änderung ist weg?</b><br>
            Prüfen Sie, ob die Anfrage noch im Status „In Prüfung (Einkauf)" ist – nur dann ist
            sie bearbeitbar.</p>
         <p><b>Wo werden Favoriten gespeichert?</b><br>
-           Lokal in Ihrem Browser. Bei Browserwechsel oder Cache-Löschung sind sie nicht mehr da.</p>
+           In SharePoint, je Benutzer. Sie bleiben auch nach einem Browserwechsel erhalten.</p>
         <div class="schulung-tip">📨 Problem oder Frage an die IT? Schreiben Sie einfach eine
           E-Mail an <a href="mailto:ticket@dihag.com"><b>ticket@dihag.com</b></a> – es wird
           <b>automatisch ein Ticket erstellt</b> und dem passenden Kollegen zugeordnet.</div>
@@ -5219,7 +4988,7 @@ async function submitMultiRequest() {
       }
     }
 
-    toast(`Sammelanfrage mit ${multiPositions.length} Positionen eingereicht! Power Automate startet den Genehmigungsprozess.`, 'success');
+    toast(`Sammelanfrage mit ${multiPositions.length} Positionen eingereicht. Als Nächstes prüft der Einkauf.`, 'success');
     await loadItems(false);
     navigate('mine');
   } catch(e) {
