@@ -12,7 +12,8 @@ import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
 
 const wurzel = join(dirname(fileURLToPath(import.meta.url)), "..");
-const lies = f => readFileSync(join(wurzel, f), "utf8");
+// Zeilenenden vereinheitlichen: Git wandelt sie unter Windows beim Auschecken um.
+const lies = f => readFileSync(join(wurzel, f), "utf8").replace(/\r\n/g, "\n");
 const require = createRequire(import.meta.url);
 
 let fehler = 0;
