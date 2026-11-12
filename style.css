@@ -745,6 +745,12 @@ details#attach-extra-wrap[open] .attach-more-toggle { color:#374151; }
 .drop-zone-text { font-size: .85rem; line-height: 1.6; pointer-events: none; }
 .drop-zone-text small { font-size: .75rem; color: #94a3b8; }
 .drop-zone.has-files .drop-zone-text small { color: #818cf8; }
+/* Angebote nachreichen (Panel und Detailansicht): kompakte Ablage unter der Anhangliste */
+.anh-upload { margin-top: 8px; }
+.anh-drop { padding: 10px 12px; border-radius: 8px; }
+.anh-drop .drop-zone-text { font-size: .8rem; line-height: 1.5; }
+.anh-drop:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
+.anh-drop.busy { cursor: progress; opacity: .7; pointer-events: none; }
 #wizard-file-list { max-width: 100%; overflow: hidden; }
 .wizard-file-item {
   display: flex;

@@ -223,7 +223,9 @@ let lockTimers  = {};        // itemId (string) → timeout handle
 let currentView = 'dashboard';
 let prevView    = 'dashboard';
 let wizardData  = {};
-let wizardFilesArr = []; // Drag-and-drop file store for wizard attachments
+// Angebote (PDF) der Assistenten bis zum Einreichen, je Präfix der Element-IDs:
+// „wizard" = Einzelanfrage, „mwizard" = Sammelanfrage.
+const wizardDateien = { wizard: [], mwizard: [] };
 // Einzelanfrage: mehrere (Menge × Einzelpreis)-Zeilen; Bestellvolumen = Σ(Menge×EP)
 let einzelLines = [{ stueck: '', preis: '' }];
 const _ezNum = v => parseFloat(String(v ?? '').replace(',', '.')) || 0;
@@ -1760,23 +1762,10 @@ function renderDetail(id) {
   const btnFav = document.getElementById('detail-fav');
   if (btnFav) btnFav.onclick = () => saveItemAsFavorite(item.id);
 
-  // Load attachments async — cache-busting ensures freshly uploaded files appear immediately
+  // Anhänge laden; Angebote lassen sich in jedem Status nachreichen
   const attachEl = document.getElementById('detail-attachments');
-  if (attachEl) {
-    getSpToken().then(tok =>
-      fetch(`${SP_BASE}/_api/web/lists/getByTitle('${SP_LIST}')/items(${id})/AttachmentFiles?_=${Date.now()}`, {
-        headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json;odata=nometadata',
-          'Cache-Control': 'no-cache', Pragma: 'no-cache' }
-      })
-    ).then(r => r.ok ? r.json() : { value: [] })
-     .then(data => {
-       const files = data.value || [];
-       attachEl.innerHTML = files.length
-         ? files.map(attachmentLink).join('')
-         : '<span class="no-order">Keine Anhänge.</span>';
-     })
-     .catch(() => { attachEl.innerHTML = ''; });
-  }
+  anhaengeAnzeigen(attachEl, id);
+  anhangUploadBinden($id('detail-attach-card'), id, () => anhaengeAnzeigen(attachEl, id));
 
   // Einkäufer-/Ablehner-Name ggf. aus der Versionshistorie nachladen und Ansicht aktualisieren.
   if (!item._histResolved) {
@@ -1818,7 +1807,14 @@ function detailSidebar(item, isEinkauf) {
         ${orderNr  ? detailRow('Bestellnummer', orderNr) : '<p class="no-order">Noch keine Bestellnummer eingetragen.</p>'}
         ${lieferd  ? detailRow('Lieferdatum', fmtDate(lieferd)) : ''}
         ${tatPreis ? detailRow('Tatsächlicher Preis', fmtEuro(tatPreis)) : ''}
+      </div>
+    </div>
+
+    <div class="detail-card" id="detail-attach-card">
+      <div class="detail-card-header">Anhänge</div>
+      <div class="detail-card-body">
         <div id="detail-attachments" class="detail-attachments">Lade Anhänge …</div>
+        ${anhangUploadHtml()}
       </div>
     </div>`;
 }
@@ -2129,13 +2125,7 @@ async function openOrderModal(itemId) {
 
   // Fetch existing attachments
   let existingFiles = [];
-  try {
-    const tok = await getSpToken();
-    const r = await fetch(`${SP_BASE}/_api/web/lists/getByTitle('${SP_LIST}')/items(${itemId})/AttachmentFiles`, {
-      headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json;odata=nometadata' }
-    });
-    if (r.ok) existingFiles = (await r.json()).value || [];
-  } catch(e) { /* non-critical */ }
+  try { existingFiles = await anhaengeLaden(itemId); } catch(e) { /* non-critical */ }
 
   const existingHtml = existingFiles.length ? `
     <div class="attach-existing">
@@ -2309,22 +2299,10 @@ async function saveOrderData(itemId) {
 
   // Upload attachments
   if (files.length) {
-    const tok = await getSpToken();
-    const errors = [];
-    for (const file of files) {
-      try {
-        // Einfache Anführungszeichen müssen im OData-Stringliteral verdoppelt
-        // werden ('' = ein '); encodeURIComponent kodiert sie nicht. Ohne das
-        // schlägt der Upload bei Dateinamen wie "Angebot'25.pdf" mit 400 fehl.
-        const fname = encodeURIComponent(file.name.replace(/'/g, "''"));
-        const r = await fetch(
-          `${SP_BASE}/_api/web/lists/getByTitle('${SP_LIST}')/items(${itemId})/AttachmentFiles/add(FileName='${fname}')`,
-          { method: 'POST', headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json;odata=nometadata' }, body: await file.arrayBuffer() }
-        );
-        if (!r.ok) errors.push(file.name + ' (' + r.status + ')');
-      } catch(e) { errors.push(file.name); }
-    }
-    if (errors.length) toast('Fehler beim Hochladen: ' + errors.join(', '), 'error');
+    let erg;
+    try { erg = await anhaengeHochladen(itemId, files); }
+    catch(e) { erg = { ok: 0, fehler: files.map(f => ({ name: f.name, status: 0 })) }; }
+    if (erg.fehler.length) toast(anhangFehlerText(erg.fehler), 'error');
     else toast('Einkauf-Daten und Anhänge gespeichert ✓', 'success');
   } else {
     toast('Einkauf-Daten gespeichert ✓', 'success');
@@ -2989,13 +2967,9 @@ function initWizard() {
   const firstRadio = document.querySelector('input[name=Beschaffungslogik]');
   if (firstRadio) firstRadio.checked = true;
   document.querySelectorAll('#beschaffungslogik-extra-cards .check-card').forEach(c => c.classList.remove('selected'));
-  // Reset wizard attachments
-  wizardFilesArr = [];
+  // Reset wizard attachments (der Bereich bleibt sichtbar, den Hinweis setzt updatePreisHint)
+  wizardDateien.wizard = [];
   renderWizardFiles();
-  const wSec = $id('wizard-attachments');
-  if (wSec) wSec.style.display = 'none';
-  const wNote = $id('attach-required-note');
-  if (wNote) wNote.textContent = '';
   initWizardDrop();
   const lbaEl = $id('f-LeadBuyerAbschluss');
   if (lbaEl) lbaEl.checked = false;
@@ -3189,19 +3163,17 @@ function updatePreisHint() {
   } else {
     hint.style.display = 'none';
   }
-  // Show/hide attachment section and update required-count note
-  const req     = lba ? 0 : angeboteAnzahl(preis);
-  const section = $id('wizard-attachments');
-  const note    = $id('attach-required-note');
-  if (!section) return;
-  section.style.display = 'block';
+  // Hinweis zur Zahl der Angebote (der Anhang-Bereich ist immer sichtbar)
+  const req  = lba ? 0 : angeboteAnzahl(preis);
+  const note = $id('attach-required-note');
   if (note) note.textContent = req === 0 ? '(optional)' : `mind. ${req} erforderlich gemäß Regelwerk`;
 }
 
 // ── WIZARD DRAG-AND-DROP ATTACHMENTS ─────────────────────────────────────────
-function initWizardDrop() {
-  const zone  = $id('wizard-drop-zone');
-  const input = $id('wizard-file-input');
+// p = Präfix der Element-IDs: „wizard" (Einzelanfrage) oder „mwizard" (Sammelanfrage)
+function initWizardDrop(p = 'wizard') {
+  const zone  = $id(p + '-drop-zone');
+  const input = $id(p + '-file-input');
   if (!zone || !input) return;
   // Guard: only attach listeners once (called on every wizard reset)
   if (zone._dropReady) return;
@@ -3211,40 +3183,42 @@ function initWizardDrop() {
   zone.addEventListener('drop', e => {
     e.preventDefault();
     zone.classList.remove('drag-over');
-    addWizardFiles([...e.dataTransfer.files]);
+    addWizardFiles([...e.dataTransfer.files], p);
   });
   zone.addEventListener('click', () => input.click());
-  input.addEventListener('change', () => { addWizardFiles([...input.files]); input.value = ''; });
+  input.addEventListener('change', () => { addWizardFiles([...input.files], p); input.value = ''; });
 }
 
-function addWizardFiles(files) {
+function addWizardFiles(files, p = 'wizard') {
+  const arr = wizardDateien[p];
   for (const f of files) {
-    if (wizardFilesArr.length >= 5) break;
-    if (!/\.pdf$/i.test(f.name)) { toast('Nur PDF-Dateien sind erlaubt.', 'error'); continue; }
-    if (wizardFilesArr.some(x => x.name === f.name && x.size === f.size)) continue; // skip duplicate
-    wizardFilesArr.push(f);
+    if (arr.length >= 5) break;
+    if (!ANHANG_PDF_RE.test(f.name)) { toast('Nur PDF-Dateien sind erlaubt.', 'error'); continue; }
+    if (arr.some(x => x.name === f.name && x.size === f.size)) continue; // skip duplicate
+    arr.push(f);
   }
-  renderWizardFiles();
+  renderWizardFiles(p);
 }
 
-function removeWizardFile(idx) {
-  wizardFilesArr.splice(idx, 1);
-  renderWizardFiles();
+function removeWizardFile(idx, p = 'wizard') {
+  wizardDateien[p].splice(idx, 1);
+  renderWizardFiles(p);
 }
 
-function renderWizardFiles() {
-  const list = $id('wizard-file-list');
+function renderWizardFiles(p = 'wizard') {
+  const list = $id(p + '-file-list');
   if (!list) return;
-  list.innerHTML = wizardFilesArr.map((f, i) =>
+  const arr = wizardDateien[p];
+  list.innerHTML = arr.map((f, i) =>
     `<div class="wizard-file-item">
       <span class="wf-icon">📎</span>
       <span class="wf-name">${esc(f.name)}</span>
       <span class="wf-size">${(f.size/1024).toFixed(0)} KB</span>
-      <button class="wf-remove" onclick="removeWizardFile(${i})" title="Entfernen">✕</button>
+      <button class="wf-remove" onclick="removeWizardFile(${i}, '${p}')" title="Entfernen">✕</button>
     </div>`
   ).join('');
-  const zone = $id('wizard-drop-zone');
-  if (zone) zone.classList.toggle('has-files', wizardFilesArr.length > 0);
+  const zone = $id(p + '-drop-zone');
+  if (zone) zone.classList.toggle('has-files', arr.length > 0);
 }
 
 function genehmigungsweg(gesamt, leadBuyer = false) {
@@ -3482,7 +3456,7 @@ async function submitRequest() {
 
     if (!allFields['Title']) { toast('Titel fehlt.', 'error'); btn.disabled=false; btn.textContent='✓ Anfrage einreichen'; return; }
 
-    const wizardFiles = [...wizardFilesArr];
+    const wizardFiles = [...wizardDateien.wizard];
 
     if (!siteId || !listId) await discoverSP();
 
@@ -3514,49 +3488,9 @@ async function submitRequest() {
     // ── Schritt 3: Anhänge hochladen ──
     if (wizardFiles.length) {
       btn.textContent = 'Anhänge werden hochgeladen…';
-      let tok;
-      try { tok = await getSpToken(); }
-      catch(tokErr) {
-        console.warn('[submitRequest] SP-Token:', tokErr);
-        toast('Anfrage erstellt. Anhänge konnten nicht hochgeladen werden (Token-Fehler).', 'error');
-        await loadItems(false);
-        navigate('mine');
-        return;
-      }
-      const errors = [];
-      for (const file of wizardFiles) {
-        try {
-          // Read the file buffer ONCE before entering the retry loop so a
-          // second attempt doesn't try to re-read a potentially consumed stream.
-          const buf = await file.arrayBuffer();
-          // SP REST may not yet have propagated the new item (same lag as PATCH 404).
-          // Wrap in retryOn404 so we wait up to ~4.8s before giving up.
-          // Filename: single-quote chars must be escaped as %27 inside the OData string literal.
-          const fname = file.name.replace(/'/g, "''");
-          const fnameUrl = encodeURIComponent(fname);
-          const uploadUrl = `${SP_BASE}/_api/web/lists/getByTitle('${SP_LIST}')/items(${itemId})/AttachmentFiles/add(FileName='${fnameUrl}')`;
-          await retryOn404(async () => {
-            const r = await fetch(uploadUrl, {
-              method: 'POST',
-              headers: {
-                Authorization: 'Bearer ' + tok,
-                Accept: 'application/json;odata=nometadata',
-                'Content-Type': 'application/octet-stream',
-              },
-              body: buf,
-            });
-            if (!r.ok) {
-              const txt = await r.text().catch(() => '');
-              const err = new Error(`${r.status}: ${txt}`);
-              // Only retry on 404; other errors are immediate failures
-              if (r.status !== 404) err._noRetry = true;
-              throw err;
-            }
-          }, 3, 1200);
-        } catch(e) { console.warn('[submitRequest] Anhang:', e); errors.push(`${file.name} (${e.message})`); }
-      }
-      if (errors.length) toast(`Anfrage erstellt. Anhänge fehlgeschlagen: ${errors.join(', ')}`, 'error');
-      else toast(`Anfrage eingereicht! ${wizardFiles.length} Angebot(e) angehängt.`, 'success');
+      const erg = await anhaengeNachAnlage(itemId, wizardFiles);
+      if (erg.fehler.length) toast(`Anfrage erstellt. ${anhangFehlerText(erg.fehler)} Sie können die Angebote in der Anfrage nachreichen.`, 'error');
+      else toast(`Anfrage eingereicht, ${anzahl(erg.ok, 'Angebot', 'Angebote')} angehängt. Als Nächstes prüft der Einkauf.`, 'success');
     } else {
       toast('Anfrage eingereicht. Als Nächstes prüft der Einkauf.', 'success');
     }
@@ -4372,6 +4306,9 @@ function initSchulung() {
         </ol>
         <div class="schulung-tip">💡 Über das Feld „Externe Artikelnummer" erfassen Sie bei
           Katalogware die Lieferanten-Nummer.</div>
+        <div class="schulung-tip">📎 Angebote hängen Sie im Schritt Beschaffung als PDF an. Fehlt eines,
+          reichen Sie es später nach: Anfrage öffnen und die Datei unter „Anhänge" ablegen. Das geht
+          in jedem Status, auch bei der Sammelanfrage.</div>
       </section>
 
       <section class="schulung-sec" id="sch-3">
@@ -4579,6 +4516,10 @@ function initMultiWizard() {
     const grp = $id('m-lieferant-extra-' + n);
     if (grp) grp.style.display = 'none';
   });
+  // Angebote (PDF) zurücksetzen
+  wizardDateien.mwizard = [];
+  renderWizardFiles('mwizard');
+  initWizardDrop('mwizard');
   // Kostenstelle autocomplete
   // Reset submit button
   const sb = $id('btn-multi-submit');
@@ -4763,6 +4704,16 @@ function updateMultiTotal() {
   if (el) el.value = total > 0 ? total.toFixed(2) : '';
   const displayEl = $id('mf-total-display');
   if (displayEl) displayEl.textContent = total > 0 ? fmtEuro(total) : '–';
+  updateMultiAngebotHinweis();
+}
+
+// Zahl der Angebote nach Regelwerk, wie im Einzel-Assistenten (Lead-Buyer: keine Pflicht)
+function updateMultiAngebotHinweis() {
+  const note = $id('mattach-required-note');
+  if (!note) return;
+  const total = parseFloat($id('mf-GeschaetzterPreis')?.value) || 0;
+  const req   = $id('mf-LeadBuyerAbschluss')?.checked ? 0 : angeboteAnzahl(total);
+  note.textContent = req === 0 ? '(optional)' : `mind. ${req} erforderlich gemäß Regelwerk`;
 }
 
 function multiPosChange(idx, field, val) {
@@ -4940,6 +4891,7 @@ async function submitMultiRequest() {
     })));
 
     const totalPreis = multiPositions.reduce((s,p) => s + _lineSum(p.preis, p.menge), 0);
+    const multiFiles = [...wizardDateien.mwizard];
 
     const rawData = {
       Title:             autoTitle,
@@ -4988,7 +4940,14 @@ async function submitMultiRequest() {
       }
     }
 
-    toast(`Sammelanfrage mit ${multiPositions.length} Positionen eingereicht. Als Nächstes prüft der Einkauf.`, 'success');
+    if (multiFiles.length) {
+      btn.textContent = 'Anhänge werden hochgeladen…';
+      const erg = await anhaengeNachAnlage(itemId, multiFiles);
+      if (erg.fehler.length) toast(`Sammelanfrage erstellt. ${anhangFehlerText(erg.fehler)} Sie können die Angebote in der Anfrage nachreichen.`, 'error');
+      else toast(`Sammelanfrage mit ${anzahl(multiPositions.length, 'Position', 'Positionen')} eingereicht, ${anzahl(erg.ok, 'Angebot', 'Angebote')} angehängt. Als Nächstes prüft der Einkauf.`, 'success');
+    } else {
+      toast(`Sammelanfrage mit ${anzahl(multiPositions.length, 'Position', 'Positionen')} eingereicht. Als Nächstes prüft der Einkauf.`, 'success');
+    }
     await loadItems(false);
     navigate('mine');
   } catch(e) {
@@ -5355,24 +5314,11 @@ function bindPanelEvents(itemId) {
 
   // Approvers are read directly from item.fields — no async history load needed.
 
-  // Load attachments — scoped to this panel
+  // Anhänge dieses Panels laden. Angebote lassen sich in jedem Status nachreichen,
+  // danach lädt nur die Liste neu (wie bei Kommentaren), nicht das ganze Panel.
   const attachEl = pq('#panel-attach-body');
-  if (attachEl) {
-    getSpToken()
-      .then(tok => fetch(
-        `${SP_BASE}/_api/web/lists/getByTitle('${SP_LIST}')/items(${itemId})/AttachmentFiles?_=${Date.now()}`,
-        { headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json;odata=nometadata',
-            'Cache-Control': 'no-cache', Pragma: 'no-cache' } }
-      ))
-      .then(r => r.ok ? r.json() : { value: [] })
-      .then(data => {
-        const files = data.value || [];
-        attachEl.innerHTML = files.length
-          ? files.map(attachmentLink).join('')
-          : '<span class="no-order">Keine Anhänge.</span>';
-      })
-      .catch(() => { attachEl.innerHTML = '<span class="no-order">Anhänge konnten nicht geladen werden.</span>'; });
-  }
+  anhaengeAnzeigen(attachEl, itemId);
+  anhangUploadBinden(pq('#panel-attach-section'), itemId, () => anhaengeAnzeigen(attachEl, itemId));
 
   // Kommentare aus SP-Listenfeld lesen (Mehrere Textzeilen, Format: "[Datum – Autor]: Text\n---\n")
   const commentsSection = pq('#panel-comments-section');
@@ -5492,6 +5438,9 @@ async function loadVersionHistory(itemId, pq) {
           const label = labelMap[k] || k;
           changes.push(`${esc(label)}: <em>${esc(fmtVH(k, prv))}</em> → <em>${esc(fmtVH(k, cur))}</em>`);
         }
+        // Das Attachments-Flag kippt beim ersten Anhang und wenn der letzte entfernt wird
+        const anhJetzt = spVal(v.fields?.Attachments), anhVorher = spVal(prev?.fields?.Attachments);
+        if (anhJetzt !== anhVorher) changes.push(/^true$/i.test(anhJetzt) ? 'Anhang hinzugefügt' : 'Anhänge entfernt');
         if (!changes.length) changes.push('Systemfelder aktualisiert');
       }
 
@@ -6115,6 +6064,7 @@ function renderPanel(item, editMode = false) {
       <div class="pf-section" id="panel-attach-section">
         <div class="pf-sec-title">Anhänge</div>
         <div id="panel-attach-body"><div class="vh-loading">Lädt…</div></div>
+        ${anhangUploadHtml()}
       </div>
       <div class="pf-section vh-section" id="panel-history-section" style="display:none">
         <div class="pf-sec-title">Versionsverlauf</div>
@@ -6574,6 +6524,164 @@ function attachmentLink(f) {
       <button class="btn-attach-dl" onclick="openAttachment('${safeUrl}')" title="In SharePoint öffnen">↗ Öffnen</button>
     </span>
   </div>`;
+}
+
+// ── ANHÄNGE NACHREICHEN ──────────────────────────────────────────────────────
+// Angebote lassen sich in jedem Status an eine Anfrage hängen: im Panel, in der
+// Detailansicht, in beiden Assistenten und im Einkauf-Dialog. Ob jemand schreiben
+// darf, entscheidet SharePoint, wie bei Kommentaren. Gleichnamige Dateien bekommen
+// eine Nummer, sonst lehnt SharePoint den zweiten Upload ab.
+const ANHANG_PDF_RE = /[.]pdf$/i;
+
+function anhangListUrl(itemId) {
+  return `${SP_BASE}/_api/web/lists/getByTitle('${SP_LIST}')/items(${itemId})/AttachmentFiles`;
+}
+
+// Anhänge einer Anfrage frisch aus SharePoint (Cache-Busting, damit neue Dateien sofort erscheinen)
+async function anhaengeLaden(itemId) {
+  const tok = await getSpToken();
+  const r = await fetch(`${anhangListUrl(itemId)}?_=${Date.now()}`, {
+    headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json;odata=nometadata',
+      'Cache-Control': 'no-cache', Pragma: 'no-cache' }
+  });
+  if (!r.ok) throw new Error('Anhänge ' + r.status);
+  return (await r.json()).value || [];
+}
+
+async function anhaengeAnzeigen(el, itemId) {
+  if (!el) return;
+  try {
+    const files = await anhaengeLaden(itemId);
+    el.innerHTML = files.length
+      ? files.map(attachmentLink).join('')
+      : '<span class="no-order">Noch keine Anhänge.</span>';
+  } catch {
+    el.innerHTML = '<span class="no-order">Anhänge konnten nicht geladen werden.</span>';
+  }
+}
+
+// „Angebot.pdf" ist schon da, dann „Angebot (2).pdf". belegt: kleingeschriebene Namen.
+function freierAnhangName(name, belegt) {
+  if (!belegt.has(name.toLowerCase())) return name;
+  const punkt  = name.lastIndexOf('.');
+  const stamm  = punkt > 0 ? name.slice(0, punkt) : name;
+  const endung = punkt > 0 ? name.slice(punkt) : '';
+  for (let n = 2; ; n++) {
+    const kandidat = `${stamm} (${n})${endung}`;
+    if (!belegt.has(kandidat.toLowerCase())) return kandidat;
+  }
+}
+
+// Lädt Dateien als Anhänge hoch und meldet { ok, fehler: [{ name, status }] }.
+// neu = Anfrage gerade angelegt: SharePoint kennt sie unter Umständen noch nicht (404),
+// deshalb kurz wiederholen; vorhandene Anhänge gibt es dann keine.
+// Wirft nur, wenn kein SharePoint-Token zu bekommen ist.
+async function anhaengeHochladen(itemId, files, { neu = false } = {}) {
+  const tok = await getSpToken();
+  const belegt = new Set();
+  if (!neu) {
+    try { (await anhaengeLaden(itemId)).forEach(f => belegt.add(String(f.FileName || '').toLowerCase())); }
+    catch { /* ohne Liste weiter, eine Dublette meldet dann SharePoint */ }
+  }
+  let ok = 0;
+  const fehler = [];
+  for (const file of files) {
+    const name = freierAnhangName(file.name, belegt);
+    try {
+      // Puffer einmal lesen, ein zweiter Versuch darf den Stream nicht erneut lesen.
+      const buf = await file.arrayBuffer();
+      // Einfache Anführungszeichen im OData-Stringliteral verdoppeln ('' = ein '),
+      // encodeURIComponent lässt sie stehen. Sonst scheitert „Angebot'25.pdf" mit 400.
+      const url = `${anhangListUrl(itemId)}/add(FileName='${encodeURIComponent(name.replace(/'/g, "''"))}')`;
+      await retryOn404(async () => {
+        const r = await fetch(url, {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + tok, Accept: 'application/json;odata=nometadata',
+            'Content-Type': 'application/octet-stream' },
+          body: buf,
+        });
+        if (!r.ok) {
+          const err = new Error(`${r.status}: ${await r.text().catch(() => '')}`);
+          err.status = r.status;
+          if (r.status !== 404) err._noRetry = true;
+          throw err;
+        }
+      }, neu ? 3 : 0, 1200);
+      belegt.add(name.toLowerCase());
+      ok++;
+    } catch (e) {
+      console.warn('[Anhang]', file.name, e);
+      fehler.push({ name: file.name, status: e.status || 0 });
+    }
+  }
+  return { ok, fehler };
+}
+
+// Upload direkt nach dem Anlegen (Assistenten). Ohne Token gelten alle Dateien als nicht hochgeladen.
+async function anhaengeNachAnlage(itemId, files) {
+  try { return await anhaengeHochladen(itemId, files, { neu: true }); }
+  catch (e) {
+    console.warn('[Anhang] SP-Token:', e);
+    return { ok: 0, fehler: files.map(f => ({ name: f.name, status: 0 })) };
+  }
+}
+
+// „1 Angebot", „2 Angebote"
+function anzahl(n, eins, mehr) { return `${n} ${n === 1 ? eins : mehr}`; }
+
+function anhangFehlerText(fehler) {
+  const rechte = fehler.some(f => f.status === 401 || f.status === 403);
+  return `${rechte ? 'Keine Schreibrechte in SharePoint. ' : ''}Nicht hochgeladen: ${fehler.map(f => f.name).join(', ')}.`;
+}
+
+// Ablage zum Nachreichen in Panel und Detailansicht
+function anhangUploadHtml() {
+  return `<div class="anh-upload">
+    <div class="drop-zone anh-drop" role="button" tabindex="0" title="Angebote als PDF anhängen">
+      <span class="drop-zone-text">📎 Angebote anhängen<br><small>PDF hier ablegen oder klicken</small></span>
+    </div>
+    <input type="file" class="anh-input" accept=".pdf,.PDF" multiple hidden>
+  </div>`;
+}
+
+// root: Container mit anhangUploadHtml(); fertig: läuft nach mindestens einem gelungenen Upload
+function anhangUploadBinden(root, itemId, fertig) {
+  const zone  = root?.querySelector('.anh-drop');
+  const input = root?.querySelector('.anh-input');
+  if (!zone || !input || zone._bound) return;
+  zone._bound = true;
+  const text = zone.querySelector('.drop-zone-text');
+  const ruhe = text.innerHTML;
+  const hochladen = async liste => {
+    if (zone.classList.contains('busy')) return;
+    const pdfs = liste.filter(f => ANHANG_PDF_RE.test(f.name));
+    if (pdfs.length < liste.length) toast('Nur PDF-Dateien sind erlaubt.', 'error');
+    if (!pdfs.length) return;
+    zone.classList.add('busy');
+    text.textContent = pdfs.length === 1 ? 'Wird hochgeladen …' : `${pdfs.length} Dateien werden hochgeladen …`;
+    let erg;
+    try { erg = await anhaengeHochladen(itemId, pdfs); }
+    catch (e) { erg = { ok: 0, fehler: pdfs.map(f => ({ name: f.name, status: 0 })) }; }
+    zone.classList.remove('busy');
+    text.innerHTML = ruhe;
+    if (erg.fehler.length) toast(anhangFehlerText(erg.fehler), 'error');
+    if (erg.ok) {
+      toast(erg.ok === 1 ? 'Anhang gespeichert ✓' : `${erg.ok} Anhänge gespeichert ✓`, 'success');
+      if (fertig) await fertig();
+    }
+  };
+  zone.addEventListener('click', () => { if (!zone.classList.contains('busy')) input.click(); });
+  zone.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); zone.click(); }
+  });
+  zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('drag-over'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    zone.classList.remove('drag-over');
+    hochladen([...(e.dataTransfer?.files || [])]);
+  });
+  input.addEventListener('change', () => { const liste = [...input.files]; input.value = ''; hochladen(liste); });
 }
 
 // ── TOAST ─────────────────────────────────────────────────────────────────────

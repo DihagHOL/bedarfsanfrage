@@ -270,7 +270,7 @@ const PZ_PANEL = {
             <li>${pzChip('a-app', 'App')}speichert die Anfrage mit dem Status Eingereicht in der SharePoint-Liste. Eine Mail an den Einkauf geht nicht raus.</li>
             <li>${pzChip('a-mensch', 'Antragsteller')}kann die Anfrage in „Meine Anfragen" zurückziehen, solange der Einkauf nicht entschieden hat. Sie steht dann auf Zurückgezogen und ist aus der Bearbeitung.</li>
             <li>${pzChip('a-mensch', 'Einkauf')}sieht neue Anfragen im Dashboard und unter Gemeinsame Anfragen. Was seit über 48 Stunden offen ist, markiert die App rot. Öffnet der zuständige Einkäufer die Anfrage, setzt die App den Status auf In Prüfung (Einkauf).</li>
-            <li>${pzChip('a-mensch', 'Einkauf')}reserviert die Anfrage bei Bedarf für sich, holt fehlende Angebote ein und genehmigt oder lehnt mit Grund ab. Bei einer Ablehnung geht keine Mail raus, der Antragsteller sieht sie in „Meine Anfragen".</li>
+            <li>${pzChip('a-mensch', 'Einkauf')}reserviert die Anfrage bei Bedarf für sich, holt fehlende Angebote ein, hängt sie an und genehmigt oder lehnt mit Grund ab. Bei einer Ablehnung geht keine Mail raus, der Antragsteller sieht sie in „Meine Anfragen".</li>
             <li>${pzChip('a-auto', 'Power Automate')}startet mit dem Status Genehmigt (Einkauf) den Freigabelauf und holt je nach Art und Betrag die Freigaben ein. Ob freigegeben oder abgelehnt, der Antragsteller bekommt vom Flow eine Mail.</li>
             <li>${pzChip('a-mensch', 'Einkauf')}bestellt die freigegebene Anfrage im ERP und trägt Bestellnummer, Liefertermin und tatsächlichen Preis ein. Steht die Bestellnummer schon an einer anderen Anfrage, warnt die App. Danach steht die Anfrage auf Bestellt.</li>
           </ol>
@@ -307,7 +307,7 @@ const PZ_PANEL = {
             <tr><td>${pzChip('t-err', 'über 50.000 €')}</td><td>5 Angebote, europäische Ausschreibung.</td></tr>
             <tr><td>${pzChip('t-ok', 'Lead-Buyer')}</td><td>Die Angebotspflicht entfällt, ebenso die Freigabe des strategischen Einkaufs.</td></tr>
           </table>
-          <p class="pz-note">Die App zeigt die geforderte Zahl beim Erfassen an, erzwingt sie aber nicht. Fehlende Angebote holt der Einkauf ein.</p>
+          <p class="pz-note">Die App zeigt die geforderte Zahl beim Erfassen an, erzwingt sie aber nicht. Fehlende Angebote holt der Einkauf ein. Angebote lassen sich in jedem Status nachreichen: Anfrage öffnen und unter „Anhänge" ablegen.</p>
         </div>
       </div>
 
