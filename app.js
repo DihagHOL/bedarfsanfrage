@@ -1846,7 +1846,8 @@ const TIMELINE_STAGES = [
     test: v => /genehmigt/i.test(v) && /einkauf/i.test(v),
     approverField: 'Entscheider_x002a_in', commentField: 'Genehmigungskommentar' },
   // Reihenfolge laut Power Automate-Freigabeprozess:
-  // Controlling (nur Dienstleistung) → Werkleitung (ab 1.500 €) → strategischer Einkauf (ab 10.000 €)
+  // Controlling (indirektes Material, bestimmte Warengruppen) → Werkleitung (ab 1.500 €) →
+  // strategischer Einkauf (ab 10.000 €), siehe freigabeStufen
   { label: 'In Prüfung (Controlling)', role: 'Controlling',
     test: v => /controlling/i.test(v),
     approverField: 'Genehmiger2', commentField: 'Genehmigungskommentar2' },
@@ -1876,14 +1877,18 @@ const TIMELINE_STAGES = [
 // 12.11.2026); Zeitleiste, Genehmigungsweg im Assistenten und Panel rechnen hiermit.
 const FREIGABE_WERKLEITUNG_AB = 1500;   // In Prüfung (Werkleitung) ab diesem Bestellvolumen
 const FREIGABE_STRATEGISCH_AB = 10000;  // In Prüfung (strategischer Einkauf), nur ohne Lead-Buyer-Abschluss
-// Der Flow fragt endsWith(Beschaffungslogik, 'Dienstleistung'). Das trifft auch die Karte
-// „Indirektes Material / Dienstleistung", nicht nur reine Dienstleistungen.
-function brauchtControlling(beschaffungslogik) {
-  return /dienstleistung$/i.test(String(beschaffungslogik || '').trim());
+// Das Controlling prüft indirektes Material und diese Warengruppen (Denis, 12.11.2026).
+// Der Flow fragt endsWith(Beschaffungslogik, 'Dienstleistung'), das trifft die Karte
+// „Indirektes Material / Dienstleistung", oder den Code vor dem ersten Leerzeichen der
+// Warengruppe („4333 – Kooperation"). Hier dieselbe Regel, damit App und Flow übereinstimmen.
+const CONTROLLING_WARENGRUPPEN = ['2000', '4333', '4334', '4335', '4336', '4337', '4338', '4340'];
+function brauchtControlling(beschaffungslogik, warengruppe) {
+  if (/dienstleistung$/i.test(String(beschaffungslogik || '').trim())) return true;
+  return CONTROLLING_WARENGRUPPEN.includes(String(warengruppe || '').trim().split(' ')[0]);
 }
-function freigabeStufen(preis, leadBuyer, beschaffungslogik) {
+function freigabeStufen(preis, leadBuyer, beschaffungslogik, warengruppe) {
   const stufen = ['Einkauf'];
-  if (brauchtControlling(beschaffungslogik)) stufen.push('Controlling');
+  if (brauchtControlling(beschaffungslogik, warengruppe)) stufen.push('Controlling');
   if (preis >= FREIGABE_WERKLEITUNG_AB) stufen.push('Werkleitung');
   if (preis >= FREIGABE_STRATEGISCH_AB && !leadBuyer) stufen.push('strategischer Einkauf');
   return stufen;
@@ -1953,7 +1958,7 @@ function statusTimeline(statusVal, item) {
   const preis       = parseFloat(getField(item, resolvedFields['GeschaetzterPreis'] || 'GeschaetzterPreis')) || 0;
   const lbRaw       = getField(item, resolvedFields['LeadBuyerAbschluss'] || 'LeadBuyerAbschluss');
   const leadBuyer   = lbRaw === true || /^(true|ja|yes|1)$/i.test(String(lbRaw || ''));
-  const isDienstleistung = brauchtControlling(beschaffung);
+  const isDienstleistung = brauchtControlling(beschaffung, getField(item, resolvedFields['Warengruppe'] || 'Warengruppe'));
   const needsWerkleitung = preis >= FREIGABE_WERKLEITUNG_AB;
   const needsStrategisch = preis >= FREIGABE_STRATEGISCH_AB && !leadBuyer;
 
@@ -3051,6 +3056,7 @@ function wNext(step) {
       ExterneArtikelnummer: $id('f-ExterneArtikelnummer')?.value.trim() || '',
       AutoBedarfDatum:      $id('f-AutoBedarfDatum')?.value || '',
     };
+    updatePreisHint(); // die Warengruppe entscheidet mit über die Controlling-Stufe
   } else if (step === 2) {
     const menge  = $id('f-Menge').value;
     const me     = $id('f-Mengeneinheit').value;
@@ -3184,7 +3190,7 @@ function updatePreisHint() {
   const lba   = $id('f-LeadBuyerAbschluss')?.checked ?? false;
   const hint  = $id('preis-route-hint');
   if (preis > 0) {
-    hint.textContent = genehmigungsweg(preis, lba, wizardBeschaffungslogik());
+    hint.textContent = genehmigungsweg(preis, lba, wizardBeschaffungslogik(), $id('f-Warengruppe')?.value || '');
     hint.style.display = 'block';
   } else {
     hint.style.display = 'none';
@@ -3252,14 +3258,14 @@ function renderWizardFiles(p = 'wizard') {
 
 // Hinweis im Assistenten, in der Zusammenfassung und im Panel: Zahl der Angebote nach
 // Regelwerk (angeboteAnzahl) und die Freigabestufen, wie sie der Flow durchläuft.
-function genehmigungsweg(gesamt, leadBuyer = false, beschaffungslogik = '') {
+function genehmigungsweg(gesamt, leadBuyer = false, beschaffungslogik = '', warengruppe = '') {
   const n = angeboteAnzahl(gesamt);
   let angebote = n === 0 ? 'kein Angebot nötig'
     : n >= 5 ? 'europ. Ausschreibung, mind. 5 Angebote'
     : `mind. ${n} Angebote`;
   // Beim Lead-Buyer-Abschluss entfällt die Angebotspflicht.
   if (n > 0) angebote += leadBuyer ? ' ✓ entfällt (Lead-Buyer-Abschluss)' : ' (entfällt bei Lead-Buyer-Abschluss)';
-  let text = `${fmtEuro(gesamt)} · ${angebote} · Freigabe: ${freigabeStufen(gesamt, leadBuyer, beschaffungslogik).join(' → ')}`;
+  let text = `${fmtEuro(gesamt)} · ${angebote} · Freigabe: ${freigabeStufen(gesamt, leadBuyer, beschaffungslogik, warengruppe).join(' → ')}`;
   if (leadBuyer && gesamt >= FREIGABE_STRATEGISCH_AB) text += ' (strategischer Einkauf entfällt, Lead-Buyer-Abschluss)';
   return text;
 }
@@ -3295,7 +3301,7 @@ function buildReview() {
         ['Kostenstelle', d.Kostenstelle],
       ])}
     </div>
-    ${d.GeschaetzterPreis ? `<div class="info-box info" style="margin-top:12px">${genehmigungsweg(d.GeschaetzterPreis, d.LeadBuyerAbschluss === true || /^(true|ja|yes|1)$/i.test(String(d.LeadBuyerAbschluss || '')), d.Beschaffungslogik)}</div>` : ''}
+    ${d.GeschaetzterPreis ? `<div class="info-box info" style="margin-top:12px">${genehmigungsweg(d.GeschaetzterPreis, d.LeadBuyerAbschluss === true || /^(true|ja|yes|1)$/i.test(String(d.LeadBuyerAbschluss || '')), d.Beschaffungslogik, d.Warengruppe)}</div>` : ''}
     <div class="info-box info" style="margin-top:10px">
       Nach dem Einreichen prüft der <strong>Einkauf</strong> die Anfrage in der App. Genehmigt er, holt <strong>Power Automate</strong> die weiteren Freigaben ein und informiert Sie per Mail über das Ergebnis.
     </div>`;
@@ -4369,7 +4375,7 @@ function initSchulung() {
           <div class="flow-step flow-cond">
             <div class="flow-num">4</div>
             <div class="flow-body"><div class="flow-name">In Prüfung (Controlling)</div>
-              <div class="flow-sub"><span class="flow-tag">nur bei Dienstleistung</span></div></div>
+              <div class="flow-sub"><span class="flow-tag">indirektes Material und Warengruppen 2000, 4333 bis 4338, 4340</span></div></div>
           </div>
           <div class="flow-arrow">↓</div>
           <div class="flow-step flow-cond">
@@ -5847,7 +5853,7 @@ function renderPanel(item, editMode = false) {
   const menge = parseFloat(gv('Menge')) || 1;
   const lbRaw     = gv('LeadBuyerAbschluss');
   const leadBuyer = lbRaw === true || /^(true|ja|yes|1)$/i.test(String(lbRaw || ''));
-  const gesamtHint = !editMode && preis > 0 ? genehmigungsweg(preis, leadBuyer, gv('Beschaffungslogik')) : '';
+  const gesamtHint = !editMode && preis > 0 ? genehmigungsweg(preis, leadBuyer, gv('Beschaffungslogik'), gv('Warengruppe')) : '';
 
   const orderNr  = gv('Bestellnummer');
   const lieferd  = gv('Lieferdatum');

@@ -4,7 +4,7 @@
     <bpmn:participant id="P_Frei" name="DIHAG SHB · Freigabelauf" processRef="Process_Bedarfsanfrage_Freigabelauf" />
   </bpmn:collaboration>
   <bpmn:process id="Process_Bedarfsanfrage_Freigabelauf" name="Freigabelauf (Power Automate)" isExecutable="false">
-    <bpmn:documentation>Power-Automate-Flow „Bedarfsanfragen SHB&quot;. Er startet, sobald eine Anfrage auf Genehmigt (Einkauf) steht. Das Controlling prüft nur Dienstleistungen, die Werkleitung ab 1.500 € Bestellvolumen, der strategische Einkauf ab 10.000 € und nur ohne Lead-Buyer-Abschluss. Jede Stufe bekommt eine Genehmigung in Teams und per Mail, die erste Antwort zählt. Bei Ablehnung setzt der Flow den Status Abgelehnt, sonst Freigegeben, und schreibt dem Antragsteller in beiden Fällen eine Mail.
+    <bpmn:documentation>Power-Automate-Flow „Bedarfsanfragen SHB&quot;. Er startet, sobald eine Anfrage auf Genehmigt (Einkauf) steht. Das Controlling prüft indirektes Material und die Warengruppen 2000, 4333 bis 4338 und 4340, die Werkleitung ab 1.500 € Bestellvolumen, der strategische Einkauf ab 10.000 € und nur ohne Lead-Buyer-Abschluss. Jede Stufe bekommt eine Genehmigung in Teams und per Mail, die erste Antwort zählt. Bei Ablehnung setzt der Flow den Status Abgelehnt, sonst Freigegeben, und schreibt dem Antragsteller in beiden Fällen eine Mail.
 Eingebunden in: Bedarfsanfrage.
 Anwender-Ansicht: https://bedarfsanfrage.dihag-extern.com/?ansicht=prozess&amp;modell=freigabe
 Im Einklang mit den Richtlinien: Konzernfachregelung Prozessmanagement; ISMS-Richtlinie Aufbewahrungsfristen und -pflichten
@@ -16,9 +16,9 @@ Im Einklang mit den Richtlinien: Konzernfachregelung Prozessmanagement; ISMS-Ric
       <bpmn:lane id="LD" name="Strategischer Einkauf"><bpmn:flowNodeRef>D_pruef</bpmn:flowNodeRef><bpmn:flowNodeRef>D_gw</bpmn:flowNodeRef></bpmn:lane>
     </bpmn:laneSet>
       <bpmn:startEvent id="A_start" name="Status steht auf Genehmigt (Einkauf)"><bpmn:outgoing>Flow_A_start_A_gw1</bpmn:outgoing></bpmn:startEvent>
-      <bpmn:exclusiveGateway id="A_gw1" name="Dienstleistung?"><bpmn:incoming>Flow_A_start_A_gw1</bpmn:incoming><bpmn:outgoing>Flow_A_gw1_A_ctrl</bpmn:outgoing><bpmn:outgoing>Flow_A_gw1_A_gw2</bpmn:outgoing></bpmn:exclusiveGateway>
+      <bpmn:exclusiveGateway id="A_gw1" name="Prüft das Controlling?"><bpmn:incoming>Flow_A_start_A_gw1</bpmn:incoming><bpmn:outgoing>Flow_A_gw1_A_ctrl</bpmn:outgoing><bpmn:outgoing>Flow_A_gw1_A_gw2</bpmn:outgoing></bpmn:exclusiveGateway>
       <bpmn:serviceTask id="A_ctrl" name="Controlling um Freigabe bitten"><bpmn:incoming>Flow_A_gw1_A_ctrl</bpmn:incoming><bpmn:outgoing>Flow_A_ctrl_B_pruef</bpmn:outgoing></bpmn:serviceTask>
-      <bpmn:userTask id="B_pruef" name="Dienstleistung prüfen"><bpmn:incoming>Flow_A_ctrl_B_pruef</bpmn:incoming><bpmn:outgoing>Flow_B_pruef_B_gw</bpmn:outgoing></bpmn:userTask>
+      <bpmn:userTask id="B_pruef" name="Anfrage prüfen"><bpmn:incoming>Flow_A_ctrl_B_pruef</bpmn:incoming><bpmn:outgoing>Flow_B_pruef_B_gw</bpmn:outgoing></bpmn:userTask>
       <bpmn:exclusiveGateway id="B_gw" name="Vom Controlling freigegeben?"><bpmn:incoming>Flow_B_pruef_B_gw</bpmn:incoming><bpmn:outgoing>Flow_B_gw_A_gw2</bpmn:outgoing><bpmn:outgoing>Flow_B_gw_A_ab</bpmn:outgoing></bpmn:exclusiveGateway>
       <bpmn:exclusiveGateway id="A_gw2" name="Ab 1.500 € Bestellvolumen?"><bpmn:incoming>Flow_A_gw1_A_gw2</bpmn:incoming><bpmn:incoming>Flow_B_gw_A_gw2</bpmn:incoming><bpmn:outgoing>Flow_A_gw2_A_wl</bpmn:outgoing><bpmn:outgoing>Flow_A_gw2_A_frei</bpmn:outgoing></bpmn:exclusiveGateway>
       <bpmn:serviceTask id="A_wl" name="Werkleitung um Freigabe bitten"><bpmn:incoming>Flow_A_gw2_A_wl</bpmn:incoming><bpmn:outgoing>Flow_A_wl_C_pruef</bpmn:outgoing></bpmn:serviceTask>
@@ -53,6 +53,8 @@ Im Einklang mit den Richtlinien: Konzernfachregelung Prozessmanagement; ISMS-Ric
       <bpmn:sequenceFlow id="Flow_D_gw_A_ab" sourceRef="D_gw" targetRef="A_ab" name="nein" />
       <bpmn:sequenceFlow id="Flow_A_frei_A_endOk" sourceRef="A_frei" targetRef="A_endOk" />
       <bpmn:sequenceFlow id="Flow_A_ab_A_endAb" sourceRef="A_ab" targetRef="A_endAb" />
+      <bpmn:textAnnotation id="An_ctrl"><bpmn:text>Ja bei indirektem Material und den Warengruppen 2000, 4333 bis 4338 und 4340.</bpmn:text></bpmn:textAnnotation>
+      <bpmn:association id="Assoc_An_ctrl" associationDirection="None" sourceRef="A_gw1" targetRef="An_ctrl" />
       <bpmn:textAnnotation id="An_appr"><bpmn:text>Setzt den Status In Prüfung und schickt die Genehmigung in Teams und per Mail. Die erste Antwort zählt.</bpmn:text></bpmn:textAnnotation>
       <bpmn:association id="Assoc_An_appr" associationDirection="None" sourceRef="A_ctrl" targetRef="An_appr" />
   </bpmn:process>
@@ -64,7 +66,7 @@ Im Einklang mit den Richtlinien: Konzernfachregelung Prozessmanagement; ISMS-Ric
       <bpmndi:BPMNShape id="LC_di" bpmnElement="LC" isHorizontal="true" bioc:stroke="#C2410C" bioc:fill="#FFF8F1" color:background-color="#FFF8F1" color:border-color="#C2410C"><dc:Bounds x="130" y="460" width="2630" height="140" /></bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="LD_di" bpmnElement="LD" isHorizontal="true" bioc:stroke="#C2410C" bioc:fill="#FFF8F1" color:background-color="#FFF8F1" color:border-color="#C2410C"><dc:Bounds x="130" y="600" width="2630" height="140" /></bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="A_start_di" bpmnElement="A_start" bioc:stroke="#1E7B3A" bioc:fill="#DDF3E4" color:background-color="#DDF3E4" color:border-color="#1E7B3A"><dc:Bounds x="247" y="112" width="36" height="36" /><bpmndi:BPMNLabel><dc:Bounds x="205" y="153" width="120" height="28" /></bpmndi:BPMNLabel></bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="A_gw1_di" bpmnElement="A_gw1" isMarkerVisible="true" bioc:stroke="#8A6100" bioc:fill="#FFF8DB" color:background-color="#FFF8DB" color:border-color="#8A6100"><dc:Bounds x="410" y="105" width="50" height="50" /><bpmndi:BPMNLabel><dc:Bounds x="335" y="86" width="96" height="15" /></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_gw1_di" bpmnElement="A_gw1" isMarkerVisible="true" bioc:stroke="#8A6100" bioc:fill="#FFF8DB" color:background-color="#FFF8DB" color:border-color="#8A6100"><dc:Bounds x="410" y="105" width="50" height="50" /><bpmndi:BPMNLabel><dc:Bounds x="335" y="73" width="96" height="28" /></bpmndi:BPMNLabel></bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="A_ctrl_di" bpmnElement="A_ctrl" bioc:stroke="#17509E" bioc:fill="#D8E8F8" color:background-color="#D8E8F8" color:border-color="#17509E"><dc:Bounds x="539" y="88" width="132" height="84" /></bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="B_pruef_di" bpmnElement="B_pruef" bioc:stroke="#C2410C" bioc:fill="#FFE3C8" color:background-color="#FFE3C8" color:border-color="#C2410C"><dc:Bounds x="709" y="348" width="132" height="84" /></bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="B_gw_di" bpmnElement="B_gw" isMarkerVisible="true" bioc:stroke="#8A6100" bioc:fill="#FFF8DB" color:background-color="#FFF8DB" color:border-color="#8A6100"><dc:Bounds x="920" y="365" width="50" height="50" /><bpmndi:BPMNLabel><dc:Bounds x="845" y="333" width="96" height="28" /></bpmndi:BPMNLabel></bpmndi:BPMNShape>
@@ -101,6 +103,8 @@ Im Einklang mit den Richtlinien: Konzernfachregelung Prozessmanagement; ISMS-Ric
       <bpmndi:BPMNEdge id="Flow_D_gw_A_ab_di" bpmnElement="Flow_D_gw_A_ab"><di:waypoint x="2305" y="645" /><di:waypoint x="2305" y="250" /><di:waypoint x="2409" y="250" /><bpmndi:BPMNLabel><dc:Bounds x="2313" y="233" width="38" height="14" /></bpmndi:BPMNLabel></bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="Flow_A_frei_A_endOk_di" bpmnElement="Flow_A_frei_A_endOk"><di:waypoint x="2541" y="130" /><di:waypoint x="2627" y="130" /></bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="Flow_A_ab_A_endAb_di" bpmnElement="Flow_A_ab_A_endAb"><di:waypoint x="2541" y="250" /><di:waypoint x="2627" y="250" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNShape id="An_ctrl_di" bpmnElement="An_ctrl" bioc:stroke="#6B7280" bioc:fill="#FFFFFF" color:background-color="#FFFFFF" color:border-color="#6B7280"><dc:Bounds x="360" y="212" width="130" height="76" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Assoc_An_ctrl_di" bpmnElement="Assoc_An_ctrl"><di:waypoint x="435" y="155" /><di:waypoint x="435" y="212" /></bpmndi:BPMNEdge>
       <bpmndi:BPMNShape id="An_appr_di" bpmnElement="An_appr" bioc:stroke="#6B7280" bioc:fill="#FFFFFF" color:background-color="#FFFFFF" color:border-color="#6B7280"><dc:Bounds x="530" y="212" width="150" height="76" /></bpmndi:BPMNShape>
       <bpmndi:BPMNEdge id="Assoc_An_appr_di" bpmnElement="Assoc_An_appr"><di:waypoint x="605" y="172" /><di:waypoint x="605" y="212" /></bpmndi:BPMNEdge>
     </bpmndi:BPMNPlane>

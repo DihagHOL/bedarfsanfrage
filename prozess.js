@@ -130,18 +130,19 @@ function initProzess() {
 
       <div class="pz-card">
         <h3>▶ Probelauf</h3>
-        <p class="pz-lead">Spielen Sie den Freigabeweg mit eigenen Werten durch. Je nach Bestellvolumen und
-           Beschaffungsart entfallen einzelne Stufen, genau wie im Flow.</p>
+        <p class="pz-lead">Spielen Sie den Freigabeweg mit eigenen Werten durch. Je nach Bestellvolumen,
+           Beschaffung und Warengruppe entfallen einzelne Stufen, genau wie im Flow.</p>
         <div class="pl-controls">
           <div class="pl-field">
             <label for="pl-preis">Bestellvolumen</label>
             <div class="pl-euro"><input type="number" id="pl-preis" min="0" step="100" value="3500"/><span>€</span></div>
           </div>
           <div class="pl-field">
-            <label for="pl-art">Beschaffungsart</label>
+            <label for="pl-art">Beschaffung</label>
             <select id="pl-art">
-              <option value="material">Material</option>
-              <option value="dienst">Dienstleistung</option>
+              <option value="material">Direktes Material, sonstige Warengruppe</option>
+              <option value="indirekt">Indirektes Material / Dienstleistung</option>
+              <option value="wg">Warengruppe 2000, 4333 bis 4338 oder 4340</option>
             </select>
           </div>
           <div class="pl-field pl-field-check">
@@ -279,7 +280,7 @@ const PZ_PANEL = {
           <h4 class="pz-box-title">Wer gibt frei?</h4>
           <table class="pz-rules">
             <tr><td>${pzChip('t-gate', 'Einkauf')}</td><td>Immer, in der App. Zuständig ist, wem die Warengruppe zugeordnet ist. Ohne Zuordnung sind es alle Einkäufer.</td></tr>
-            <tr><td>${pzChip('a-mensch', 'Controlling')}</td><td>Nur bei Dienstleistungen.</td></tr>
+            <tr><td>${pzChip('a-mensch', 'Controlling')}</td><td>Bei indirektem Material und den Warengruppen 2000, 4333 bis 4338 und 4340.</td></tr>
             <tr><td>${pzChip('a-mensch', 'Werkleitung')}</td><td>Ab 1.500 € Bestellvolumen.</td></tr>
             <tr><td>${pzChip('a-mensch', 'Strategischer Einkauf')}</td><td>Ab 10.000 €. Entfällt beim Lead-Buyer-Abschluss.</td></tr>
           </table>
@@ -316,7 +317,7 @@ const PZ_PANEL = {
           <h4 class="pz-box-title">⊞ Freigabelauf (Power Automate)</h4>
           <ol class="pz-steps">
             <li>${pzChip('a-auto', 'Power Automate')}startet, sobald eine Anfrage auf Genehmigt (Einkauf) steht.</li>
-            <li>${pzChip('a-auto', 'Power Automate')}setzt bei einer Dienstleistung den Status In Prüfung (Controlling) und schickt dem Controlling die Genehmigung.</li>
+            <li>${pzChip('a-auto', 'Power Automate')}setzt bei indirektem Material und bei den Warengruppen 2000, 4333 bis 4338 und 4340 den Status In Prüfung (Controlling) und schickt dem Controlling die Genehmigung.</li>
             <li>${pzChip('a-auto', 'Power Automate')}setzt ab 1.500 € In Prüfung (Werkleitung), ab 10.000 € ohne Lead-Buyer-Abschluss danach In Prüfung (strategischer Einkauf), und schickt jeweils die Genehmigung.</li>
             <li>${pzChip('a-mensch', 'Genehmiger')}antworten in Teams oder per Mail. Lehnt eine Stufe ab, setzt der Flow Abgelehnt und die folgenden Stufen entfallen.</li>
             <li>${pzChip('a-auto', 'Power Automate')}setzt am Ende Freigegeben und schreibt dem Antragsteller eine Mail, bei einer Ablehnung ebenso.</li>
@@ -584,10 +585,11 @@ document.addEventListener('fullscreenchange', () => {
 });
 
 /* ── Probelauf: den Freigabeweg mit eigenen Werten durchspielen ──────────────
-   Dieselben Wertgrenzen wie im Flow „Bedarfsanfragen SHB" und in der
-   Status-Timeline: Controlling nur bei Dienstleistung, Werkleitung ab 1.500 €,
-   strategischer Einkauf ab 10.000 € und ohne Lead-Buyer-Abschluss. */
+   Dieselben Regeln wie im Flow „Bedarfsanfragen SHB" und in der Status-Timeline:
+   Controlling bei indirektem Material und den Warengruppen 2000, 4333 bis 4338, 4340,
+   Werkleitung ab 1.500 €, strategischer Einkauf ab 10.000 € und ohne Lead-Buyer-Abschluss. */
 let plState = null;
+const PL_ART = { material: 'direktes Material', indirekt: 'indirektes Material', wg: 'Controlling-Warengruppe' };
 
 function roleBadge(role) {
   const map = {
@@ -598,7 +600,7 @@ function roleBadge(role) {
 }
 
 function plBuildStages(preis, art, lead) {
-  const dienst = art === 'dienst';
+  const controlling = art !== 'material';
   return [
     { role: 'Antragsteller', name: 'Bedarfsanfrage erfassen', kind: 'task', applies: true,
       desc: 'Der Antragsteller beschreibt den Bedarf im Assistenten und reicht die Anfrage ein.' },
@@ -608,8 +610,8 @@ function plBuildStages(preis, art, lead) {
       desc: 'Der zuständige Einkauf öffnet die Anfrage, holt fehlende Angebote ein und entscheidet in der App.' },
     { role: 'Power Automate', name: 'Genehmigt (Einkauf): Freigabelauf startet', kind: 'auto', applies: true,
       desc: 'Mit der Genehmigung des Einkaufs startet der Flow „Bedarfsanfragen SHB".' },
-    { role: 'Controlling', name: 'Freigabe Controlling', kind: 'decision', applies: dienst,
-      cond: 'nur bei Dienstleistung', desc: 'Das Controlling gibt die Dienstleistung frei.' },
+    { role: 'Controlling', name: 'Freigabe Controlling', kind: 'decision', applies: controlling,
+      cond: 'bei indirektem Material und Warengruppen 2000, 4333 bis 4338, 4340', desc: 'Das Controlling gibt die Anfrage frei.' },
     { role: 'Werkleitung', name: 'Freigabe Werkleitung', kind: 'decision', applies: preis >= 1500,
       cond: 'ab 1.500 € Bestellvolumen', desc: 'Die Werkleitung gibt das Bestellvolumen frei.' },
     { role: 'Strategischer Einkauf', name: 'Freigabe strategischer Einkauf', kind: 'decision',
@@ -694,7 +696,7 @@ function renderProbelauf() {
   } else if (S.done) {
     controls = `
       <div class="pl-result pl-result-ok"><b>📦 Bestellt.</b> Durchlaufen: ${decisions} Freigabestufe${decisions === 1 ? '' : 'n'}
-        bei ${fmtEuro(S.preis)}${S.art === 'dienst' ? ', Dienstleistung' : ''}${S.lead ? ', Lead-Buyer-Abschluss' : ''}.</div>
+        bei ${fmtEuro(S.preis)}, ${esc(PL_ART[S.art] || S.art)}${S.lead ? ', Lead-Buyer-Abschluss' : ''}.</div>
       <div class="pl-actions"><button class="btn btn-ghost" onclick="plReset()">Nochmal</button></div>`;
   } else {
     const st = S.stages[S.idx];
@@ -709,6 +711,6 @@ function renderProbelauf() {
       <div class="pl-actions">${btns} <button class="btn btn-ghost" onclick="plReset()">Zurücksetzen</button></div>`;
   }
 
-  const summary = `<div class="pl-summary">${fmtEuro(S.preis)} · ${S.art === 'dienst' ? 'Dienstleistung' : 'Material'}${S.lead ? ' · Lead-Buyer' : ''} · ${decisions} Freigabestufe${decisions === 1 ? '' : 'n'}${skipped.length ? ' · entfällt: ' + skipped.map(esc).join(', ') : ''}</div>`;
+  const summary = `<div class="pl-summary">${fmtEuro(S.preis)} · ${esc(PL_ART[S.art] || S.art)}${S.lead ? ' · Lead-Buyer' : ''} · ${decisions} Freigabestufe${decisions === 1 ? '' : 'n'}${skipped.length ? ' · entfällt: ' + skipped.map(esc).join(', ') : ''}</div>`;
   $id('pl-stage').innerHTML = summary + `<div class="pl-steps">${steps}</div>` + controls;
 }

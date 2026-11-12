@@ -38,8 +38,10 @@ Auto-Entwurf-Lauf in GitHub Actions:
 - Bis zur Entscheidung des Einkaufs kann der Antragsteller die Anfrage zurückziehen.
 - Lehnt der Einkauf ab, geht keine Mail raus. Freigabe und Ablehnung im Flow melden sich beim
   Antragsteller per Mail.
-- Freigabelauf: Controlling nur bei Dienstleistung, Werkleitung ab 1.500 €, strategischer
-  Einkauf ab 10.000 € und ohne Lead-Buyer-Abschluss. Approvals vom Typ „erste Antwort".
+- Freigabelauf: Controlling bei indirektem Material (Beschaffungslogik endet auf
+  „Dienstleistung") und den Warengruppen 2000, 4333 bis 4338, 4340 (seit 12.11.2026),
+  Werkleitung ab 1.500 €, strategischer Einkauf ab 10.000 € und ohne Lead-Buyer-Abschluss.
+  Approvals vom Typ „erste Antwort".
 
 ## Hausschema
 

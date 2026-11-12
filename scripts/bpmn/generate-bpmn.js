@@ -308,7 +308,8 @@ const FREIGABE = {
   kennung: 'Process_Bedarfsanfrage_Freigabelauf',
   policies: ['120', '119'],
   doku: 'Power-Automate-Flow „Bedarfsanfragen SHB". Er startet, sobald eine Anfrage auf Genehmigt '
-      + '(Einkauf) steht. Das Controlling prüft nur Dienstleistungen, die Werkleitung ab 1.500 € '
+      + '(Einkauf) steht. Das Controlling prüft indirektes Material und die Warengruppen 2000, 4333 bis '
+      + '4338 und 4340, die Werkleitung ab 1.500 € '
       + 'Bestellvolumen, der strategische Einkauf ab 10.000 € und nur ohne Lead-Buyer-Abschluss. Jede '
       + 'Stufe bekommt eine Genehmigung in Teams und per Mail, die erste Antwort zählt. Bei Ablehnung '
       + 'setzt der Flow den Status Abgelehnt, sonst Freigegeben, und schreibt dem Antragsteller in beiden '
@@ -324,9 +325,9 @@ const FREIGABE = {
       ],
       nodes: [
         { id: 'A_start', k: 'start', n: 'Status steht auf Genehmigt (Einkauf)', lane: 'LA', c: 0, r: 0 },
-        { id: 'A_gw1', k: 'gw', n: 'Dienstleistung?', lane: 'LA', c: 1, r: 0 },
+        { id: 'A_gw1', k: 'gw', n: 'Prüft das Controlling?', lane: 'LA', c: 1, r: 0 },
         { id: 'A_ctrl', k: 'service', n: 'Controlling um Freigabe bitten', lane: 'LA', c: 2, r: 0 },
-        { id: 'B_pruef', k: 'user', n: 'Dienstleistung prüfen', lane: 'LB', c: 3, r: 0 },
+        { id: 'B_pruef', k: 'user', n: 'Anfrage prüfen', lane: 'LB', c: 3, r: 0 },
         { id: 'B_gw', k: 'gw', n: 'Vom Controlling freigegeben?', lane: 'LB', c: 4, r: 0 },
         { id: 'A_gw2', k: 'gw', n: 'Ab 1.500 € Bestellvolumen?', lane: 'LA', c: 5, r: 0 },
         { id: 'A_wl', k: 'service', n: 'Werkleitung um Freigabe bitten', lane: 'LA', c: 6, r: 0 },
@@ -365,6 +366,8 @@ const FREIGABE = {
         F('A_ab', 'A_endAb'),
       ],
       annotations: [
+        { id: 'An_ctrl', of: 'A_gw1', lane: 'LA', c: 1, r: 1, w: 130, h: 76,
+          text: 'Ja bei indirektem Material und den Warengruppen 2000, 4333 bis 4338 und 4340.' },
         { id: 'An_appr', of: 'A_ctrl', lane: 'LA', c: 2, r: 1, w: 150, h: 76,
           text: 'Setzt den Status In Prüfung und schickt die Genehmigung in Teams und per Mail. Die erste Antwort zählt.' },
       ],
