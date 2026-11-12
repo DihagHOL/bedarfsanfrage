@@ -437,6 +437,18 @@
       <div id="view-multi" class="view">
         <div class="wizard-wrap">
           <div id="fav-bar-multi"></div>
+          <div class="si-karte" id="si-karte">
+            <div class="si-karte-text">
+              <strong>📊 Sammelanfrage aus Excel</strong>
+              <span>Für viele Positionen, etwa aus der Instandhaltung: Vorlage öffnen, in Excel ausfüllen, speichern und hier importieren. Excel- und CSV-Dateien gehen, auch per Drag-and-drop auf diesen Kasten.</span>
+            </div>
+            <div class="si-karte-aktionen">
+              <button type="button" class="btn btn-outline btn-sm" onclick="siVorlageExcel()">📄 Excel-Vorlage öffnen</button>
+              <button type="button" class="btn btn-ghost btn-sm" onclick="siVorlageCsv()">CSV-Vorlage</button>
+              <button type="button" class="btn btn-primary btn-sm" onclick="document.getElementById('si-datei').click()">📥 Datei importieren</button>
+              <input type="file" id="si-datei" accept=".xlsx,.xls,.xlsm,.csv" hidden onchange="siDateiGewaehlt(this)">
+            </div>
+          </div>
           <div class="wizard-header">
             <div class="wizard-steps" id="mwizard-steps">
               <div class="wstep active" data-mstep="1"><span>1</span>Positionen</div>
@@ -731,5 +743,6 @@
 <!-- SheetJS wird bei Bedarf via ensureXLSX() nachgeladen (Importer + Reports-Export) -->
 <script src="app.js"></script>
 <script src="prozess.js"></script>
+<script src="sammelimport.js"></script>
 </body>
 </html>

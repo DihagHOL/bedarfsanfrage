@@ -292,7 +292,7 @@ const PZ_PANEL = {
         <div>
           <h4 class="pz-box-title">⊞ Anfrage erfassen und einreichen</h4>
           <ol class="pz-steps">
-            <li>${pzChip('a-mensch', 'Antragsteller')}wählt Einzel- oder Sammelanfrage. Zur Artikelnummer schlägt die App Bezeichnung und Warengruppe aus dem Artikelstamm vor.</li>
+            <li>${pzChip('a-mensch', 'Antragsteller')}wählt Einzel- oder Sammelanfrage. Zur Artikelnummer schlägt die App Bezeichnung und Warengruppe aus dem Artikelstamm vor. Viele Positionen, etwa aus der Instandhaltung, lassen sich in der Excel-Vorlage erfassen und als Sammelanfrage importieren.</li>
             <li>${pzChip('a-mensch', 'Antragsteller')}gibt Beschaffungsart, Lieferanten, Kostenstelle und Abteilung an. Die Abteilung bestimmt, unter welcher Gruppe die Anfrage in Gemeinsame Anfragen erscheint.</li>
             <li>${pzChip('a-app', 'App')}summiert das Bestellvolumen aus Menge und Einzelpreis und zeigt den Genehmigungsweg.</li>
             <li>${pzChip('a-mensch', 'Antragsteller')}hängt vorhandene Angebote an, prüft die Zusammenfassung und reicht ein.</li>

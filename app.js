@@ -4343,6 +4343,11 @@ function initSchulung() {
           <li>Das <b>Bestellvolumen</b> wird automatisch aus den Einzelpreisen summiert.</li>
           <li>Warengruppe, Priorität, Abteilung und Beschaffungsart gelten für die gesamte Anfrage.</li>
         </ol>
+        <div class="schulung-tip">📊 Viele Positionen, etwa in der Instandhaltung, erfassen Sie bequemer in Excel.
+          Oben in der Sammelanfrage öffnen Sie die <b>Excel-Vorlage</b>, füllen sie aus, speichern sie als Excel
+          oder CSV und laden sie über <b>„Datei importieren"</b> hoch. Die App zeigt vorher eine Vorschau.
+          Zeilen mit gleicher Warengruppe, Abteilung, Beschaffungsart und gleichem Lieferanten werden eine
+          Sammelanfrage.</div>
       </section>
 
       <section class="schulung-sec" id="sch-4">
@@ -4549,7 +4554,7 @@ function initMultiWizard() {
   // Ausstehende Wiedervorlage anwenden (vor renderMultiPositions, damit Positionen gesetzt sind)
   if (pendingPrefill && pendingPrefill.type === 'multi') {
     applyMultiPrefill(pendingPrefill);
-    toast('Wiedervorlage übernommen – bitte prüfen und absenden.', 'success');
+    toast(pendingPrefill.hinweis || 'Wiedervorlage übernommen. Bitte prüfen und absenden.', 'success');
   }
   pendingPrefill = null;
 
@@ -4563,6 +4568,7 @@ function applyMultiPrefill(fav) {
   const setVal = (id, v) => { const el = $id(id); if (el && v != null && v !== '') el.value = v; };
   _setSelectFlexible('mf-Warengruppe', data.Warengruppe);
   _setSelectFlexible('mf-Prioritaet', data.Prioritaet);
+  _setSelectFlexible('mf-Abteilung', data.Abteilung);
   setVal('mf-Beschreibung', data.Beschreibung);
   setVal('mf-Lieferant', data.Lieferant);
   setVal('mf-Lieferant2', data.Lieferant2);
@@ -4587,6 +4593,9 @@ function applyMultiPrefill(fav) {
       preis:        p.Preis != null ? String(p.Preis) : '',
       termin:       p.Termin ? String(p.Termin).slice(0,10) : '',
       kostenstelle: p.Kostenstelle || '',
+      hersteller:   p.Hersteller || '',
+      typNr:        p.TypNr || '',
+      begruendung:  p.Begruendung || '',
     }));
   }
 }
@@ -4607,7 +4616,9 @@ function renderMultiPositions() {
   const container = $id('multi-positions-table');
   if (!container) return;
   if (multiPositions.length === 0) multiPositions.push({ artNr: '', extArtNr: '', bezeichnung: '', menge: '', me: '', termin: '', kostenstelle: '', preis: '' });
-  const meOptions = ['','Lagereinheiten','kg','Stück','Anzahl','m','Paar','Liter'];
+  const meOptions = ['','Lagereinheiten','kg','Stück','Anzahl','m','Paar','Liter','VPE'];
+  // Eine importierte Einheit, die nicht in der Liste steht, bleibt wählbar statt verloren zu gehen
+  const meFuer = me => (me && !meOptions.includes(me)) ? [...meOptions, me] : meOptions;
   const rows = multiPositions.map((pos, i) => `
     <div class="multi-pos-row" data-idx="${i}">
       <div class="multi-pos-num">${i + 1}</div>
@@ -4647,7 +4658,7 @@ function renderMultiPositions() {
         <div class="multi-pos-field" style="flex:0 0 130px">
           <label>ME <span class="req">*</span></label>
           <select class="mpos-me" data-idx="${i}" onchange="multiPosChange(${i},'me',this.value)">
-            ${meOptions.map(o => `<option value="${o}"${pos.me === o ? ' selected' : ''}>${o || '– wählen –'}</option>`).join('')}
+            ${meFuer(pos.me).map(o => `<option value="${esc(o)}"${pos.me === o ? ' selected' : ''}>${esc(o) || '– wählen –'}</option>`).join('')}
           </select>
         </div>
         <div class="multi-pos-field" style="flex:0 0 110px">
@@ -4673,6 +4684,7 @@ function renderMultiPositions() {
               autocomplete="off"/>
           </div>
         </div>
+        ${positionZusatz(pos) ? `<div class="mpos-extra">${esc(positionZusatz(pos))}</div>` : ''}
       </div>
       ${multiPositions.length > 1
         ? `<button type="button" class="multi-pos-del" title="Position entfernen" onclick="removeMultiPosition(${i})">✕</button>`
@@ -4832,7 +4844,7 @@ function buildMultiReview() {
       <td style="padding:4px 8px;color:#6b7280">${i + 1}</td>
       <td style="padding:4px 8px">${esc(p.artNr) || '–'}</td>
       <td style="padding:4px 8px;color:#9ca3af">${esc(p.extArtNr) || '–'}</td>
-      <td style="padding:4px 8px">${esc(p.bezeichnung)}</td>
+      <td style="padding:4px 8px">${esc(p.bezeichnung)}${positionZusatz(p) ? `<div class="pos-extra">${esc(positionZusatz(p))}</div>` : ''}</td>
       <td style="padding:4px 8px;text-align:right">${esc(p.menge)}</td>
       <td style="padding:4px 8px">${esc(p.me)}</td>
       <td style="padding:4px 8px;text-align:right">${p.preis ? fmtEuro(p.preis) : '–'}</td>
@@ -4882,84 +4894,99 @@ function buildMultiReview() {
     </div>`;
 }
 
+// Position im Format der SharePoint-Spalte „Positionen" (JSON). Hersteller, Typ-Nr und
+// Begründung kommen aus dem Excel-Import und stehen nur drin, wenn sie gefüllt sind.
+function positionFuerSp(p, i) {
+  const o = {
+    Nr: i + 1,
+    Artikelnummer: p.artNr,
+    ExterneArtikelnummer: p.extArtNr || '',
+    Bezeichnung: p.bezeichnung,
+    Menge: p.menge,
+    ME: p.me,
+    Preis: p.preis ? parseFloat(p.preis) : null,
+    Termin: p.termin || '',
+    Kostenstelle: p.kostenstelle || '',
+  };
+  if (p.hersteller)  o.Hersteller  = p.hersteller;
+  if (p.typNr)       o.TypNr       = p.typNr;
+  if (p.begruendung) o.Begruendung = p.begruendung;
+  return o;
+}
+
+// Zusatzangaben einer Position (Hersteller, Typ-Nr, Begründung) als eine Zeile unter der
+// Bezeichnung. Nimmt das Format des Assistenten (hersteller) und das der Spalte (Hersteller).
+function positionZusatz(p) {
+  const typ = p.typNr || p.TypNr;
+  return [p.hersteller || p.Hersteller, typ ? `Typ ${typ}` : '', p.begruendung || p.Begruendung]
+    .filter(Boolean).join(' · ');
+}
+
+// Legt eine Sammelanfrage an: erst das Element mit Titel, dann die übrigen Felder samt
+// Positionen. Nutzen der Assistent und der Excel-Import. setText zeigt den Fortschritt.
+// Liefert { itemId, felderOk }; felderOk = false, wenn Felder nicht gespeichert wurden.
+async function sammelanfrageSpeichern(positionen, s2 = {}, s3 = {}, setText = () => {}) {
+  const first = positionen[0] || {};
+  const autoTitle = first.bezeichnung
+    ? (positionen.length > 1
+        ? `Sammelanfrage: ${first.bezeichnung} +${positionen.length - 1} weitere`
+        : `Sammelanfrage: ${first.bezeichnung}`)
+    : 'Sammelanfrage';
+  const posJson = JSON.stringify(positionen.map(positionFuerSp));
+  const totalPreis = positionen.reduce((s, p) => s + _lineSum(p.preis, p.menge), 0);
+
+  const rawData = {
+    Title:             autoTitle,
+    Artikelnummer:     first.artNr || '',
+    Menge:             first.menge || '',
+    Mengeneinheit:     first.me || '',
+    Warengruppe:       s2.Warengruppe || '',
+    Prioritaet:        s2.Prioritaet || '',
+    Beschreibung:      s2.Beschreibung || '',
+    Abteilung:         s2.Abteilung || '',
+    Termin:            '',
+    Beschaffungslogik: s3.Beschaffungslogik || '',
+    Lieferant:         s3.Lieferant || '',
+    Lieferant2:        s3.Lieferant2 || '',
+    Lieferant3:        s3.Lieferant3 || '',
+    Lieferant4:        s3.Lieferant4 || '',
+    GeschaetzterPreis: totalPreis > 0 ? totalPreis : (s3.GeschaetzterPreis || null),
+    LeadBuyerAbschluss: s3.LeadBuyerAbschluss ?? false,
+  };
+  const allFields = buildFields(rawData, FORM_FIELDS);
+
+  if (!siteId || !listId) await discoverSP();
+  const listPath = `/sites/${siteId}/lists/${listId}`;
+
+  setText('Anfrage wird angelegt…');
+  const newItem = await gPost(`${listPath}/items`, { fields: { Title: allFields['Title'] } });
+  const itemId  = newItem.id;
+
+  // Übrige Felder und Positionen (mehrzeiliges JSON-Feld) nachpflegen
+  const patchFields = { ...allFields };
+  delete patchFields['Title'];
+  patchFields[resolvedFields['Positionen'] || 'Positionen'] = posJson;
+
+  setText('Felder werden gespeichert…');
+  let felderOk = true;
+  try {
+    await patchRetry(`${listPath}/items/${itemId}/fields`, patchFields);
+  } catch(patchErr) {
+    console.warn('[Sammelanfrage] PATCH fehlgeschlagen:', patchErr.message);
+    felderOk = false;
+  }
+  return { itemId, felderOk };
+}
+
 async function submitMultiRequest() {
   const btn = $id('btn-multi-submit');
   btn.disabled = true;
   btn.textContent = 'Wird eingereicht…';
   try {
-    const s2 = multiWizardData.step2 || {};
-    const s3 = multiWizardData.step3 || {};
-    const first = multiPositions[0] || {};
-
-    // Auto-generate title from first position
-    const autoTitle = first.bezeichnung
-      ? (multiPositions.length > 1
-          ? `Sammelanfrage: ${first.bezeichnung} +${multiPositions.length - 1} weitere`
-          : `Sammelanfrage: ${first.bezeichnung}`)
-      : 'Sammelanfrage';
-
-    // Serialize all positions as JSON for the Positionen SP field
-    const posJson = JSON.stringify(multiPositions.map((p, i) => ({
-      Nr: i + 1,
-      Artikelnummer: p.artNr,
-      ExterneArtikelnummer: p.extArtNr || '',
-      Bezeichnung: p.bezeichnung,
-      Menge: p.menge,
-      ME: p.me,
-      Preis: p.preis ? parseFloat(p.preis) : null,
-      Termin: p.termin || '',
-      Kostenstelle: p.kostenstelle || '',
-    })));
-
-    const totalPreis = multiPositions.reduce((s,p) => s + _lineSum(p.preis, p.menge), 0);
     const multiFiles = [...wizardDateien.mwizard];
-
-    const rawData = {
-      Title:             autoTitle,
-      Artikelnummer:     first.artNr || '',
-      Menge:             first.menge || '',
-      Mengeneinheit:     first.me || '',
-      Warengruppe:       s2.Warengruppe || '',
-      Prioritaet:        s2.Prioritaet || '',
-      Beschreibung:      s2.Beschreibung || '',
-      Abteilung:         s2.Abteilung || '',
-      Termin:            '',
-      Beschaffungslogik: s3.Beschaffungslogik || '',
-      Lieferant:         s3.Lieferant || '',
-      Lieferant2:        s3.Lieferant2 || '',
-      Lieferant3:        s3.Lieferant3 || '',
-      Lieferant4:        s3.Lieferant4 || '',
-      GeschaetzterPreis: totalPreis > 0 ? totalPreis : (s3.GeschaetzterPreis || null),
-      LeadBuyerAbschluss: s3.LeadBuyerAbschluss ?? false,
-    };
-
-    const allFields = buildFields(rawData, FORM_FIELDS);
-
-    if (!siteId || !listId) await discoverSP();
-
-    const listPath = `/sites/${siteId}/lists/${listId}`;
-
-    btn.textContent = 'Anfrage wird angelegt…';
-    const newItem = await gPost(`${listPath}/items`, { fields: { Title: allFields['Title'] } });
-    const itemId  = newItem.id;
-
-    // Patch remaining fields + Positionen (JSON multi-line field)
-    const patchFields = { ...allFields };
-    delete patchFields['Title'];
-
-    // Add Positionen field if SP field exists
-    const posField = resolvedFields['Positionen'] || 'Positionen';
-    patchFields[posField] = posJson;
-
-    if (Object.keys(patchFields).length) {
-      btn.textContent = 'Felder werden gespeichert…';
-      try {
-        await patchRetry(`${listPath}/items/${itemId}/fields`, patchFields);
-      } catch(patchErr) {
-        console.warn('[submitMultiRequest] PATCH fehlgeschlagen:', patchErr.message);
-        toast('Anfrage erstellt, aber einige Felder konnten nicht gespeichert werden.', 'error');
-      }
-    }
+    const { itemId, felderOk } = await sammelanfrageSpeichern(multiPositions,
+      multiWizardData.step2 || {}, multiWizardData.step3 || {}, t => { btn.textContent = t; });
+    if (!felderOk) toast('Anfrage erstellt, aber einige Felder konnten nicht gespeichert werden.', 'error');
 
     if (multiFiles.length) {
       btn.textContent = 'Anhänge werden hochgeladen…';
@@ -5704,6 +5731,12 @@ function buildApprovalInner(item, statusVal) {
 
 // Panel-positions in-place editing
 let _panelPosData = []; // working copy while editing
+// Mengeneinheiten der Positionen. Eine importierte Einheit außerhalb der Liste bleibt
+// als Option stehen, sonst würde das Speichern sie leeren.
+const POS_ME_OPTIONEN = ['Lagereinheiten','kg','Stück','Anzahl','m','Paar','Liter','VPE'];
+function meOptionenFuer(me) {
+  return (me && !POS_ME_OPTIONEN.includes(me)) ? [...POS_ME_OPTIONEN, me] : POS_ME_OPTIONEN;
+}
 function _syncPanelPosFromDOM() {
   const tbody = $id('pos-edit-tbody');
   if (!tbody) return;
@@ -5727,14 +5760,14 @@ function panelPosDelete(idx) {
 function _rebuildPosEditTable() {
   const tbody = $id('pos-edit-tbody');
   if (!tbody) return;
-  const meOpts = ['Lagereinheiten','kg','Stück','Anzahl','m','Paar','Liter'];
   tbody.innerHTML = _panelPosData.map((p, idx) => {
-    const meSelOpts = meOpts.map(o => `<option value="${o}"${(p.ME||'')=== o?' selected':''}>${o}</option>`).join('');
+    const meSelOpts = meOptionenFuer(p.ME).map(o => `<option value="${esc(o)}"${(p.ME||'')=== o?' selected':''}>${esc(o)}</option>`).join('');
+    const zusatz = positionZusatz(p) ? `<div class="pos-extra">${esc(positionZusatz(p))}</div>` : '';
     return `<tr class="pos-edit-row" data-pos-idx="${idx}">
       <td class="pos-td pos-nr">${p.Nr}</td>
       <td class="pos-td"><input class="pos-edit-input" data-idx="${idx}" data-field="Artikelnummer" value="${esc(String(p.Artikelnummer||''))}" placeholder="ArtNr."/></td>
       <td class="pos-td"><input class="pos-edit-input" data-idx="${idx}" data-field="ExterneArtikelnummer" value="${esc(String(p.ExterneArtikelnummer||''))}" placeholder="Ext.ArtNr."/></td>
-      <td class="pos-td pos-bez"><input class="pos-edit-input" data-idx="${idx}" data-field="Bezeichnung" value="${esc(String(p.Bezeichnung||''))}" placeholder="Bezeichnung"/></td>
+      <td class="pos-td pos-bez"><input class="pos-edit-input" data-idx="${idx}" data-field="Bezeichnung" value="${esc(String(p.Bezeichnung||''))}" placeholder="Bezeichnung"/>${zusatz}</td>
       <td class="pos-td pos-right"><input class="pos-edit-input pos-edit-num" type="number" data-idx="${idx}" data-field="Menge" value="${esc(String(p.Menge||''))}" placeholder="1" min="0.001" step="any"/></td>
       <td class="pos-td"><select class="pos-edit-input pos-edit-me" data-idx="${idx}" data-field="ME"><option value="">–</option>${meSelOpts}</select></td>
       <td class="pos-td pos-right"><input class="pos-edit-input pos-edit-num" type="number" data-idx="${idx}" data-field="Preis" value="${esc(String(p.Preis||''))}" placeholder="0,00" min="0" step="0.01"/></td>
@@ -6004,16 +6037,16 @@ function renderPanel(item, editMode = false) {
         _panelPosData = positions.map(p => ({...p}));
 
         const canEditPos = !editMode && !isMineView && /pr[üu]fung/i.test(statusVal) && /einkauf/i.test(statusVal) && !/strategisch/i.test(statusVal);
-        const meOpts = ['Lagereinheiten','kg','Stück','Anzahl','m','Paar','Liter'];
 
         const rows = positions.map((p, idx) => {
+          const zusatz = positionZusatz(p) ? `<div class="pos-extra">${esc(positionZusatz(p))}</div>` : '';
           if (canEditPos) {
-            const meSelOpts = meOpts.map(o => `<option value="${o}"${(p.ME||p.me||'')=== o?' selected':''}>${o}</option>`).join('');
+            const meSelOpts = meOptionenFuer(p.ME || p.me).map(o => `<option value="${esc(o)}"${(p.ME||p.me||'')=== o?' selected':''}>${esc(o)}</option>`).join('');
             return `<tr class="pos-edit-row" data-pos-idx="${idx}">
               <td class="pos-td pos-nr">${p.Nr ?? idx+1}</td>
               <td class="pos-td"><input class="pos-edit-input" data-idx="${idx}" data-field="Artikelnummer" value="${esc(String(p.Artikelnummer||''))}" placeholder="ArtNr."/></td>
               <td class="pos-td"><input class="pos-edit-input" data-idx="${idx}" data-field="ExterneArtikelnummer" value="${esc(String(p.ExterneArtikelnummer||''))}" placeholder="Ext.ArtNr."/></td>
-              <td class="pos-td pos-bez"><input class="pos-edit-input" data-idx="${idx}" data-field="Bezeichnung" value="${esc(String(p.Bezeichnung||''))}" placeholder="Bezeichnung"/></td>
+              <td class="pos-td pos-bez"><input class="pos-edit-input" data-idx="${idx}" data-field="Bezeichnung" value="${esc(String(p.Bezeichnung||''))}" placeholder="Bezeichnung"/>${zusatz}</td>
               <td class="pos-td pos-right"><input class="pos-edit-input pos-edit-num" type="number" data-idx="${idx}" data-field="Menge" value="${esc(String(p.Menge||''))}" placeholder="1" min="0.001" step="any"/></td>
               <td class="pos-td"><select class="pos-edit-input pos-edit-me" data-idx="${idx}" data-field="ME"><option value="">–</option>${meSelOpts}</select></td>
               <td class="pos-td pos-right"><input class="pos-edit-input pos-edit-num" type="number" data-idx="${idx}" data-field="Preis" value="${esc(String(p.Preis||''))}" placeholder="0,00" min="0" step="0.01"/></td>
@@ -6026,7 +6059,7 @@ function renderPanel(item, editMode = false) {
               <td class="pos-td pos-nr">${p.Nr ?? ''}</td>
               <td class="pos-td">${esc(String(p.Artikelnummer||'–'))}</td>
               <td class="pos-td">${esc(String(p.ExterneArtikelnummer||'–'))}</td>
-              <td class="pos-td pos-bez">${esc(String(p.Bezeichnung||'–'))}</td>
+              <td class="pos-td pos-bez">${esc(String(p.Bezeichnung||'–'))}${zusatz}</td>
               <td class="pos-td pos-right">${esc(String(p.Menge||'–'))}</td>
               <td class="pos-td">${esc(String(p.ME||p.me||'–'))}</td>
               <td class="pos-td pos-right">${p.Preis ? fmtEuro(p.Preis) : '–'}</td>
@@ -6101,7 +6134,10 @@ function emptyState(msg) {
 }
 
 // ── MODAL ─────────────────────────────────────────────────────────────────────
-function closeModal() { $id('modal-overlay').classList.add('hidden'); }
+function closeModal() {
+  $id('modal-overlay').classList.add('hidden');
+  document.querySelector('#modal-overlay .modal')?.classList.remove('modal-wide'); // breite Vorschau des Imports
+}
 document.addEventListener('DOMContentLoaded', () => {
   $id('modal-overlay')?.addEventListener('click', e => {
     if (e.target === $id('modal-overlay')) closeModal();
