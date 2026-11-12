@@ -6,9 +6,13 @@
 // Beschaffungsart und Lieferant zu Sammelanfragen bündeln, eine Vorschau zeigen und anlegen.
 // Die Vorlage entsteht im Browser: Abteilungen und Kostenstellen kommen aus SharePoint
 // und gehören nicht in das öffentliche Repository.
-// Nutzt aus app.js: $id, esc, toast, fmtEuro, anzahl, ensureXLSX, abteilungen, KOSTENST_DATA,
-// WG_FALLBACK, colByKey, resolvedFields, genehmigungsweg, positionFuerSp,
-// sammelanfrageSpeichern, pendingPrefill, navigate, closeModal, loadItems.
+// „Excel-Vorlage öffnen“ legt die Vorlage im OneDrive der Person an (Ordner Bedarfsanfrage)
+// und öffnet sie in Excel im Browser zum Bearbeiten. Excel speichert selbst, „Übernehmen“
+// liest die Datei von dort. Sites.ReadWrite.All reicht dafür, Files.* braucht die App nicht.
+// Nutzt aus app.js: $id, esc, toast, fmtEuro, fmtDate, fmtDateTime, anzahl, ensureXLSX,
+// abteilungen, KOSTENST_DATA, WG_FALLBACK, colByKey, resolvedFields, genehmigungsweg,
+// positionFuerSp, sammelanfrageSpeichern, pendingPrefill, navigate, closeModal, loadItems,
+// currentView, API, _authedFetch, gGet, gPost, gPatch, gDelete.
 
 const SI_TAB = String.fromCharCode(9);
 const SI_LF  = String.fromCharCode(10);
@@ -18,6 +22,10 @@ const SI_GS  = String.fromCharCode(8211);   // Gedankenstrich wie in „4334 –
 const SI_NBSP = String.fromCharCode(160);
 const SI_MAX_ZEILEN = 1000;                 // so weit reichen Auswahllisten und Formate der Vorlage
 const SI_MAX_JSON = 60000;                  // Spalte Positionen: mehrzeiliger Text, Reserve zum Höchstwert
+const SI_ORDNER = 'Bedarfsanfrage';         // Ordner im OneDrive der Person
+const SI_ORDNER_FERTIG = 'Übernommen';      // Unterordner für Vorlagen, aus denen Anfragen angelegt sind
+const SI_XLSX_TYP = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const SI_MERKER = 'banf_si_uebernommen';    // localStorage: übernommene Vorlagen, falls das Verschieben scheitert
 
 // Spalten der Vorlage. alias: normierte Kopfzeilen, die der Import erkennt (* = beginnt mit).
 // Die Titel folgen dem Vorschlag der Instandhaltung, der Import liest auch dessen Schreibweise.
@@ -406,9 +414,10 @@ function siVorlageXlsx(heute = new Date()) {
       { werte: ['2. Pflicht sind Menge, Einheit, Bezeichnung, Warengruppe, Beschaffungsart 1 und 2, Lieferant und Einzelpreis.'] },
       { werte: ['3. Warengruppe, Abteilung, Beschaffungsart, Einheit und Kostenstelle über die Auswahlliste in der Zelle wählen.'] },
       { werte: ['4. Zeilen mit gleicher Warengruppe, Abteilung, Beschaffungsart und gleichem Lieferanten werden eine Sammelanfrage.'] },
-      { werte: ['5. Datei als Excel oder CSV speichern und in der App unter Sammelanfrage mit „Datei importieren“ hochladen.'] },
-      { werte: ['6. Vor dem Anlegen zeigt die App eine Vorschau mit Positionen, Summen und Genehmigungsweg.'] },
-      { werte: ['7. Angebote danach in der Anfrage unter „Anhänge“ anhängen.'] },
+      { werte: [`5. Aus der App geöffnet speichert Excel die Vorlage selbst in Ihrem OneDrive (Ordner ${SI_ORDNER}). Danach in der App unter Sammelanfrage bei der Vorlage auf „Übernehmen“ klicken.`] },
+      { werte: ['6. Eine heruntergeladene oder eigene Datei als Excel oder CSV speichern und in der App mit „Datei importieren“ hochladen.'] },
+      { werte: ['7. Vor dem Anlegen zeigt die App eine Vorschau mit Positionen, Summen und Genehmigungsweg.'] },
+      { werte: ['8. Angebote danach in der Anfrage unter „Anhänge“ anhängen.'] },
       { werte: [''] },
       { werte: [`Auswahllisten nach dem Stand vom ${datum}. Für neue Abteilungen oder Kostenstellen die Vorlage in der App neu öffnen.`] },
       { werte: [''] },
@@ -508,15 +517,245 @@ function siHerunterladen(inhalt, dateiname, typ) {
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
-function siVorlageExcel() {
+// Nur noch Ausweg, wenn OneDrive nicht erreichbar ist
+function siVorlageExcelHerunterladen() {
   try {
-    siHerunterladen(siVorlageXlsx(), 'Bedarfsmeldung-Vorlage.xlsx',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    toast('Vorlage erstellt. Öffnen Sie sie aus dem Download in Excel.', 'success');
+    siHerunterladen(siVorlageXlsx(), 'Bedarfsmeldung-Vorlage.xlsx', SI_XLSX_TYP);
+    toast('Vorlage heruntergeladen. Ausgefüllt mit „Datei importieren“ hochladen.', 'success');
   } catch (e) { toast('Vorlage konnte nicht erstellt werden: ' + e.message, 'error'); }
 }
 function siVorlageCsv() {
   siHerunterladen(siVorlageCsvText(), 'Bedarfsmeldung-Vorlage.csv', 'text/csv;charset=utf-8');
+}
+
+// ── Vorlage im OneDrive ──────────────────────────────────────────────────────
+let siVorlagenListe = [];   // Vorlagen im Ordner, zuletzt geladen
+let siOrdnerId = '';
+let siZuletztGeladen = 0;
+
+function siVorlageName(d = new Date(), nr = 0) {
+  const z = n => String(n).padStart(2, '0');
+  return `Sammelanfrage ${z(d.getDate())}.${z(d.getMonth() + 1)}.${d.getFullYear()} ${z(d.getHours())}.${z(d.getMinutes())}`
+    + `${nr ? ` (${nr})` : ''}.xlsx`;
+}
+// IDs von OneDrive-Elementen bestehen aus Buchstaben, Ziffern und wenigen Zeichen
+function siDriveId(id) { return String(id ?? '').replace(/[^A-Za-z0-9!_-]/g, ''); }
+function siStatus(e) {
+  const m = String(e?.message || '').match(/(GET|POST|PUT|PATCH|DELETE) ([0-9]{3})/);
+  return m ? Number(m[2]) : 0;
+}
+function siOneDriveFehler(e) {
+  const s = siStatus(e);
+  if (s === 401 || s === 403) return 'Die App hat keinen Zugriff auf Ihr OneDrive.';
+  if (s === 404) return 'Ihr OneDrive ist nicht erreichbar oder noch nicht eingerichtet.';
+  if (s === 423) return 'Die Datei ist gerade gesperrt. Bitte gleich noch einmal versuchen.';
+  if (s === 507) return 'Ihr OneDrive ist voll.';
+  return e?.message || 'Unbekannter Fehler';
+}
+// Adresse, unter der Excel im Browser die Datei zum Bearbeiten öffnet
+function siBearbeitenUrl(item) {
+  const url = String(item?.webUrl || '');
+  if (!/^https:[/][/]/i.test(url)) return '';
+  if (/[/]_layouts[/]15[/]Doc[.]aspx/i.test(url)) {
+    if (/[?&]action=/i.test(url)) return url.replace(/([?&]action=)[^&#]*/i, '$1edit');
+    return url + (url.includes('?') ? '&' : '?') + 'action=edit';
+  }
+  return url + (url.includes('?') ? '&' : '?') + 'web=1';
+}
+function siZeitText(iso, jetzt = Date.now()) {
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return '';
+  const min = Math.floor((jetzt - t) / 60000);
+  if (min < 1) return 'gerade gespeichert';
+  if (min < 60) return `gespeichert vor ${min} Min.`;
+  const d = new Date(t);
+  const uhr = d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+  if (d.toDateString() === new Date(jetzt).toDateString()) return `gespeichert heute ${uhr}`;
+  return `gespeichert ${d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })} ${uhr}`;
+}
+function siUebernommenListe() {
+  try {
+    const l = JSON.parse(localStorage.getItem(SI_MERKER) || '[]');
+    return Array.isArray(l) ? l : [];
+  } catch { return []; }
+}
+function siUebernommenMerken(id) {
+  try { localStorage.setItem(SI_MERKER, JSON.stringify([id, ...siUebernommenListe().filter(x => x !== id)].slice(0, 30))); }
+  catch { /* ohne localStorage fehlt nur der Vermerk */ }
+}
+function siIstUebernommen(id) { return siUebernommenListe().includes(id); }
+
+// Ordner holen oder anlegen. basis: '/me/drive/root' oder '/me/drive/items/{id}'
+async function siOrdnerSichern(basis, name) {
+  const pfad = `${basis}:/${encodeURIComponent(name)}`;
+  const holen = async () => (await gGet(`${pfad}?$select=id,folder`)).id;
+  try { return await holen(); }
+  catch (e) { if (siStatus(e) !== 404) throw e; }
+  try { return (await gPost(`${basis}/children`, { name, folder: {}, '@microsoft.graph.conflictBehavior': 'fail' })).id; }
+  catch (e) { if (siStatus(e) !== 409) throw e; return holen(); }
+}
+async function siOrdnerHolen() {
+  if (!siOrdnerId) siOrdnerId = siDriveId(await siOrdnerSichern('/me/drive/root', SI_ORDNER));
+  return siOrdnerId;
+}
+async function siVorlageHochladen(heute = new Date()) {
+  const vorhanden = new Set(siVorlagenListe.map(v => String(v.name || '').toLowerCase()));
+  let name = siVorlageName(heute);
+  for (let nr = 2; vorhanden.has(name.toLowerCase()) && nr < 50; nr++) name = siVorlageName(heute, nr);
+  const inhalt = siVorlageXlsx(heute);
+  const hochladen = async () => _authedFetch(
+    `${API}/me/drive/items/${await siOrdnerHolen()}:/${encodeURIComponent(name)}:/content?@microsoft.graph.conflictBehavior=rename`,
+    { method: 'PUT', headers: { 'Content-Type': SI_XLSX_TYP }, body: inhalt });
+  let r = await hochladen();
+  // Ordner inzwischen gelöscht: neu anlegen und noch einmal
+  if (r.status === 404) { siOrdnerId = ''; r = await hochladen(); }
+  if (!r.ok) throw new Error(`Graph PUT ${r.status}: ${await r.text().catch(() => '')}`);
+  return r.json();
+}
+// Das Fenster sofort beim Klick öffnen. Nach dem Hochladen wäre der Klick vorbei und
+// der Browser würde das Fenster als Popup blockieren.
+function siFensterVorbereiten() {
+  let w = null;
+  try { w = window.open('', '_blank'); } catch { w = null; }
+  if (!w) return null;
+  try {
+    w.document.title = 'Excel-Vorlage';
+    w.document.body.innerHTML = '<p style="font:15px Segoe UI,Arial,sans-serif;color:#1a2644;padding:32px">'
+      + 'Die Vorlage wird in Ihrem OneDrive angelegt und gleich in Excel geöffnet …</p>';
+    w.opener = null;
+  } catch { /* Text ist nur Zierde */ }
+  return w;
+}
+function siHinweisZeigen(html) {
+  const box = $id('si-hinweis');
+  if (!box) return;
+  box.innerHTML = html || '';
+  box.classList.toggle('hidden', !html);
+}
+async function siVorlageExcel() {
+  const btn = $id('si-btn-excel');
+  siHinweisZeigen('');
+  const fenster = siFensterVorbereiten();
+  if (btn) { btn.disabled = true; btn.textContent = 'Vorlage wird angelegt…'; }
+  try {
+    const item = await siVorlageHochladen();
+    const url = siBearbeitenUrl(item);
+    if (fenster && !fenster.closed && url) {
+      fenster.location.replace(url);
+      toast('Vorlage in Excel geöffnet. Excel speichert selbst. Danach hier auf „Übernehmen“ klicken.', 'success');
+    } else {
+      if (fenster && !fenster.closed) fenster.close();
+      toast('Vorlage angelegt. Bitte unten bei der Vorlage auf „Öffnen“ klicken.', 'info');
+    }
+    await siVorlagenLaden();
+  } catch (e) {
+    if (fenster && !fenster.closed) fenster.close();
+    console.warn('[Sammelimport] Vorlage nicht angelegt', e);
+    siHinweisZeigen(`<div class="info-box warn">Die Vorlage konnte nicht in Ihrem OneDrive angelegt werden.
+      ${esc(siOneDriveFehler(e))}
+      <button type="button" class="btn btn-outline btn-sm" onclick="siVorlageExcelHerunterladen()">⬇ Vorlage stattdessen herunterladen</button></div>`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '📄 Excel-Vorlage öffnen'; }
+  }
+}
+// Vorlagen im Ordner zeigen, die neueste zuerst. Legt nichts an: ohne Ordner bleibt die Liste leer.
+async function siVorlagenLaden() {
+  const box = $id('si-vorlagen');
+  if (!box) return;
+  siZuletztGeladen = Date.now();
+  let liste = [];
+  try {
+    const data = await gGet(`/me/drive/root:/${encodeURIComponent(SI_ORDNER)}:/children?$select=id,name,webUrl,lastModifiedDateTime,file&$top=200`);
+    liste = (data.value || []).filter(v => v.file && /[.]xlsx$/i.test(v.name || ''));
+  } catch (e) {
+    if (siStatus(e) !== 404) console.warn('[Sammelimport] Vorlagen im OneDrive nicht lesbar', e);
+  }
+  liste.sort((a, b) => String(b.lastModifiedDateTime || '').localeCompare(String(a.lastModifiedDateTime || '')));
+  siVorlagenListe = liste;
+  box.innerHTML = liste.length ? siVorlagenHtml(liste.slice(0, 5), liste.length) : '';
+  box.classList.toggle('hidden', !liste.length);
+}
+function siVorlagenHtml(liste, gesamt = liste.length) {
+  const zeilen = liste.map(v => {
+    const id = siDriveId(v.id);
+    const url = siBearbeitenUrl(v);
+    return `<div class="si-vorlage">
+      <span class="si-vorlage-name">📄 ${esc(String(v.name || '').replace(/[.]xlsx$/i, ''))}</span>
+      ${siIstUebernommen(id) ? '<span class="si-vorlage-fertig" title="Aus dieser Vorlage sind schon Anfragen angelegt">übernommen</span>' : ''}
+      <span class="si-vorlage-zeit" title="${esc(fmtDateTime(v.lastModifiedDateTime))}">${esc(siZeitText(v.lastModifiedDateTime))}</span>
+      <span class="si-vorlage-aktionen">
+        ${url ? `<a class="btn btn-ghost btn-sm" href="${esc(url)}" target="_blank" rel="noopener" title="In Excel bearbeiten">✏️ Öffnen</a>` : ''}
+        <button type="button" class="btn btn-primary btn-sm" onclick="siVorlageUebernehmen('${id}', this)">📥 Übernehmen</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="siVorlageVerwerfen('${id}')" title="In den Papierkorb Ihres OneDrive" aria-label="Vorlage verwerfen">🗑</button>
+      </span>
+    </div>`;
+  }).join('');
+  const mehr = gesamt > liste.length ? `<div class="si-vorlagen-mehr">Dazu ${gesamt - liste.length} ältere im Ordner ${esc(SI_ORDNER)}.</div>` : '';
+  return `<div class="si-vorlagen-kopf">Ihre Vorlagen im OneDrive, Ordner ${esc(SI_ORDNER)}</div>${zeilen}${mehr}`;
+}
+// Die vorab angemeldete Download-Adresse ohne Authorization-Kopf abrufen. /content antwortet
+// mit einer Umleitung, und die ist bei einer CORS-Vorabprüfung nicht erlaubt.
+async function siOneDriveLaden(id) {
+  const item = await gGet(`/me/drive/items/${id}?select=id,name,@microsoft.graph.downloadUrl`);
+  const url = item['@microsoft.graph.downloadUrl'];
+  if (!url) throw new Error('OneDrive hat keine Download-Adresse geliefert.');
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`Download ${r.status}`);
+  return { name: item.name || 'Vorlage.xlsx', puffer: await r.arrayBuffer() };
+}
+async function siVorlageUebernehmen(id, btn = null, bestaetigt = false) {
+  id = siDriveId(id);
+  if (!id) return;
+  if (!bestaetigt && siIstUebernommen(id)) {
+    siFrage('Vorlage schon übernommen', 'Aus dieser Vorlage sind schon Sammelanfragen angelegt. Noch einmal übernehmen?',
+      'Noch einmal übernehmen', () => siVorlageUebernehmen(id, null, true));
+    return;
+  }
+  const text = btn?.textContent;
+  if (btn) { btn.disabled = true; btn.textContent = 'Wird geladen…'; }
+  try {
+    const { name, puffer } = await siOneDriveLaden(id);
+    siErgebnis = siAuswerten(await siDateiLesen({ name, arrayBuffer: async () => puffer }), name);
+    siErgebnis.quelle = { id, name };
+    siVorschau();
+  } catch (e) {
+    toast('Vorlage konnte nicht gelesen werden: ' + siOneDriveFehler(e), 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = text; }
+  }
+}
+// Nach dem Anlegen in den Unterordner „Übernommen“, damit niemand sie zweimal übernimmt.
+// Scheitert das (etwa weil Excel die Datei sperrt), bleibt sie mit Vermerk in der Liste.
+async function siVorlageAblegen(quelle) {
+  const id = siDriveId(quelle?.id);
+  if (!id) return;
+  siUebernommenMerken(id);
+  try {
+    const ziel = await siOrdnerSichern(`/me/drive/items/${await siOrdnerHolen()}`, SI_ORDNER_FERTIG);
+    await gPatch(`/me/drive/items/${id}?@microsoft.graph.conflictBehavior=rename`, { parentReference: { id: ziel } });
+  } catch (e) {
+    console.warn('[Sammelimport] Vorlage nicht verschoben', e);
+  }
+}
+function siVorlageVerwerfen(id) {
+  id = siDriveId(id);
+  const v = siVorlagenListe.find(x => siDriveId(x.id) === id);
+  const name = String(v?.name || 'Vorlage').replace(/[.]xlsx$/i, '');
+  siFrage('Vorlage verwerfen', `„${name}“ in den Papierkorb Ihres OneDrive verschieben? Von dort lässt sie sich wiederherstellen.`,
+    '🗑 Verwerfen', async () => {
+      try { await gDelete(`/me/drive/items/${id}`); toast('Vorlage verworfen.', 'success'); }
+      catch (e) { toast('Vorlage konnte nicht verworfen werden: ' + siOneDriveFehler(e), 'error'); }
+      siVorlagenLaden();
+    }, 'btn-danger');
+}
+function siFrage(titel, text, knopf, aktion, klasse = 'btn-primary') {
+  $id('modal-title').textContent = titel;
+  $id('modal-body').innerHTML = `<p class="si-zus">${esc(text)}</p>`;
+  $id('modal-footer').innerHTML = '<button class="btn btn-ghost" onclick="closeModal()">Abbrechen</button>'
+    + `<button class="btn ${klasse}" id="si-frage-ok">${esc(knopf)}</button>`;
+  $id('si-frage-ok').onclick = () => { closeModal(); aktion(); };
+  document.querySelector('#modal-overlay .modal')?.classList.remove('modal-wide');
+  $id('modal-overlay').classList.remove('hidden');
 }
 function siDateiGewaehlt(input) {
   const datei = input.files?.[0];
@@ -611,6 +850,7 @@ async function siAnlegen() {
   }
   const summe = (e.angelegt || 0) + fertig;
   siErgebnis = null;
+  if (e.quelle) await siVorlageAblegen(e.quelle);
   closeModal();
   toast(`${anzahl(summe, 'Sammelanfrage', 'Sammelanfragen')} aus ${e.dateiname} eingereicht. Als Nächstes prüft der Einkauf.`, 'success');
   if (ohneFelder) toast(`Bei ${anzahl(ohneFelder, 'Anfrage', 'Anfragen')} konnten nicht alle Felder gespeichert werden.`, 'error');
@@ -632,8 +872,12 @@ function siImAssistenten(i) {
   navigate('multi');
 }
 
-// Datei auch per Drag-and-drop auf den Kasten
+// Datei auch per Drag-and-drop auf den Kasten. Zurück aus Excel: Liste der Vorlagen auffrischen.
 if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden || typeof currentView === 'undefined' || currentView !== 'multi') return;
+    if (Date.now() - siZuletztGeladen > 3000) siVorlagenLaden();
+  });
   document.addEventListener('DOMContentLoaded', () => {
     const karte = document.getElementById('si-karte');
     if (!karte) return;
@@ -652,5 +896,6 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     SI_SPALTEN, SI_ART1, SI_ART2, siNorm, siZahl, siText, siDatum, siEinheit, siWarengruppe, siAbteilung,
     siArt1, siArt2, siCsvZeilen, siKopfFinden, siAuswerten, siVorlageXlsx, siVorlageCsvText, siZip, siCrc32,
+    siVorlageName, siBearbeitenUrl, siDriveId, siStatus, siZeitText,
   };
 }

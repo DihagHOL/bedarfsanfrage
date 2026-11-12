@@ -4344,10 +4344,11 @@ function initSchulung() {
           <li>Warengruppe, Priorität, Abteilung und Beschaffungsart gelten für die gesamte Anfrage.</li>
         </ol>
         <div class="schulung-tip">📊 Viele Positionen, etwa in der Instandhaltung, erfassen Sie bequemer in Excel.
-          Oben in der Sammelanfrage öffnen Sie die <b>Excel-Vorlage</b>, füllen sie aus, speichern sie als Excel
-          oder CSV und laden sie über <b>„Datei importieren"</b> hoch. Die App zeigt vorher eine Vorschau.
-          Zeilen mit gleicher Warengruppe, Abteilung, Beschaffungsart und gleichem Lieferanten werden eine
-          Sammelanfrage.</div>
+          Oben in der Sammelanfrage legt <b>„Excel-Vorlage öffnen"</b> eine neue Vorlage in Ihrem OneDrive an
+          und öffnet sie in Excel zum Bearbeiten. Excel speichert selbst. Zurück in der App holt
+          <b>„Übernehmen"</b> die ausgefüllte Vorlage, die App zeigt vorher eine Vorschau. Eigene Excel- oder
+          CSV-Dateien laden Sie über <b>„Datei importieren"</b> hoch. Zeilen mit gleicher Warengruppe, Abteilung,
+          Beschaffungsart und gleichem Lieferanten werden eine Sammelanfrage.</div>
       </section>
 
       <section class="schulung-sec" id="sch-4">
@@ -4560,6 +4561,8 @@ function initMultiWizard() {
 
   renderMultiPositions();
   renderFavBar('multi');
+  // Excel-Vorlagen im OneDrive (sammelimport.js)
+  if (typeof siVorlagenLaden === 'function') siVorlagenLaden();
 }
 
 // Füllt den Sammel-Wizard mit Favoritendaten

@@ -123,13 +123,36 @@ const listen = teile['xl/worksheets/sheet3.xml']?.text || '';
 pruefe(listen.includes('techn. Dienste') && listen.includes('1111 – Kostenstelle A'), 'Listen enthalten Abteilungen und Kostenstellen des Augenblicks');
 pruefe(listen.indexOf('1111 – Kostenstelle A') < listen.indexOf('2011 – Kostenstelle B'), 'Kostenstellen nach Nummer sortiert');
 pruefe((teile['xl/worksheets/sheet2.xml']?.text || '').includes('12.11.2026'), 'Hinweise nennen den Stand der Listen');
+pruefe((teile['xl/worksheets/sheet2.xml']?.text || '').includes('„Übernehmen“'), 'Hinweise erklären das Übernehmen aus dem OneDrive');
 const ausgewogen = t => (t.match(/</g) || []).length === (t.match(/>/g) || []).length;
 pruefe(Object.values(teile).every(t => t.text.startsWith('<?xml') && ausgewogen(t.text)), 'jedes Teil beginnt mit XML-Kopf, spitze Klammern ausgeglichen');
+
+console.log('OneDrive');
+pruefe(S.siVorlageName(new Date(2026, 10, 12, 13, 5)) === 'Sammelanfrage 12.11.2026 13.05.xlsx', 'Dateiname mit Datum und Uhrzeit');
+pruefe(S.siVorlageName(new Date(2026, 10, 12, 13, 5), 2) === 'Sammelanfrage 12.11.2026 13.05 (2).xlsx', 'zweite Vorlage derselben Minute');
+const docUrl = 'https://firma-my.sharepoint.com/personal/x/_layouts/15/Doc.aspx?sourcedoc=%7BAB12%7D&file=Sammelanfrage%2012.11.2026.xlsx&action=default&mobileredirect=true';
+pruefe(S.siBearbeitenUrl({ webUrl: docUrl }) === docUrl.replace('action=default', 'action=edit'), 'Excel im Browser öffnet zum Bearbeiten (action=edit)');
+pruefe(S.siBearbeitenUrl({ webUrl: 'https://firma-my.sharepoint.com/personal/x/_layouts/15/Doc.aspx?sourcedoc=%7BAB12%7D' }).endsWith('&action=edit'), 'fehlendes action=edit wird ergänzt');
+pruefe(S.siBearbeitenUrl({ webUrl: 'https://firma-my.sharepoint.com/personal/x/Documents/Bedarfsanfrage/a.xlsx' }).endsWith('/a.xlsx?web=1'), 'direkte Dateiadresse öffnet im Browser (web=1)');
+pruefe(S.siBearbeitenUrl({ webUrl: 'javascript:alert(1)' }) === '' && S.siBearbeitenUrl({}) === '', 'nur https-Adressen');
+pruefe(S.siDriveId("01ABC'); alert(1);//") === '01ABCalert1' && S.siDriveId('D4648F06C91D9D3D!54927') === 'D4648F06C91D9D3D!54927', 'Element-ID ohne fremde Zeichen');
+pruefe(S.siStatus(new Error('Graph GET 404: x')) === 404 && S.siStatus(new Error('Graph POST 409: y')) === 409 && S.siStatus(new Error('x')) === 0, 'Statuscode aus der Fehlermeldung');
+const jetzt = new Date(2026, 10, 12, 14, 0).getTime();
+pruefe(S.siZeitText(new Date(jetzt - 20e3).toISOString(), jetzt) === 'gerade gespeichert'
+  && S.siZeitText(new Date(jetzt - 5 * 60e3).toISOString(), jetzt) === 'gespeichert vor 5 Min.', 'Zeitangabe: gerade, vor Minuten');
+pruefe(S.siZeitText(new Date(2026, 10, 12, 9, 7).toISOString(), jetzt) === 'gespeichert heute 09:07'
+  && S.siZeitText(new Date(2026, 10, 10, 9, 7).toISOString(), jetzt) === 'gespeichert 10.11.2026 09:07', 'Zeitangabe: heute, älter');
+const quelle = lies('sammelimport.js');
+const knopf = quelle.slice(quelle.indexOf('async function siVorlageExcel()'), quelle.indexOf('async function siVorlagenLaden'));
+pruefe(knopf.length > 100 && knopf.includes('siVorlageHochladen()') && !knopf.includes('siHerunterladen('), '„Excel-Vorlage öffnen“ legt im OneDrive an und lädt nichts herunter');
+pruefe(quelle.includes("'@microsoft.graph.downloadUrl'") && !/[/]content['`]/.test(quelle.replace(':/content?', '')), 'Übernehmen liest über die Download-Adresse, nicht über /content');
 
 console.log('Einbindung');
 const html = lies('index.html');
 pruefe(html.indexOf('src="sammelimport.js"') > html.indexOf('src="app.js"'), 'index.html lädt sammelimport.js nach app.js');
 pruefe(html.includes('id="si-karte"') && html.includes('siVorlageExcel()') && html.includes('id="si-datei"'), 'Kasten mit Vorlage und Import im Reiter Sammelanfrage');
+pruefe(html.includes('id="si-vorlagen"') && html.includes('id="si-hinweis"') && html.includes('id="si-btn-excel"'), 'Kasten mit Liste der Vorlagen und Hinweisfeld');
+pruefe(/renderFavBar[(]'multi'[)];[^}]*siVorlagenLaden[(][)]/.test(app), 'Reiter Sammelanfrage lädt die Vorlagen aus dem OneDrive');
 pruefe(/function sammelanfrageSpeichern/.test(app) && /sammelanfrageSpeichern\(multiPositions/.test(app), 'Assistent und Import legen über dieselbe Funktion an');
 pruefe(/o\.Hersteller\s*=/.test(app) && /o\.TypNr\s*=/.test(app) && /o\.Begruendung\s*=/.test(app), 'Positionen speichern Hersteller, Typ-Nr und Begründung');
 

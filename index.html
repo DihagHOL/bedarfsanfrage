@@ -440,14 +440,16 @@
           <div class="si-karte" id="si-karte">
             <div class="si-karte-text">
               <strong>📊 Sammelanfrage aus Excel</strong>
-              <span>Für viele Positionen, etwa aus der Instandhaltung: Vorlage öffnen, in Excel ausfüllen, speichern und hier importieren. Excel- und CSV-Dateien gehen, auch per Drag-and-drop auf diesen Kasten.</span>
+              <span>Für viele Positionen, etwa aus der Instandhaltung. „Excel-Vorlage öffnen“ legt die Vorlage in Ihrem OneDrive an und öffnet sie in Excel zum Bearbeiten. Excel speichert selbst, danach hier auf „Übernehmen“ klicken. Eigene Excel- oder CSV-Dateien gehen über „Datei importieren“ oder per Drag-and-drop auf diesen Kasten.</span>
             </div>
             <div class="si-karte-aktionen">
-              <button type="button" class="btn btn-outline btn-sm" onclick="siVorlageExcel()">📄 Excel-Vorlage öffnen</button>
-              <button type="button" class="btn btn-ghost btn-sm" onclick="siVorlageCsv()">CSV-Vorlage</button>
-              <button type="button" class="btn btn-primary btn-sm" onclick="document.getElementById('si-datei').click()">📥 Datei importieren</button>
+              <button type="button" class="btn btn-primary btn-sm" id="si-btn-excel" onclick="siVorlageExcel()">📄 Excel-Vorlage öffnen</button>
+              <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('si-datei').click()">📥 Datei importieren</button>
+              <button type="button" class="btn btn-ghost btn-sm" onclick="siVorlageCsv()" title="Leere CSV-Datei mit der Kopfzeile herunterladen">CSV-Vorlage</button>
               <input type="file" id="si-datei" accept=".xlsx,.xls,.xlsm,.csv" hidden onchange="siDateiGewaehlt(this)">
             </div>
+            <div id="si-hinweis" class="si-hinweis hidden"></div>
+            <div id="si-vorlagen" class="si-vorlagen hidden"></div>
           </div>
           <div class="wizard-header">
             <div class="wizard-steps" id="mwizard-steps">

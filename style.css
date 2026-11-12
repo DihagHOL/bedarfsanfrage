@@ -859,6 +859,16 @@ details#attach-extra-wrap[open] .attach-more-toggle { color:#374151; }
 .si-karte-text strong { font-size: .88rem; color: #1a2644; }
 .si-karte-text span { font-size: .8rem; color: #475569; line-height: 1.45; }
 .si-karte-aktionen { display: flex; gap: 6px; flex-wrap: wrap; }
+.si-hinweis { flex: 1 1 100%; }
+.si-hinweis .info-box { margin: 0; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.si-vorlagen { flex: 1 1 100%; display: flex; flex-direction: column; gap: 6px; border-top: 1px solid #c9d8ea; padding-top: 10px; }
+.si-vorlagen-kopf { font-size: .78rem; font-weight: 600; color: #475569; }
+.si-vorlagen-mehr { font-size: .76rem; color: #64748b; }
+.si-vorlage { display: flex; align-items: center; gap: 6px 10px; flex-wrap: wrap; background: #fff; border: 1px solid #dbe5f1; border-radius: 8px; padding: 6px 10px; }
+.si-vorlage-name { font-size: .84rem; font-weight: 600; color: #1a2644; flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
+.si-vorlage-zeit { font-size: .76rem; color: #64748b; white-space: nowrap; }
+.si-vorlage-fertig { font-size: .72rem; color: #166534; background: #dcfce7; border-radius: 999px; padding: 1px 8px; }
+.si-vorlage-aktionen { display: flex; gap: 4px; flex-wrap: wrap; margin-left: auto; }
 .si-zus { font-size: .88rem; margin-bottom: 10px; color: #1e293b; }
 .si-fehler ul { margin: 6px 0 0 18px; font-size: .82rem; }
 .si-gruppe { border: 1px solid #e2e8f0; border-radius: 10px; margin-bottom: 14px; overflow: hidden; }
