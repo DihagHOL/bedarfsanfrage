@@ -1872,6 +1872,23 @@ const TIMELINE_STAGES = [
     approverField: null, commentField: null },
 ];
 
+// Freigabestufen wie im Flow „Bedarfsanfragen SHB". Dessen Wertgrenzen gelten (Denis,
+// 12.11.2026); Zeitleiste, Genehmigungsweg im Assistenten und Panel rechnen hiermit.
+const FREIGABE_WERKLEITUNG_AB = 1500;   // In Prüfung (Werkleitung) ab diesem Bestellvolumen
+const FREIGABE_STRATEGISCH_AB = 10000;  // In Prüfung (strategischer Einkauf), nur ohne Lead-Buyer-Abschluss
+// Der Flow fragt endsWith(Beschaffungslogik, 'Dienstleistung'). Das trifft auch die Karte
+// „Indirektes Material / Dienstleistung", nicht nur reine Dienstleistungen.
+function brauchtControlling(beschaffungslogik) {
+  return /dienstleistung$/i.test(String(beschaffungslogik || '').trim());
+}
+function freigabeStufen(preis, leadBuyer, beschaffungslogik) {
+  const stufen = ['Einkauf'];
+  if (brauchtControlling(beschaffungslogik)) stufen.push('Controlling');
+  if (preis >= FREIGABE_WERKLEITUNG_AB) stufen.push('Werkleitung');
+  if (preis >= FREIGABE_STRATEGISCH_AB && !leadBuyer) stufen.push('strategischer Einkauf');
+  return stufen;
+}
+
 // Resolve a person/lookup field from item.fields to a display name string.
 function resolvePersonField(fields, fieldName) {
   if (!fieldName || !fields) return null;
@@ -1936,9 +1953,9 @@ function statusTimeline(statusVal, item) {
   const preis       = parseFloat(getField(item, resolvedFields['GeschaetzterPreis'] || 'GeschaetzterPreis')) || 0;
   const lbRaw       = getField(item, resolvedFields['LeadBuyerAbschluss'] || 'LeadBuyerAbschluss');
   const leadBuyer   = lbRaw === true || /^(true|ja|yes|1)$/i.test(String(lbRaw || ''));
-  const isDienstleistung = /dienstleistung/i.test(beschaffung);
-  const needsWerkleitung = preis >= 1500;
-  const needsStrategisch = preis >= 10000 && !leadBuyer;
+  const isDienstleistung = brauchtControlling(beschaffung);
+  const needsWerkleitung = preis >= FREIGABE_WERKLEITUNG_AB;
+  const needsStrategisch = preis >= FREIGABE_STRATEGISCH_AB && !leadBuyer;
 
   // Anwendbare Stufen in Workflow-Reihenfolge (nur tatsächlich getriggerte)
   const applies = st => {
@@ -2139,7 +2156,7 @@ async function openOrderModal(itemId) {
   // Always show 1 slot; extra slots (up to required-1 or 4 more) go into a collapsed <details>
   const extraN     = Math.max(0, required - 1);
   const extraSlots = Array.from({length: extraN}, (_, i) =>
-    `<input type="file" class="attach-file-input" accept=".pdf,.PDF" style="margin-bottom:6px" data-slot="${i+2}"/>`
+    `<input type="file" class="attach-file-input" accept="${ANHANG_ACCEPT}" style="margin-bottom:6px" data-slot="${i+2}"/>`
   ).join('');
 
   $id('modal-title').textContent = 'Einkauf-Daten eintragen';
@@ -2180,7 +2197,7 @@ async function openOrderModal(itemId) {
       <label>${esc(attachNote)}</label>
       ${existingHtml}
       <div id="attach-inputs">
-        <input type="file" class="attach-file-input" accept=".pdf,.PDF" style="margin-bottom:6px" data-slot="1"/>
+        <input type="file" class="attach-file-input" accept="${ANHANG_ACCEPT}" style="margin-bottom:6px" data-slot="1"/>
       </div>
       <details id="attach-extra-wrap" style="margin-top:4px">
         <summary class="attach-more-toggle">+ Weitere Angebote${required > 1 ? ` (${extraN} gem. Regelwerk vorausgefüllt)` : ''}</summary>
@@ -2227,7 +2244,7 @@ function addAttachInput() {
   const total = document.querySelectorAll('.attach-file-input').length;
   if (total >= 5) { if (addBtn) addBtn.disabled = true; return; }
   const inp = document.createElement('input');
-  inp.type = 'file'; inp.accept = '.pdf,.PDF'; inp.className = 'attach-file-input';
+  inp.type = 'file'; inp.accept = ANHANG_ACCEPT; inp.className = 'attach-file-input';
   inp.style.marginBottom = '6px';
   extra.appendChild(inp);
   if (document.querySelectorAll('.attach-file-input').length >= 5 && addBtn) addBtn.disabled = true;
@@ -2247,6 +2264,9 @@ async function saveOrderData(itemId) {
   // Collect selected files
   const fileInputs = [...document.querySelectorAll('.attach-file-input')];
   const files = fileInputs.map(i => i.files[0]).filter(Boolean);
+  // Im Dateidialog lässt sich „Alle Dateien" wählen, deshalb hier prüfen, bevor etwas gespeichert wird
+  const verboten = files.filter(f => !anhangErlaubt(f.name)).map(f => f.name);
+  if (verboten.length) { toast(`Nicht erlaubt: ${verboten.join(', ')}. ${ANHANG_ERLAUBT_TEXT}`, 'error'); return; }
 
   // Build patch using resolved names; fall back to raw key if column was never resolved
   const patch = {};
@@ -3053,10 +3073,7 @@ function wNext(step) {
     const totalQty = einzelLines.reduce((s, ln) => s + _ezNum(ln.stueck), 0);
     if (!(total > 0)) { toast('Bitte mindestens eine Zeile mit Menge und Einzelpreis ausfüllen.', 'error'); return; }
     wizardData.step3 = {
-      Beschaffungslogik: [
-        document.querySelector('input[name=Beschaffungslogik]:checked')?.value || '',
-        ...[...document.querySelectorAll('#beschaffungslogik-extra-cards .check-card.selected')].map(c => c.dataset.value)
-      ].filter(Boolean).join(', '),
+      Beschaffungslogik: wizardBeschaffungslogik(),
       Lieferant:         $id('f-Lieferant').value.trim(),
       Lieferant2:        $id('f-Lieferant2').value.trim(),
       Lieferant3:        $id('f-Lieferant3').value.trim(),
@@ -3077,6 +3094,15 @@ function toggleBLExtra(el) {
   const wasSelected = el.classList.contains('selected');
   document.querySelectorAll('#beschaffungslogik-extra-cards .check-card').forEach(c => c.classList.remove('selected'));
   if (!wasSelected) el.classList.add('selected');
+  updatePreisHint(); // die Zusatzkarte entscheidet über die Controlling-Stufe
+}
+
+// Beschaffungslogik des Einzel-Assistenten, so wie sie gespeichert wird: Auswahl plus Zusatzkarte
+function wizardBeschaffungslogik() {
+  return [
+    document.querySelector('input[name=Beschaffungslogik]:checked')?.value || '',
+    ...[...document.querySelectorAll('#beschaffungslogik-extra-cards .check-card.selected')].map(c => c.dataset.value)
+  ].filter(Boolean).join(', ');
 }
 
 function angeboteAnzahl(gesamt) {
@@ -3158,7 +3184,7 @@ function updatePreisHint() {
   const lba   = $id('f-LeadBuyerAbschluss')?.checked ?? false;
   const hint  = $id('preis-route-hint');
   if (preis > 0) {
-    hint.textContent = genehmigungsweg(preis, lba);
+    hint.textContent = genehmigungsweg(preis, lba, wizardBeschaffungslogik());
     hint.style.display = 'block';
   } else {
     hint.style.display = 'none';
@@ -3175,6 +3201,7 @@ function initWizardDrop(p = 'wizard') {
   const zone  = $id(p + '-drop-zone');
   const input = $id(p + '-file-input');
   if (!zone || !input) return;
+  input.accept = ANHANG_ACCEPT;
   // Guard: only attach listeners once (called on every wizard reset)
   if (zone._dropReady) return;
   zone._dropReady = true;
@@ -3191,12 +3218,14 @@ function initWizardDrop(p = 'wizard') {
 
 function addWizardFiles(files, p = 'wizard') {
   const arr = wizardDateien[p];
+  const abgelehnt = [];
   for (const f of files) {
     if (arr.length >= 5) break;
-    if (!ANHANG_PDF_RE.test(f.name)) { toast('Nur PDF-Dateien sind erlaubt.', 'error'); continue; }
+    if (!anhangErlaubt(f.name)) { abgelehnt.push(f.name); continue; }
     if (arr.some(x => x.name === f.name && x.size === f.size)) continue; // skip duplicate
     arr.push(f);
   }
+  if (abgelehnt.length) toast(`Nicht erlaubt: ${abgelehnt.join(', ')}. ${ANHANG_ERLAUBT_TEXT}`, 'error');
   renderWizardFiles(p);
 }
 
@@ -3221,32 +3250,18 @@ function renderWizardFiles(p = 'wizard') {
   if (zone) zone.classList.toggle('has-files', arr.length > 0);
 }
 
-function genehmigungsweg(gesamt, leadBuyer = false) {
-  let stufe, freigeber, angebote;
-  if (gesamt <= 500) {
-    stufe = 1; freigeber = ['Anforderer Fachabt.', 'Einkäufer Werk']; angebote = 'kein Angebot nötig';
-  } else if (gesamt <= 2500) {
-    stufe = 2; freigeber = ['Einkäufer Werk', 'Werkleiter'];           angebote = 'mind. 2 Angebote';
-  } else if (gesamt <= 5000) {
-    stufe = 2; freigeber = ['Einkäufer Werk', 'Werkleiter'];           angebote = 'mind. 2–3 Angebote';
-  } else if (gesamt <= 10000) {
-    stufe = 3; freigeber = ['Werkleiter', 'Einkaufsleitung Holding'];  angebote = 'mind. 3 Angebote';
-  } else if (gesamt <= 50000) {
-    stufe = 3; freigeber = ['Werkleiter', 'Einkaufsleitung Holding'];  angebote = 'mind. 3–4 Angebote';
-  } else {
-    stufe = 4; freigeber = ['Einkaufsleitung Holding', 'GF kfm. Leitung Holding'];
-    angebote = 'Europ. Ausschreibung (mind. 5 Angebote)';
-  }
-  // Angebotspflicht: ab Stufe 2 entfällt sie beim Lead-Buyer-Abschluss.
-  let angeboteText = angebote;
-  if (stufe > 1) angeboteText += leadBuyer ? ' ✓ entfällt' : ' (entfällt bei Lead-Buyer-Abschluss)';
-  // Lead-Buyer-Abschluss macht die Holding-Freigabe (Einkaufsleitung Holding) überflüssig.
-  let fg = freigeber;
-  if (leadBuyer) {
-    const filtered = freigeber.filter(f => !/Einkaufsleitung Holding/i.test(f));
-    if (filtered.length) fg = filtered;
-  }
-  return `Stufe ${stufe} · ${fmtEuro(gesamt)} · ${angeboteText} · Freigabe: ${fg.join(' + ')}`;
+// Hinweis im Assistenten, in der Zusammenfassung und im Panel: Zahl der Angebote nach
+// Regelwerk (angeboteAnzahl) und die Freigabestufen, wie sie der Flow durchläuft.
+function genehmigungsweg(gesamt, leadBuyer = false, beschaffungslogik = '') {
+  const n = angeboteAnzahl(gesamt);
+  let angebote = n === 0 ? 'kein Angebot nötig'
+    : n >= 5 ? 'europ. Ausschreibung, mind. 5 Angebote'
+    : `mind. ${n} Angebote`;
+  // Beim Lead-Buyer-Abschluss entfällt die Angebotspflicht.
+  if (n > 0) angebote += leadBuyer ? ' ✓ entfällt (Lead-Buyer-Abschluss)' : ' (entfällt bei Lead-Buyer-Abschluss)';
+  let text = `${fmtEuro(gesamt)} · ${angebote} · Freigabe: ${freigabeStufen(gesamt, leadBuyer, beschaffungslogik).join(' → ')}`;
+  if (leadBuyer && gesamt >= FREIGABE_STRATEGISCH_AB) text += ' (strategischer Einkauf entfällt, Lead-Buyer-Abschluss)';
+  return text;
 }
 
 function buildReview() {
@@ -3280,7 +3295,7 @@ function buildReview() {
         ['Kostenstelle', d.Kostenstelle],
       ])}
     </div>
-    ${d.GeschaetzterPreis ? `<div class="info-box info" style="margin-top:12px">${genehmigungsweg(d.GeschaetzterPreis, d.LeadBuyerAbschluss === true || /^(true|ja|yes|1)$/i.test(String(d.LeadBuyerAbschluss || '')))}</div>` : ''}
+    ${d.GeschaetzterPreis ? `<div class="info-box info" style="margin-top:12px">${genehmigungsweg(d.GeschaetzterPreis, d.LeadBuyerAbschluss === true || /^(true|ja|yes|1)$/i.test(String(d.LeadBuyerAbschluss || '')), d.Beschaffungslogik)}</div>` : ''}
     <div class="info-box info" style="margin-top:10px">
       Nach dem Einreichen prüft der <strong>Einkauf</strong> die Anfrage in der App. Genehmigt er, holt <strong>Power Automate</strong> die weiteren Freigaben ein und informiert Sie per Mail über das Ergebnis.
     </div>`;
@@ -4306,9 +4321,9 @@ function initSchulung() {
         </ol>
         <div class="schulung-tip">💡 Über das Feld „Externe Artikelnummer" erfassen Sie bei
           Katalogware die Lieferanten-Nummer.</div>
-        <div class="schulung-tip">📎 Angebote hängen Sie im Schritt Beschaffung als PDF an. Fehlt eines,
-          reichen Sie es später nach: Anfrage öffnen und die Datei unter „Anhänge" ablegen. Das geht
-          in jedem Status, auch bei der Sammelanfrage.</div>
+        <div class="schulung-tip">📎 Angebote hängen Sie im Schritt Beschaffung an, als PDF, gespeicherte
+          Mail (.msg, .eml) oder Excel-Datei. Fehlt eines, reichen Sie es später nach: Anfrage öffnen und
+          die Datei unter „Anhänge" ablegen. Das geht in jedem Status, auch bei der Sammelanfrage.</div>
       </section>
 
       <section class="schulung-sec" id="sch-3">
@@ -4400,7 +4415,7 @@ function initSchulung() {
       <section class="schulung-sec" id="sch-5">
         <h2>5 · Einkauf-Daten eintragen</h2>
         <p>Bei Status <b>Freigegeben</b> öffnen Sie über „📦 Einkauf-Daten" das Formular für
-           Bestellnummer, Lieferdatum, tatsächlichen Preis und Angebots-PDFs.</p>
+           Bestellnummer, Lieferdatum, tatsächlichen Preis und Angebote.</p>
         <div class="schulung-tip">⚠️ Ist eine <b>Bestellnummer (BE)</b> bereits bei einer anderen
           Anfrage hinterlegt, warnt das Tool sofort – so vermeiden Sie Doppelbestellungen.</div>
       </section>
@@ -5832,7 +5847,7 @@ function renderPanel(item, editMode = false) {
   const menge = parseFloat(gv('Menge')) || 1;
   const lbRaw     = gv('LeadBuyerAbschluss');
   const leadBuyer = lbRaw === true || /^(true|ja|yes|1)$/i.test(String(lbRaw || ''));
-  const gesamtHint = !editMode && preis > 0 ? genehmigungsweg(preis, leadBuyer) : '';
+  const gesamtHint = !editMode && preis > 0 ? genehmigungsweg(preis, leadBuyer, gv('Beschaffungslogik')) : '';
 
   const orderNr  = gv('Bestellnummer');
   const lieferd  = gv('Lieferdatum');
@@ -6531,7 +6546,14 @@ function attachmentLink(f) {
 // Detailansicht, in beiden Assistenten und im Einkauf-Dialog. Ob jemand schreiben
 // darf, entscheidet SharePoint, wie bei Kommentaren. Gleichnamige Dateien bekommen
 // eine Nummer, sonst lehnt SharePoint den zweiten Upload ab.
-const ANHANG_PDF_RE = /[.]pdf$/i;
+// Erlaubt sind PDF, gespeicherte Mails (Outlook .msg, sonst .eml) und Excel.
+const ANHANG_ENDUNGEN = ['.pdf', '.msg', '.eml', '.xlsx', '.xls'];
+const ANHANG_ACCEPT   = ANHANG_ENDUNGEN.join(',');
+const ANHANG_ERLAUBT_TEXT = 'Erlaubt sind PDF, Mails (.msg, .eml) und Excel (.xlsx, .xls).';
+function anhangErlaubt(name) {
+  const n = String(name || '').toLowerCase();
+  return ANHANG_ENDUNGEN.some(e => n.endsWith(e));
+}
 
 function anhangListUrl(itemId) {
   return `${SP_BASE}/_api/web/lists/getByTitle('${SP_LIST}')/items(${itemId})/AttachmentFiles`;
@@ -6637,10 +6659,10 @@ function anhangFehlerText(fehler) {
 // Ablage zum Nachreichen in Panel und Detailansicht
 function anhangUploadHtml() {
   return `<div class="anh-upload">
-    <div class="drop-zone anh-drop" role="button" tabindex="0" title="Angebote als PDF anhängen">
-      <span class="drop-zone-text">📎 Angebote anhängen<br><small>PDF hier ablegen oder klicken</small></span>
+    <div class="drop-zone anh-drop" role="button" tabindex="0" title="Angebote anhängen: PDF, Mail oder Excel">
+      <span class="drop-zone-text">📎 Angebote anhängen<br><small>PDF, Mail oder Excel hier ablegen oder klicken</small></span>
     </div>
-    <input type="file" class="anh-input" accept=".pdf,.PDF" multiple hidden>
+    <input type="file" class="anh-input" accept="${ANHANG_ACCEPT}" multiple hidden>
   </div>`;
 }
 
@@ -6654,14 +6676,15 @@ function anhangUploadBinden(root, itemId, fertig) {
   const ruhe = text.innerHTML;
   const hochladen = async liste => {
     if (zone.classList.contains('busy')) return;
-    const pdfs = liste.filter(f => ANHANG_PDF_RE.test(f.name));
-    if (pdfs.length < liste.length) toast('Nur PDF-Dateien sind erlaubt.', 'error');
-    if (!pdfs.length) return;
+    const dateien = liste.filter(f => anhangErlaubt(f.name));
+    const abgelehnt = liste.filter(f => !anhangErlaubt(f.name)).map(f => f.name);
+    if (abgelehnt.length) toast(`Nicht erlaubt: ${abgelehnt.join(', ')}. ${ANHANG_ERLAUBT_TEXT}`, 'error');
+    if (!dateien.length) return;
     zone.classList.add('busy');
-    text.textContent = pdfs.length === 1 ? 'Wird hochgeladen …' : `${pdfs.length} Dateien werden hochgeladen …`;
+    text.textContent = dateien.length === 1 ? 'Wird hochgeladen …' : `${dateien.length} Dateien werden hochgeladen …`;
     let erg;
-    try { erg = await anhaengeHochladen(itemId, pdfs); }
-    catch (e) { erg = { ok: 0, fehler: pdfs.map(f => ({ name: f.name, status: 0 })) }; }
+    try { erg = await anhaengeHochladen(itemId, dateien); }
+    catch (e) { erg = { ok: 0, fehler: dateien.map(f => ({ name: f.name, status: 0 })) }; }
     zone.classList.remove('busy');
     text.innerHTML = ruhe;
     if (erg.fehler.length) toast(anhangFehlerText(erg.fehler), 'error');
