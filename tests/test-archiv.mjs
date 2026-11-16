@@ -56,6 +56,17 @@ pruefe(A.archivTrennerVor([alt, neu]) === -1 && A.archivTrennerVor([neu, alt, ne
 pruefe(A.ARCHIV_TRENNER.includes('Produktivstart 16.11.2026') && A.ARCHIV_TRENNER.includes('bearbeitbar'), 'Linie nennt den Produktivstart und dass Archiv bearbeitbar bleibt');
 pruefe(A.archivMarke('ic-tag').includes('class="ic-tag marke-archiv"') && A.archivMarke('ic-tag').includes('Archiv'), 'Marke Archiv für Karten und Kopfzeilen');
 
+console.log('Status Eingereicht');
+const zeileSA = app.split(String.fromCharCode(10)).find(l => l.startsWith('const statusAnzeige'));
+pruefe(!!zeileSA, 'Hilfsfunktion statusAnzeige vorhanden');
+const kSA = vm.createContext({ getStatusVal: item => item.status || '' });
+vm.runInContext(String(zeileSA).replace('const statusAnzeige', 'var statusAnzeige'), kSA);
+pruefe(kSA.statusAnzeige({ status: '' }) === 'Eingereicht' && kSA.statusAnzeige({ status: 'Eingereicht' }) === 'Eingereicht'
+  && kSA.statusAnzeige({ status: 'Bestellt' }) === 'Bestellt', 'leerer und ausdrücklicher Status Eingereicht ergeben denselben Chip');
+pruefe(!/[(]getStatusVal[(][a-z][)] *[|][|] *''[)] *===/.test(app), 'Statusfilter vergleichen nicht mehr mit leerem Status');
+pruefe((app.match(/statusAnzeige[(]i[)] === (dashStatusFilter|mineStatusFilter|status)/g) || []).length === 5, 'Dashboard, Meine Anfragen und Alle Anfragen filtern über statusAnzeige');
+pruefe(app.includes('allItems.map(statusAnzeige)'), 'Statusauswahl unter Alle Anfragen enthält Eingereicht');
+
 console.log('Oberfläche');
 const html = lies('index.html'), css = lies('style.css'), prozess = lies('prozess.js');
 pruefe(!/testumgebung|env-test|boot-env|nav-beta/i.test(html), 'index.html ohne Testumgebung und Beta-Marke');

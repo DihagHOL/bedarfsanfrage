@@ -234,6 +234,10 @@ let _panelRenderedLm = null; // lastModifiedDateTime des zuletzt gerenderten off
 let panelEditMode = false; // true, solange ein Panel im Bearbeiten-Modus offen ist (pausiert Auto-Refresh)
 // SP column may be misspelled "Stauts" in some tenants → always try both
 const getStatusVal = item => getField(item,'Status') || getField(item,'Stauts') || '';
+// Status für Chips, Filter und Sortierung: Ein leerer Status heißt in der App „Eingereicht".
+// So landen leere und ausdrücklich eingereichte Anfragen im selben Chip, und der Chip
+// filtert wirklich (ein leerer Schlüssel war gleichbedeutend mit „Alle").
+const statusAnzeige = item => getStatusVal(item) || 'Eingereicht';
 
 // ── USER SETTINGS ────────────────────────────────────────────────────────────
 const SETTINGS_KEY = 'bedarfsanfrage_settings_v1';
@@ -1292,14 +1296,14 @@ function renderStatusChips() {
   const counts = {};
   let total = 0;
   for (const item of baseItems) {
-    const s = getStatusVal(item) || '';
+    const s = statusAnzeige(item);
     counts[s] = (counts[s] || 0) + 1;
     total++;
   }
 
   // Volume from filtered items only
   const filteredForVol = dashStatusFilter
-    ? baseItems.filter(i => (getStatusVal(i) || '') === dashStatusFilter)
+    ? baseItems.filter(i => statusAnzeige(i) === dashStatusFilter)
     : baseItems;
   const volume = filteredForVol.reduce((sum, i) =>
     sum + (parseFloat(getField(i, resolvedFields['GeschaetzterPreis'] || 'GeschaetzterPreis')) || 0), 0);
@@ -1413,7 +1417,7 @@ function filterDashboard(soft) {
   if (search) items = items.filter(i =>
     (getField(i,'Title')||'').toLowerCase().includes(search) || String(i.id||'').includes(search)
   );
-  if (dashStatusFilter !== '') items = items.filter(i => (getStatusVal(i)||'') === dashStatusFilter);
+  if (dashStatusFilter !== '') items = items.filter(i => statusAnzeige(i) === dashStatusFilter);
   if (overdueOnly) items = items.filter(isOverdue);
   if (dashWGFilter) items = items.filter(i => (getField(i, resolvedFields['Warengruppe']||'Warengruppe')||'') === dashWGFilter);
   if (dashMAFilter) items = items.filter(i => {
@@ -1430,7 +1434,7 @@ function filterDashboard(soft) {
     case 'price-asc':
       items.sort((a,b) => (parseFloat(getField(a,priceKey))||0) - (parseFloat(getField(b,priceKey))||0)); break;
     case 'status':
-      items.sort((a,b) => (getStatusVal(a)||'').localeCompare(getStatusVal(b)||'')); break;
+      items.sort((a,b) => statusAnzeige(a).localeCompare(statusAnzeige(b))); break;
     default: // date-desc
       items.sort((a,b) => new Date(b.createdDateTime) - new Date(a.createdDateTime));
   }
@@ -1590,7 +1594,7 @@ function renderList(type, soft) {
   }
   const sel = $id(`filter-${type}-status`);
   if (sel && sel.options.length <= 1) {
-    const statuses = [...new Set(allItems.map(i => getStatusVal(i)).filter(Boolean))];
+    const statuses = [...new Set(allItems.map(statusAnzeige))];
     statuses.forEach(s => sel.add(new Option(s, s)));
   }
   filterView(type, soft);
@@ -1602,11 +1606,11 @@ function renderStatusChipsMine() {
   const mine = myItems();
   const counts = {};
   for (const item of mine) {
-    const s = getStatusVal(item) || '';
+    const s = statusAnzeige(item);
     counts[s] = (counts[s] || 0) + 1;
   }
   const filteredVol = (mineStatusFilter
-    ? mine.filter(i => (getStatusVal(i)||'') === mineStatusFilter)
+    ? mine.filter(i => statusAnzeige(i) === mineStatusFilter)
     : mine
   ).reduce((sum, i) => sum + (parseFloat(getField(i, resolvedFields['GeschaetzterPreis'] || 'GeschaetzterPreis')) || 0), 0);
 
@@ -1678,10 +1682,10 @@ function filterView(type, soft) {
   );
 
   if (type === 'mine' && mineStatusFilter)
-    items = items.filter(i => (getStatusVal(i)||'') === mineStatusFilter);
+    items = items.filter(i => statusAnzeige(i) === mineStatusFilter);
   else if (type !== 'mine') {
     const status = $id(`filter-${type}-status`)?.value || '';
-    if (status) items = items.filter(i => (getStatusVal(i)||'') === status);
+    if (status) items = items.filter(i => statusAnzeige(i) === status);
   }
 
   // 48-Std-Filter: nur seit über 48 Std offene Anfragen
@@ -1692,7 +1696,7 @@ function filterView(type, soft) {
       case 'date-asc':   items.sort((a,b) => new Date(a.createdDateTime)-new Date(b.createdDateTime)); break;
       case 'price-desc': items.sort((a,b) => (parseFloat(getField(b,priceKey))||0)-(parseFloat(getField(a,priceKey))||0)); break;
       case 'price-asc':  items.sort((a,b) => (parseFloat(getField(a,priceKey))||0)-(parseFloat(getField(b,priceKey))||0)); break;
-      case 'status':     items.sort((a,b) => (getStatusVal(a)||'').localeCompare(getStatusVal(b)||'')); break;
+      case 'status':     items.sort((a,b) => statusAnzeige(a).localeCompare(statusAnzeige(b))); break;
       default:           items.sort((a,b) => new Date(b.createdDateTime)-new Date(a.createdDateTime));
     }
   }
