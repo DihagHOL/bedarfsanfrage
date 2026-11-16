@@ -1,0 +1,82 @@
+# Prüfung und Veröffentlichung.
+#
+# Prüfung: Syntax aller Skripte, die Tests und die Verdrahtung der Seite
+# (tests/seite.test.mjs). Läuft bei jedem Push und bei Pull Requests.
+#
+# Veröffentlichung: nur für master und nur nach grüner Prüfung. Ein roter Lauf
+# hält sie auf, die Seite bleibt dann auf dem letzten guten Stand. Hochgeladen
+# werden allein die Dateien der Seite. Cron-Skript, Modellgenerator und Tests bleiben im Repository.
+# Das Repository ändert der Lauf nicht.
+name: Prüfung
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch: {}   # manueller Lauf über den Actions-Tab, veröffentlicht master neu
+
+# Nur lesen: Der Lauf braucht keine Schreibrechte am Repository.
+permissions:
+  contents: read
+
+jobs:
+  pruefung:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4.4.0, auf den Commit festgelegt
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020   # v4.4.0
+        with:
+          node-version: "20"
+
+      - name: Syntax aller JavaScript-Dateien
+        run: |
+          fehler=0
+          for f in app.js prozess.js sammelimport.js scripts/*.mjs tests/*.mjs; do
+            node --check "$f" || fehler=1
+          done
+          exit $fehler
+
+      - name: Archiv und Produktivstart
+        run: node tests/test-archiv.mjs
+
+      - name: Prozessmodelle
+        run: node tests/test-prozess.mjs
+
+      - name: Sammelimport
+        run: node tests/test-sammelimport.mjs
+
+      - name: Verdrahtung der Seite (Schrift, Veröffentlichung)
+        run: node tests/seite.test.mjs
+
+  veroeffentlichen:
+    needs: pruefung
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    # Nur dieser Job darf veröffentlichen, und nur das.
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    # Zwei Pushes kurz nacheinander: nacheinander veröffentlichen, keinen Lauf abbrechen.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4.4.0, auf den Commit festgelegt
+
+      # Nur was die Seite braucht. Alles andere bleibt im Repository.
+      - name: Dateien der Seite zusammenstellen
+        run: |
+          mkdir _site
+          cp -r index.html CNAME app.js prozess.js sammelimport.js style.css assets js docs _site/
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9   # v5.0.0
+        with:
+          path: _site
+
+      - name: Veröffentlichen
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346   # v5.0.1
