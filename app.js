@@ -110,11 +110,27 @@ function loadLookupCache() {
   } catch(e) { console.warn('loadLookupCache KOSTENST:', e); }
 }
 
+// Alle Listen der Site, einmal gelesen und eine Minute gemerkt. Bis zum 16.11.2026 suchten vier
+// Stellen (Zugriffssteuerung, Wiedervorlagen, Artikel, Kostenstellen) je mit einem eigenen Abruf.
+// Gleichzeitige Aufrufer teilen den laufenden Abruf, ein Fehler wird nicht gemerkt.
+let _listenLauf = null, _listenAm = 0;
+function _alleListen() {
+  if (!_listenLauf || Date.now() - _listenAm > 60000) {
+    _listenAm = Date.now();
+    const lauf = gGet(`/sites/${siteId}/lists?$select=id,displayName&$top=500`).then(r => r.value || []);
+    lauf.catch(() => { if (_listenLauf === lauf) _listenLauf = null; });
+    _listenLauf = lauf;
+  }
+  return _listenLauf;
+}
+// Nach dem Anlegen einer Liste: Die nächste Suche muss sie sehen.
+function _listenVergessen() { _listenLauf = null; }
+
 // Liste per Anzeigename finden (case-insensitiv, wirft nicht).
 async function _findListByName(name) {
   try {
-    const all = await gGet(`/sites/${siteId}/lists?$select=id,displayName&$top=500`);
-    const hit = (all.value || []).find(l => (l.displayName || '').trim().toLowerCase() === name.toLowerCase());
+    const all = await _alleListen();
+    const hit = all.find(l => (l.displayName || '').trim().toLowerCase() === name.toLowerCase());
     return hit?.id || null;
   } catch { return null; }
 }
@@ -132,6 +148,7 @@ async function _createList(name, columns) {
     console.info(`[Stammdaten] Liste "${name}" nicht automatisch anlegbar (HTTP ${r.status}).`);
     return null;
   } catch { return null; }
+  finally { _listenVergessen(); }
 }
 
 // Stammdaten aus SharePoint laden; Listen bei Bedarf anlegen. Wirft nie (Fallback: Cache).
@@ -420,12 +437,14 @@ async function doLogin() {
 async function bootDone() {
   $id('boot-sub').textContent = 'Daten werden geladen…';
   try {
+    // Echte Identitäten (UPN/Mail/Aliase) laden – Basis für die Zugriffsprüfung.
+    // /me braucht nichts von SharePoint und läuft deshalb neben allem anderen.
+    const identLauf = loadMyIdentities();
     await discoverSP();
-    await loadItems(false);
-    // Echte Identitäten (UPN/Mail/Aliase) laden – Basis für die Zugriffsprüfung
-    await loadMyIdentities();
-    // Zentrale Zugriffssteuerung laden (bestimmt Sichtbarkeit von Dashboard/Reports/Importer)
-    await loadAccessConfig();
+    // Anfragen, Zugriffssteuerung (bestimmt Sichtbarkeit von Dashboard/Reports/Importer),
+    // Identitäten und Nutzerliste hängen nicht voneinander ab: gleichzeitig statt nacheinander.
+    // Bis zum 16.11.2026 lief der Start als Kette von elf Abrufen, gut 3,5 Sekunden.
+    await Promise.all([loadItems(false), identLauf, loadAccessConfig(), _spUserLauf]);
     // Wiedervorlagen aus SharePoint laden (nicht blockierend für den Start)
     initFavorites().catch(() => {});
     // Artikel-/Kostenstellen-Stammdaten aus SharePoint nachladen (nicht blockierend;
@@ -606,6 +625,11 @@ async function discoverSP() {
   const site = await gGet(`/sites/${SP_SITE}`);
   siteId = site.id;
 
+  // Zwei Abrufe brauchen nur die Site und laufen ab hier neben Liste und Spalten: die Nutzerliste
+  // (gut eine Sekunde) und das Verzeichnis der Listen. bootDone wartet auf die Nutzerliste.
+  _spUserLauf = _ladeSpUserMap();
+  _alleListen().catch(() => {});
+
   // 2. List ID
   const list = await gGet(`/sites/${siteId}/lists/${encodeURIComponent(SP_LIST)}`);
   listId = list.id;
@@ -674,9 +698,13 @@ async function discoverSP() {
     }
   }
 
-  // 5. Build SP user map (id → display name) for Person-column LookupId resolution.
-  //    Person columns via Graph API return only a numeric LookupId; we need this map
-  //    to show the approver's name instead of a raw ID.
+}
+
+// 5. Build SP user map (id → display name) for Person-column LookupId resolution.
+//    Person columns via Graph API return only a numeric LookupId; we need this map
+//    to show the approver's name instead of a raw ID. Wirft nie.
+let _spUserLauf = null;
+async function _ladeSpUserMap() {
   try {
     const usersRes = await gGet(
       `/sites/${siteId}/lists('User Information List')/items?$expand=fields($select=Title,EMail,Name)&$top=500`
@@ -1009,8 +1037,8 @@ function _decodeSpText(s) {
 async function _findConfigList() {
   if (accessListId) return accessListId;
   try {
-    const all = await gGet(`/sites/${siteId}/lists?$select=id,displayName&$top=500`);
-    accessListId = (all.value || []).find(l =>
+    const all = await _alleListen();
+    accessListId = all.find(l =>
       (l.displayName || '').trim().toLowerCase() === ACCESS_LIST_NAME.toLowerCase())?.id || null;
   } catch { accessListId = null; }
   return accessListId;
@@ -2710,8 +2738,8 @@ function _favOwner() { return (account?.username || '').trim().toLowerCase(); }
 // Sucht die Favoriten-Liste (case-insensitiv, ohne Fehler zu werfen)
 async function _findFavList() {
   try {
-    const all = await gGet(`/sites/${siteId}/lists?$select=id,displayName&$top=500`);
-    const hit = (all.value || []).find(l =>
+    const all = await _alleListen();
+    const hit = all.find(l =>
       (l.displayName || '').trim().toLowerCase() === FAV_LIST_NAME.toLowerCase());
     return hit?.id || null;
   } catch { return null; }
@@ -2740,6 +2768,7 @@ async function _createFavList() {
     console.info(`[Favoriten] Liste konnte nicht automatisch angelegt werden (HTTP ${r.status}).`);
     return null;
   } catch { return null; }
+  finally { _listenVergessen(); }
 }
 
 // Beim Start aufrufen (nach discoverSP). Niemals werfen – Fallback ist localStorage.

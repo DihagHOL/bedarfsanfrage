@@ -36,6 +36,9 @@ jobs:
           done
           exit $fehler
 
+      - name: Start der App (gleichzeitige Abrufe, Verzeichnis der Listen)
+        run: node tests/test-start.mjs
+
       - name: Archiv und Produktivstart
         run: node tests/test-archiv.mjs
 
