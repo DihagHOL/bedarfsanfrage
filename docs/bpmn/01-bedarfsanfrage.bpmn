@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:bioc="http://bpmn.io/schema/bpmn/biocolor/1.0" xmlns:color="http://www.omg.org/spec/BPMN/non-normative/color/1.0" id="Definitions_haupt" targetNamespace="https://bedarfsanfrage.dihag-extern.com/bpmn" exporter="DIHAG BPMN-Generator (scripts/bpmn/generate-bpmn.js)" exporterVersion="2.0">
+  <bpmn:collaboration id="Collab_haupt">
+    <bpmn:participant id="P_Banf" name="DIHAG SHB · Bedarfsanfrage" processRef="Process_Bedarfsanfrage" />
+    <bpmn:participant id="P_Lief" name="Lieferant" />
+    <bpmn:messageFlow id="Msg_C_best_P_Lief" name="Bestellung" sourceRef="C_best" targetRef="P_Lief" />
+  </bpmn:collaboration>
+  <bpmn:process id="Process_Bedarfsanfrage" name="Bedarfsanfrage" isExecutable="false">
+    <bpmn:documentation>Ablauf einer Bedarfsanfrage bei SHB von der Erfassung bis zur Bestellung. Der Antragsteller erfasst die Anfrage in der App, gespeichert wird sie in der SharePoint-Liste Bedarfsanfrage auf gruppe_shb. Solange der Einkauf nicht entschieden hat, kann er sie zurückziehen. Öffnet der zuständige Einkauf die Anfrage, setzt die App den Status auf In Prüfung (Einkauf). Der Einkauf genehmigt oder lehnt in der App ab. Nach der Genehmigung läuft der Freigabe-Flow in Power Automate. Ist die Anfrage freigegeben, bestellt der Einkauf im ERP und trägt Bestellnummer, Liefertermin und Preis ein. Dann steht sie auf Bestellt.
+Anwender-Ansicht: https://bedarfsanfrage.dihag-extern.com/?ansicht=prozess&amp;modell=haupt
+Nebenprozesse: Bedarfsanfrage-AutoEntwurf
+[[rms:neben=01NH6NP5DFYDNIEQOLAJHZNZT3627RDOSI]]
+Im Einklang mit den Richtlinien: Konzernfachregelung Prozessmanagement; ISMS-Richtlinie Aufbewahrungsfristen und -pflichten; ISMS-Richtlinie Sichere Softwareentwicklung
+[[rms:policies=120,119,111]]</bpmn:documentation>
+    <bpmn:laneSet id="LaneSet_P_Banf">
+      <bpmn:lane id="LA" name="Antragsteller (Fachbereich)"><bpmn:flowNodeRef>A_start</bpmn:flowNodeRef><bpmn:flowNodeRef>A_erf</bpmn:flowNodeRef><bpmn:flowNodeRef>A_gw</bpmn:flowNodeRef><bpmn:flowNodeRef>A_zur</bpmn:flowNodeRef><bpmn:flowNodeRef>A_endZur</bpmn:flowNodeRef></bpmn:lane>
+      <bpmn:lane id="LB" name="Bedarfsanfrage-App"><bpmn:flowNodeRef>B_adv</bpmn:flowNodeRef><bpmn:flowNodeRef>B_best</bpmn:flowNodeRef><bpmn:flowNodeRef>B_end</bpmn:flowNodeRef></bpmn:lane>
+      <bpmn:lane id="LC" name="Einkauf"><bpmn:flowNodeRef>C_open</bpmn:flowNodeRef><bpmn:flowNodeRef>C_pruef</bpmn:flowNodeRef><bpmn:flowNodeRef>C_gw</bpmn:flowNodeRef><bpmn:flowNodeRef>C_endAb</bpmn:flowNodeRef><bpmn:flowNodeRef>C_best</bpmn:flowNodeRef><bpmn:flowNodeRef>C_daten</bpmn:flowNodeRef></bpmn:lane>
+      <bpmn:lane id="LD" name="Power Automate"><bpmn:flowNodeRef>D_frei</bpmn:flowNodeRef><bpmn:flowNodeRef>D_gw</bpmn:flowNodeRef><bpmn:flowNodeRef>D_endAb</bpmn:flowNodeRef></bpmn:lane>
+    </bpmn:laneSet>
+      <bpmn:startEvent id="A_start" name="Bedarf entsteht"><bpmn:outgoing>Flow_A_start_A_erf</bpmn:outgoing></bpmn:startEvent>
+      <bpmn:callActivity id="A_erf" name="Anfrage erfassen und einreichen" calledElement="Process_Bedarfsanfrage_Erfassen"><bpmn:documentation>Unterprozess: Bedarfsanfrage-Erfassen
+[[rms:modell=01NH6NP5HUHMSE6LKN6FBZHNXAX5S2VXPO]]</bpmn:documentation><bpmn:incoming>Flow_A_start_A_erf</bpmn:incoming><bpmn:outgoing>Flow_A_erf_A_gw</bpmn:outgoing></bpmn:callActivity>
+      <bpmn:exclusiveGateway id="A_gw" name="Anfrage zurückziehen?"><bpmn:incoming>Flow_A_erf_A_gw</bpmn:incoming><bpmn:outgoing>Flow_A_gw_A_zur</bpmn:outgoing><bpmn:outgoing>Flow_A_gw_C_open</bpmn:outgoing></bpmn:exclusiveGateway>
+      <bpmn:userTask id="A_zur" name="Anfrage in „Meine Anfragen&quot; zurückziehen"><bpmn:incoming>Flow_A_gw_A_zur</bpmn:incoming><bpmn:outgoing>Flow_A_zur_A_endZur</bpmn:outgoing></bpmn:userTask>
+      <bpmn:endEvent id="A_endZur" name="Anfrage zurückgezogen"><bpmn:incoming>Flow_A_zur_A_endZur</bpmn:incoming></bpmn:endEvent>
+      <bpmn:userTask id="C_open" name="Anfrage im Dashboard oder unter Gemeinsame Anfragen öffnen"><bpmn:incoming>Flow_A_gw_C_open</bpmn:incoming><bpmn:outgoing>Flow_C_open_B_adv</bpmn:outgoing></bpmn:userTask>
+      <bpmn:serviceTask id="B_adv" name="Status auf In Prüfung (Einkauf) setzen"><bpmn:incoming>Flow_C_open_B_adv</bpmn:incoming><bpmn:outgoing>Flow_B_adv_C_pruef</bpmn:outgoing></bpmn:serviceTask>
+      <bpmn:callActivity id="C_pruef" name="Anfrage prüfen und entscheiden" calledElement="Process_Bedarfsanfrage_Einkauf"><bpmn:documentation>Unterprozess: Bedarfsanfrage-Einkaufsprüfung
+[[rms:modell=01NH6NP5CT3ID7HZMK4JBYSAHRU34JWGMB]]</bpmn:documentation><bpmn:incoming>Flow_B_adv_C_pruef</bpmn:incoming><bpmn:outgoing>Flow_C_pruef_C_gw</bpmn:outgoing></bpmn:callActivity>
+      <bpmn:exclusiveGateway id="C_gw" name="Vom Einkauf genehmigt?"><bpmn:incoming>Flow_C_pruef_C_gw</bpmn:incoming><bpmn:outgoing>Flow_C_gw_D_frei</bpmn:outgoing><bpmn:outgoing>Flow_C_gw_C_endAb</bpmn:outgoing></bpmn:exclusiveGateway>
+      <bpmn:endEvent id="C_endAb" name="Vom Einkauf abgelehnt"><bpmn:incoming>Flow_C_gw_C_endAb</bpmn:incoming></bpmn:endEvent>
+      <bpmn:callActivity id="D_frei" name="Freigabelauf durchlaufen" calledElement="Process_Bedarfsanfrage_Freigabelauf"><bpmn:documentation>Unterprozess: Bedarfsanfrage-Freigabelauf
+[[rms:modell=01NH6NP5AOD65CF4LUVRCLFWHE6BBQWOI4]]</bpmn:documentation><bpmn:incoming>Flow_C_gw_D_frei</bpmn:incoming><bpmn:outgoing>Flow_D_frei_D_gw</bpmn:outgoing></bpmn:callActivity>
+      <bpmn:exclusiveGateway id="D_gw" name="Freigegeben?"><bpmn:incoming>Flow_D_frei_D_gw</bpmn:incoming><bpmn:outgoing>Flow_D_gw_C_best</bpmn:outgoing><bpmn:outgoing>Flow_D_gw_D_endAb</bpmn:outgoing></bpmn:exclusiveGateway>
+      <bpmn:endEvent id="D_endAb" name="In der Freigabe abgelehnt"><bpmn:incoming>Flow_D_gw_D_endAb</bpmn:incoming></bpmn:endEvent>
+      <bpmn:userTask id="C_best" name="Bestellung im ERP auslösen"><bpmn:incoming>Flow_D_gw_C_best</bpmn:incoming><bpmn:outgoing>Flow_C_best_C_daten</bpmn:outgoing></bpmn:userTask>
+      <bpmn:userTask id="C_daten" name="Bestellnummer, Liefertermin und Preis eintragen"><bpmn:incoming>Flow_C_best_C_daten</bpmn:incoming><bpmn:outgoing>Flow_C_daten_B_best</bpmn:outgoing></bpmn:userTask>
+      <bpmn:serviceTask id="B_best" name="Bestellnummer prüfen und Status Bestellt setzen"><bpmn:incoming>Flow_C_daten_B_best</bpmn:incoming><bpmn:outgoing>Flow_B_best_B_end</bpmn:outgoing></bpmn:serviceTask>
+      <bpmn:endEvent id="B_end" name="Bedarf bestellt"><bpmn:incoming>Flow_B_best_B_end</bpmn:incoming></bpmn:endEvent>
+      <bpmn:sequenceFlow id="Flow_A_start_A_erf" sourceRef="A_start" targetRef="A_erf" />
+      <bpmn:sequenceFlow id="Flow_A_erf_A_gw" sourceRef="A_erf" targetRef="A_gw" />
+      <bpmn:sequenceFlow id="Flow_A_gw_A_zur" sourceRef="A_gw" targetRef="A_zur" name="ja" />
+      <bpmn:sequenceFlow id="Flow_A_gw_C_open" sourceRef="A_gw" targetRef="C_open" name="nein" />
+      <bpmn:sequenceFlow id="Flow_A_zur_A_endZur" sourceRef="A_zur" targetRef="A_endZur" />
+      <bpmn:sequenceFlow id="Flow_C_open_B_adv" sourceRef="C_open" targetRef="B_adv" />
+      <bpmn:sequenceFlow id="Flow_B_adv_C_pruef" sourceRef="B_adv" targetRef="C_pruef" />
+      <bpmn:sequenceFlow id="Flow_C_pruef_C_gw" sourceRef="C_pruef" targetRef="C_gw" />
+      <bpmn:sequenceFlow id="Flow_C_gw_D_frei" sourceRef="C_gw" targetRef="D_frei" name="ja" />
+      <bpmn:sequenceFlow id="Flow_C_gw_C_endAb" sourceRef="C_gw" targetRef="C_endAb" name="nein" />
+      <bpmn:sequenceFlow id="Flow_D_frei_D_gw" sourceRef="D_frei" targetRef="D_gw" />
+      <bpmn:sequenceFlow id="Flow_D_gw_C_best" sourceRef="D_gw" targetRef="C_best" name="ja" />
+      <bpmn:sequenceFlow id="Flow_D_gw_D_endAb" sourceRef="D_gw" targetRef="D_endAb" name="nein" />
+      <bpmn:sequenceFlow id="Flow_C_best_C_daten" sourceRef="C_best" targetRef="C_daten" />
+      <bpmn:sequenceFlow id="Flow_C_daten_B_best" sourceRef="C_daten" targetRef="B_best" />
+      <bpmn:sequenceFlow id="Flow_B_best_B_end" sourceRef="B_best" targetRef="B_end" />
+      <bpmn:textAnnotation id="An_zur"><bpmn:text>Geht nur, solange der Einkauf nicht entschieden hat (Eingereicht oder In Prüfung Einkauf). Die App setzt den Status Zurückgezogen.</bpmn:text></bpmn:textAnnotation>
+      <bpmn:association id="Assoc_An_zur" associationDirection="None" sourceRef="A_zur" targetRef="An_zur" />
+      <bpmn:textAnnotation id="An_open"><bpmn:text>Keine Mail bei neuen Anfragen. Was über 48 Std offen ist, markiert die App rot.</bpmn:text></bpmn:textAnnotation>
+      <bpmn:association id="Assoc_An_open" associationDirection="None" sourceRef="C_open" targetRef="An_open" />
+      <bpmn:textAnnotation id="An_adv"><bpmn:text>Nur beim zuständigen Einkauf. Ein Auto-Entwurf wandert genauso in die Prüfung.</bpmn:text></bpmn:textAnnotation>
+      <bpmn:association id="Assoc_An_adv" associationDirection="None" sourceRef="B_adv" targetRef="An_adv" />
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_haupt">
+    <bpmndi:BPMNPlane id="Plane_haupt" bpmnElement="Collab_haupt">
+      <bpmndi:BPMNShape id="P_Banf_di" bpmnElement="P_Banf" isHorizontal="true" bioc:stroke="#1A2644" bioc:fill="#FFFFFF" color:background-color="#FFFFFF" color:border-color="#1A2644"><dc:Bounds x="100" y="60" width="2320" height="1040" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="LA_di" bpmnElement="LA" isHorizontal="true" bioc:stroke="#C2410C" bioc:fill="#FFF8F1" color:background-color="#FFF8F1" color:border-color="#C2410C"><dc:Bounds x="130" y="60" width="2290" height="260" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="LB_di" bpmnElement="LB" isHorizontal="true" bioc:stroke="#1A2644" bioc:fill="#F3F6FB" color:background-color="#F3F6FB" color:border-color="#1A2644"><dc:Bounds x="130" y="320" width="2290" height="260" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="LC_di" bpmnElement="LC" isHorizontal="true" bioc:stroke="#C2410C" bioc:fill="#FFF8F1" color:background-color="#FFF8F1" color:border-color="#C2410C"><dc:Bounds x="130" y="580" width="2290" height="260" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="LD_di" bpmnElement="LD" isHorizontal="true" bioc:stroke="#17509E" bioc:fill="#F3F8FE" color:background-color="#F3F8FE" color:border-color="#17509E"><dc:Bounds x="130" y="840" width="2290" height="260" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="P_Lief_di" bpmnElement="P_Lief" isHorizontal="true" bioc:stroke="#5B6472" bioc:fill="#F6F7F9" color:background-color="#F6F7F9" color:border-color="#5B6472"><dc:Bounds x="100" y="1170" width="2320" height="70" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_start_di" bpmnElement="A_start" bioc:stroke="#1E7B3A" bioc:fill="#DDF3E4" color:background-color="#DDF3E4" color:border-color="#1E7B3A"><dc:Bounds x="247" y="112" width="36" height="36" /><bpmndi:BPMNLabel><dc:Bounds x="205" y="153" width="120" height="15" /></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_erf_di" bpmnElement="A_erf" bioc:stroke="#C2410C" bioc:fill="#FFE3C8" color:background-color="#FFE3C8" color:border-color="#C2410C"><dc:Bounds x="369" y="88" width="132" height="84" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_gw_di" bpmnElement="A_gw" isMarkerVisible="true" bioc:stroke="#8A6100" bioc:fill="#FFF8DB" color:background-color="#FFF8DB" color:border-color="#8A6100"><dc:Bounds x="580" y="105" width="50" height="50" /><bpmndi:BPMNLabel><dc:Bounds x="505" y="73" width="96" height="28" /></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_zur_di" bpmnElement="A_zur" bioc:stroke="#C2410C" bioc:fill="#FFE3C8" color:background-color="#FFE3C8" color:border-color="#C2410C"><dc:Bounds x="709" y="88" width="132" height="84" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_endZur_di" bpmnElement="A_endZur" bioc:stroke="#8A8F98" bioc:fill="#F1F1F3" color:background-color="#F1F1F3" color:border-color="#8A8F98"><dc:Bounds x="927" y="112" width="36" height="36" /><bpmndi:BPMNLabel><dc:Bounds x="885" y="153" width="120" height="28" /></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="C_open_di" bpmnElement="C_open" bioc:stroke="#C2410C" bioc:fill="#FFE3C8" color:background-color="#FFE3C8" color:border-color="#C2410C"><dc:Bounds x="709" y="608" width="132" height="84" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="B_adv_di" bpmnElement="B_adv" bioc:stroke="#1A2644" bioc:fill="#DCE5F2" color:background-color="#DCE5F2" color:border-color="#1A2644"><dc:Bounds x="879" y="348" width="132" height="84" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="C_pruef_di" bpmnElement="C_pruef" bioc:stroke="#C2410C" bioc:fill="#FFE3C8" color:background-color="#FFE3C8" color:border-color="#C2410C"><dc:Bounds x="1049" y="608" width="132" height="84" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="C_gw_di" bpmnElement="C_gw" isMarkerVisible="true" bioc:stroke="#8A6100" bioc:fill="#FFF8DB" color:background-color="#FFF8DB" color:border-color="#8A6100"><dc:Bounds x="1260" y="625" width="50" height="50" /><bpmndi:BPMNLabel><dc:Bounds x="1185" y="593" width="96" height="28" /></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="C_endAb_di" bpmnElement="C_endAb" bioc:stroke="#B42318" bioc:fill="#FDE2E1" color:background-color="#FDE2E1" color:border-color="#B42318"><dc:Bounds x="1437" y="752" width="36" height="36" /><bpmndi:BPMNLabel><dc:Bounds x="1395" y="793" width="120" height="28" /></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="D_frei_di" bpmnElement="D_frei" bioc:stroke="#17509E" bioc:fill="#D8E8F8" color:background-color="#D8E8F8" color:border-color="#17509E"><dc:Bounds x="1389" y="868" width="132" height="84" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="D_gw_di" bpmnElement="D_gw" isMarkerVisible="true" bioc:stroke="#8A6100" bioc:fill="#FFF8DB" color:background-color="#FFF8DB" color:border-color="#8A6100"><dc:Bounds x="1600" y="885" width="50" height="50" /><bpmndi:BPMNLabel><dc:Bounds x="1525" y="866" width="96" height="15" /></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="D_endAb_di" bpmnElement="D_endAb" bioc:stroke="#B42318" bioc:fill="#FDE2E1" color:background-color="#FDE2E1" color:border-color="#B42318"><dc:Bounds x="1607" y="1012" width="36" height="36" /><bpmndi:BPMNLabel><dc:Bounds x="1565" y="1053" width="120" height="28" /></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="C_best_di" bpmnElement="C_best" bioc:stroke="#C2410C" bioc:fill="#FFE3C8" color:background-color="#FFE3C8" color:border-color="#C2410C"><dc:Bounds x="1729" y="608" width="132" height="84" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="C_daten_di" bpmnElement="C_daten" bioc:stroke="#C2410C" bioc:fill="#FFE3C8" color:background-color="#FFE3C8" color:border-color="#C2410C"><dc:Bounds x="1899" y="608" width="132" height="84" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="B_best_di" bpmnElement="B_best" bioc:stroke="#1A2644" bioc:fill="#DCE5F2" color:background-color="#DCE5F2" color:border-color="#1A2644"><dc:Bounds x="2069" y="348" width="132" height="84" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="B_end_di" bpmnElement="B_end" bioc:stroke="#1E7B3A" bioc:fill="#DDF3E4" color:background-color="#DDF3E4" color:border-color="#1E7B3A"><dc:Bounds x="2287" y="372" width="36" height="36" /><bpmndi:BPMNLabel><dc:Bounds x="2245" y="413" width="120" height="15" /></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_A_start_A_erf_di" bpmnElement="Flow_A_start_A_erf"><di:waypoint x="283" y="130" /><di:waypoint x="369" y="130" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_A_erf_A_gw_di" bpmnElement="Flow_A_erf_A_gw"><di:waypoint x="501" y="130" /><di:waypoint x="580" y="130" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_A_gw_A_zur_di" bpmnElement="Flow_A_gw_A_zur"><di:waypoint x="630" y="130" /><di:waypoint x="709" y="130" /><bpmndi:BPMNLabel><dc:Bounds x="636" y="113" width="25" height="14" /></bpmndi:BPMNLabel></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_A_gw_C_open_di" bpmnElement="Flow_A_gw_C_open"><di:waypoint x="605" y="155" /><di:waypoint x="605" y="650" /><di:waypoint x="709" y="650" /><bpmndi:BPMNLabel><dc:Bounds x="613" y="633" width="38" height="14" /></bpmndi:BPMNLabel></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_A_zur_A_endZur_di" bpmnElement="Flow_A_zur_A_endZur"><di:waypoint x="841" y="130" /><di:waypoint x="927" y="130" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_C_open_B_adv_di" bpmnElement="Flow_C_open_B_adv"><di:waypoint x="841" y="650" /><di:waypoint x="860" y="650" /><di:waypoint x="860" y="390" /><di:waypoint x="879" y="390" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_B_adv_C_pruef_di" bpmnElement="Flow_B_adv_C_pruef"><di:waypoint x="1011" y="390" /><di:waypoint x="1030" y="390" /><di:waypoint x="1030" y="650" /><di:waypoint x="1049" y="650" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_C_pruef_C_gw_di" bpmnElement="Flow_C_pruef_C_gw"><di:waypoint x="1181" y="650" /><di:waypoint x="1260" y="650" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_C_gw_D_frei_di" bpmnElement="Flow_C_gw_D_frei"><di:waypoint x="1285" y="675" /><di:waypoint x="1285" y="910" /><di:waypoint x="1389" y="910" /><bpmndi:BPMNLabel><dc:Bounds x="1293" y="893" width="25" height="14" /></bpmndi:BPMNLabel></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_C_gw_C_endAb_di" bpmnElement="Flow_C_gw_C_endAb"><di:waypoint x="1285" y="675" /><di:waypoint x="1285" y="770" /><di:waypoint x="1437" y="770" /><bpmndi:BPMNLabel><dc:Bounds x="1293" y="753" width="38" height="14" /></bpmndi:BPMNLabel></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_D_frei_D_gw_di" bpmnElement="Flow_D_frei_D_gw"><di:waypoint x="1521" y="910" /><di:waypoint x="1600" y="910" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_D_gw_C_best_di" bpmnElement="Flow_D_gw_C_best"><di:waypoint x="1625" y="885" /><di:waypoint x="1625" y="650" /><di:waypoint x="1729" y="650" /><bpmndi:BPMNLabel><dc:Bounds x="1633" y="633" width="25" height="14" /></bpmndi:BPMNLabel></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_D_gw_D_endAb_di" bpmnElement="Flow_D_gw_D_endAb"><di:waypoint x="1625" y="935" /><di:waypoint x="1625" y="1012" /><bpmndi:BPMNLabel><dc:Bounds x="1631" y="967" width="38" height="14" /></bpmndi:BPMNLabel></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_C_best_C_daten_di" bpmnElement="Flow_C_best_C_daten"><di:waypoint x="1861" y="650" /><di:waypoint x="1899" y="650" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_C_daten_B_best_di" bpmnElement="Flow_C_daten_B_best"><di:waypoint x="2031" y="650" /><di:waypoint x="2050" y="650" /><di:waypoint x="2050" y="390" /><di:waypoint x="2069" y="390" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_B_best_B_end_di" bpmnElement="Flow_B_best_B_end"><di:waypoint x="2201" y="390" /><di:waypoint x="2287" y="390" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNShape id="An_zur_di" bpmnElement="An_zur" bioc:stroke="#6B7280" bioc:fill="#FFFFFF" color:background-color="#FFFFFF" color:border-color="#6B7280"><dc:Bounds x="700" y="219" width="220" height="62" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Assoc_An_zur_di" bpmnElement="Assoc_An_zur"><di:waypoint x="775" y="172" /><di:waypoint x="775" y="219" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNShape id="An_open_di" bpmnElement="An_open" bioc:stroke="#6B7280" bioc:fill="#FFFFFF" color:background-color="#FFFFFF" color:border-color="#6B7280"><dc:Bounds x="700" y="739" width="200" height="62" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Assoc_An_open_di" bpmnElement="Assoc_An_open"><di:waypoint x="775" y="692" /><di:waypoint x="775" y="739" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNShape id="An_adv_di" bpmnElement="An_adv" bioc:stroke="#6B7280" bioc:fill="#FFFFFF" color:background-color="#FFFFFF" color:border-color="#6B7280"><dc:Bounds x="870" y="479" width="150" height="62" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Assoc_An_adv_di" bpmnElement="Assoc_An_adv"><di:waypoint x="945" y="432" /><di:waypoint x="945" y="479" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Msg_C_best_P_Lief_di" bpmnElement="Msg_C_best_P_Lief"><di:waypoint x="1795" y="692" /><di:waypoint x="1795" y="1170" /><bpmndi:BPMNLabel><dc:Bounds x="1803" y="1121" width="170" height="27" /></bpmndi:BPMNLabel></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

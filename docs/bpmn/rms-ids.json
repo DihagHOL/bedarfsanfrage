@@ -1,0 +1,12 @@
+{
+  "hinweis": "Datei-Kennungen der Modelle im RMS (sites/ISMS, ISMS Dokumente, Prozesse/SHB). Nach dem Import gesetzt, bleiben beim Überschreiben gleich. Kennung = 01 plus Base32 aus Präfix 69fcd7f4 und UniqueId (Bytes in Windows-Reihenfolge).",
+  "ablage": "Prozesse/SHB",
+  "driveId": "b!mHt0ojDvMUO2CASB1CYZ7LZfHr-4oQxOpM8lU-BHkQAn6GWLTefSRpGSUcefMjhL",
+  "modelle": {
+    "haupt": "01NH6NP5DKYW2SVIV5G5BJOOUWU6PPLIYV",
+    "erfassen": "01NH6NP5HUHMSE6LKN6FBZHNXAX5S2VXPO",
+    "pruefen": "01NH6NP5CT3ID7HZMK4JBYSAHRU34JWGMB",
+    "freigabe": "01NH6NP5AOD65CF4LUVRCLFWHE6BBQWOI4",
+    "autoentwurf": "01NH6NP5DFYDNIEQOLAJHZNZT3627RDOSI"
+  }
+}

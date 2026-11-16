@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta http-equiv="Cache-Control" content="no-cache,no-store,must-revalidate"/>
+  <title>DIHAG · Bedarfsanfragen</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+  <script src="https://alcdn.msauth.net/browser/2.38.2/js/msal-browser.min.js"></script>
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+
+<!-- ── BOOT ─────────────────────────────────────────────────────── -->
+<div id="boot">
+  <div class="boot-logo">
+    <svg width="40" height="40" viewBox="0 0 40 40"><rect width="40" height="40" rx="10" fill="#1a56db"/><text x="7" y="28" font-size="22" font-weight="700" fill="white" font-family="Inter">D</text></svg>
+  </div>
+  <div class="boot-title">DIHAG Bedarfsanfragen</div>
+  <div class="boot-sub" id="boot-sub">Anmeldung läuft…</div>
+  <div class="boot-spinner" id="boot-spinner"></div>
+  <div class="boot-err" id="boot-err"></div>
+  <button class="boot-btn" id="boot-btn" onclick="doLogin()" style="display:none">Anmelden</button>
+</div>
+
+<!-- ── APP ──────────────────────────────────────────────────────── -->
+<div id="app" style="display:none">
+
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+      <svg width="26" height="26" viewBox="0 0 26 26"><rect width="26" height="26" rx="6" fill="#1a56db"/><text x="5" y="19" font-size="13" font-weight="700" fill="white" font-family="Inter">D</text></svg>
+      <span>DIHAG</span>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="#" class="nav-item" data-view="dashboard">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path d="M2 4a2 2 0 012-2h4a2 2 0 012 2v4a2 2 0 01-2 2H4a2 2 0 01-2-2V4zm10 0a2 2 0 012-2h4a2 2 0 012 2v4a2 2 0 01-2 2h-4a2 2 0 01-2-2V4zM2 14a2 2 0 012-2h4a2 2 0 012 2v4a2 2 0 01-2 2H4a2 2 0 01-2-2v-4zm10 0a2 2 0 012-2h4a2 2 0 012 2v4a2 2 0 01-2 2h-4a2 2 0 01-2-2v-4z"/></svg>
+        Dashboard
+      </a>
+      <a href="#" class="nav-item" data-view="new">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd"/></svg>
+        Neue Anfrage
+      </a>
+      <a href="#" class="nav-item" data-view="multi">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"/></svg>
+        Sammelanfrage
+      </a>
+      <a href="#" class="nav-item" data-view="mine">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"/></svg>
+        Meine Anfragen
+      </a>
+      <a href="#" class="nav-item" data-view="gemeinsame">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path d="M7 3a1 1 0 000 2h6a1 1 0 100-2H7zM4 7a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1zm-2 4a2 2 0 012-2h12a2 2 0 012 2v4a2 2 0 01-2 2H4a2 2 0 01-2-2v-4z"/></svg>
+        Gemeinsame Anfragen
+      </a>
+      <a href="#" class="nav-item" data-view="reports">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v14a1 1 0 01-1 1H4a1 1 0 01-1-1V3zm3 3a1 1 0 000 2h.01a1 1 0 100-2H6zm3 0a1 1 0 000 2h4a1 1 0 100-2H9zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H6zm3 0a1 1 0 100 2h4a1 1 0 100-2H9zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H6zm3 0a1 1 0 100 2h4a1 1 0 100-2H9z" clip-rule="evenodd"/></svg>
+        Reports
+      </a>
+      <a href="#" class="nav-item" data-view="prozess">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path d="M15 8a3 3 0 10-2.977-2.63l-4.94 2.47a3 3 0 100 4.319l4.94 2.47a3 3 0 10.895-1.789l-4.94-2.47a3.027 3.027 0 000-.74l4.94-2.47C13.456 7.68 14.19 8 15 8z"/></svg>
+        Prozess
+      </a>
+      <a href="#" class="nav-item" data-view="importer">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+        Tabellen-Importer
+      </a>
+      <div class="nav-sep"></div>
+      <a href="#" class="nav-item" data-view="schulung">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10.394 2.08a1 1 0 00-.788 0l-7 3a1 1 0 000 1.84L5.25 8.051a.999.999 0 01.356-.257l4-1.714a1 1 0 11.788 1.838L7.667 9.088l1.94.831a1 1 0 00.787 0l7-3a1 1 0 000-1.838l-7-3zM3.31 9.397L5 10.12v4.102a8.969 8.969 0 00-1.05-.174 1 1 0 01-.89-.89 11.115 11.115 0 01.25-3.762zM9.3 16.573A9.026 9.026 0 007 14.935v-3.957l1.818.78a3 3 0 002.364 0l5.508-2.361a11.026 11.026 0 01.25 3.762 1 1 0 01-.89.89 8.968 8.968 0 00-5.35 2.524 1 1 0 01-1.4 0zM6 18a1 1 0 001-1v-2.065a8.935 8.935 0 00-2-.712V17a1 1 0 001 1z"/></svg>
+        Schulung
+      </a>
+    </nav>
+    <div class="sidebar-user">
+      <div class="user-avatar" id="hdr-av">?</div>
+      <div class="user-info">
+        <div class="user-name" id="hdr-name">–</div>
+        <div class="user-sub" id="hdr-mail">–</div>
+      </div>
+      <button class="logout-btn" title="Abmelden" onclick="doLogout()">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 3a1 1 0 00-1 1v12a1 1 0 102 0V4a1 1 0 00-1-1zm10.293 9.293a1 1 0 001.414 1.414l3-3a1 1 0 000-1.414l-3-3a1 1 0 10-1.414 1.414L14.586 9H7a1 1 0 100 2h7.586l-1.293 1.293z" clip-rule="evenodd"/></svg>
+      </button>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <header class="topbar">
+      <div class="topbar-left">
+        <button class="menu-toggle" id="menu-toggle">
+          <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 5a1 1 0 011-1h6a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd"/></svg>
+        </button>
+        <h1 class="topbar-title" id="page-title">Dashboard</h1>
+      </div>
+      <div class="topbar-right">
+        <button class="btn btn-sm btn-ghost" onclick="loadItems(true)" title="Aktualisieren" aria-label="Aktualisieren" id="btn-reload">
+          <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16"><path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"/></svg>
+          <span class="btn-label">Aktualisieren</span>
+        </button>
+        <button class="btn btn-sm btn-ghost ar-btn" id="btn-autorefresh" onclick="toggleAutoRefresh()" title="Auto-Aktualisierung">⏱ Auto AUS</button>
+        <button class="btn btn-sm btn-ghost" onclick="openSettings()" title="Einstellungen">⚙️</button>
+      </div>
+    </header>
+
+    <!-- col-warning: SP columns that don't exist yet -->
+    <div id="col-warning" class="col-warning" style="display:none"></div>
+
+    <div class="content" id="content">
+
+      <!-- DASHBOARD -->
+      <div id="view-dashboard" class="view view-split">
+        <div id="status-chips" class="status-chips"></div>
+        <div id="dash-extra-filters" class="dash-extra-filters"></div>
+        <div class="split-layout" id="split-dashboard">
+          <div class="split-list">
+            <div class="view-toolbar">
+              <div class="search-box">
+                <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/></svg>
+                <input type="text" id="search-dashboard" placeholder="Suchen …" oninput="searchDebounced(filterDashboard)"/>
+              </div>
+              <select id="sort-dashboard" class="sort-select" onchange="setDashSort(this.value)">
+                <option value="date-desc">Neueste zuerst</option>
+                <option value="date-asc">Älteste zuerst</option>
+                <option value="price-desc">Preis ↓</option>
+                <option value="price-asc">Preis ↑</option>
+                <option value="status">Nach Status</option>
+              </select>
+              <button class="btn btn-sm btn-primary" data-view="new" style="white-space:nowrap">+ Neue Anfrage</button>
+            </div>
+            <div id="list-dashboard" class="item-cards"></div>
+          </div>
+          <div class="split-panel hidden" id="panel-dashboard">
+            <div id="panel-dashboard-content"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- NEW REQUEST (WIZARD) -->
+      <div id="view-new" class="view">
+        <div class="wizard-wrap">
+          <div id="fav-bar-single"></div>
+          <div class="wizard-header">
+            <div class="wizard-steps" id="wizard-steps">
+              <div class="wstep active" data-step="1"><span>1</span>Bedarf</div>
+              <div class="wstep" data-step="2"><span>2</span>Mengengaben</div>
+              <div class="wstep" data-step="3"><span>3</span>Beschaffung</div>
+              <div class="wstep" data-step="4"><span>4</span>Überprüfung</div>
+            </div>
+          </div>
+
+          <!-- Step 1 -->
+          <div class="wizard-body" id="wstep-1">
+            <h2>Bedarf beschreiben</h2>
+            <p class="step-hint">Was wird benötigt und warum?</p>
+            <div class="form-grid">
+              <div class="form-group">
+                <label>Artikelnummer</label>
+                <div class="tid-ac-wrap">
+                  <input type="text" id="f-Artikelnummer" placeholder="z. B. 4001-00010 oder Bezeichnung…" oninput="lookupTID(this.value)" autocomplete="off"/>
+                </div>
+                <div class="tid-match" id="tid-match" style="display:none"></div>
+                <div class="field-hint" id="hint-Artikelnummer"></div>
+              </div>
+              <div class="form-group">
+                <label>Externe Artikelnummer <span class="field-sub">Bei Katalogware</span></label>
+                <input type="text" id="f-ExterneArtikelnummer" placeholder="z. B. Lieferanten-Artikelnummer" autocomplete="off"/>
+                <div class="field-hint" id="hint-ExterneArtikelnummer"></div>
+              </div>
+              <div class="form-group full">
+                <label>Bezeichnung / Titel <span class="req">*</span></label>
+                <input type="text" id="f-Title" placeholder="z. B. Bürostühle ergonomisch, Schrauben M8 × 50 …"/>
+                <div class="field-hint" id="hint-Title"></div>
+              </div>
+              <div class="form-group full">
+                <label>Beschreibung / Begründung</label>
+                <textarea id="f-Beschreibung" rows="3" placeholder="Warum wird dieser Bedarf benötigt? Welche Anforderungen gibt es?"></textarea>
+                <div class="field-hint" id="hint-Beschreibung"></div>
+              </div>
+              <div class="form-group">
+                <label>Warengruppe <span class="req">*</span></label>
+                <select id="f-Warengruppe">
+                  <option value="">– bitte wählen –</option>
+                  <option>4001 – Schrott</option>
+                  <option>4002 – Legierungen</option>
+                  <option>4103 – Bleche</option>
+                  <option>4116 – Kaufteile</option>
+                  <option>4211 – Kaufteile Formerei (Kühlm. ..)</option>
+                  <option>4304 – Strahlmittel</option>
+                  <option>4305 – Modellbaumaterial</option>
+                  <option>4306 – Formstoffkomponenten</option>
+                  <option>4307 – Eingußsysteme</option>
+                  <option>4308 – exotherme Kappen (Speiser)</option>
+                  <option>4309 – Gießfilter</option>
+                  <option>4310 – Kerne (bez. Kerne f. Gießerei)</option>
+                  <option>4311 – metallurgische Zusatzstoffe</option>
+                  <option>4312 – Hilfsstoffe Gießerei</option>
+                  <option>4313 – Feuerfestmaterial Ofen/Pfannen</option>
+                  <option>4314 – Kohleprodukte (Grafitelektr., Aufk...)</option>
+                  <option>4317 – externer Modellbau</option>
+                  <option>4318 – Befestigungsteile</option>
+                  <option>4319 – WENDESCHNEIDPLATTE</option>
+                  <option>4320 – Ersatzteile</option>
+                  <option>4321 – Schleif- und Fräsmittel</option>
+                  <option>4322 – Arbeitsschutzmittel</option>
+                  <option>4323 – Schweißbedarf</option>
+                  <option>4324 – Gemeinkostenmaterial</option>
+                  <option>4325 – Technische Gase</option>
+                  <option>4326 – Treibstoffe, Öle, Fette</option>
+                  <option>4328 – Werkzeug</option>
+                  <option>4329 – sonst. Hilfs- u. Betriebsstoffe</option>
+                  <option>4333 – Kooperation</option>
+                  <option>4334 – Reparatur</option>
+                  <option>4335 – Serviceleistung</option>
+                  <option>4336 – Entsorgung</option>
+                  <option>4337 – Büromaterial</option>
+                  <option>4338 – Mieten</option>
+                  <option>4340 – Investitionen</option>
+                  <option>4333 – Transporte</option>
+                  <option>4335 – Leiharbeiter</option>
+                  <option>2000 – Frachtkosten, sonstiges</option>
+                </select>
+                <div class="field-hint" id="hint-Warengruppe"></div>
+              </div>
+              <div class="form-group">
+                <label>Priorität</label>
+                <select id="f-Prioritaet">
+                  <option value="Normal">Normal</option>
+                  <option value="Hoch">Hoch</option>
+                  <option value="Dringend">Dringend</option>
+                </select>
+                <div class="field-hint" id="hint-Prioritaet"></div>
+              </div>
+              <div class="form-group full">
+                <label>Datum zur automatischen Bedarfsanfrage
+                  <span class="field-sub">optional – Erinnerung: zu diesem Datum wird automatisch ein Entwurf erstellt</span>
+                </label>
+                <input type="date" id="f-AutoBedarfDatum"/>
+                <div class="field-hint" id="hint-AutoBedarfDatum"></div>
+              </div>
+            </div>
+            <div class="wizard-footer">
+              <span></span>
+              <button class="btn btn-primary" onclick="wNext(1)">Weiter →</button>
+            </div>
+          </div>
+
+          <!-- Step 2 -->
+          <div class="wizard-body hidden" id="wstep-2">
+            <h2>Mengengaben</h2>
+            <p class="step-hint">Wie viel wird benötigt und bis wann?</p>
+            <div class="form-grid">
+              <div class="form-group">
+                <label>Menge <span class="req">*</span></label>
+                <input type="number" id="f-Menge" min="0.001" step="any" placeholder="1" value="1"/>
+                <div class="field-hint" id="hint-Menge"></div>
+              </div>
+              <div class="form-group">
+                <label>Mengeneinheit <span class="req">*</span></label>
+                <select id="f-Mengeneinheit">
+                  <option value="">– bitte wählen –</option>
+                  <option>Lagereinheiten</option>
+                  <option>kg</option>
+                  <option>Stück</option>
+                  <option>Anzahl</option>
+                  <option>m</option>
+                  <option>Paar</option>
+                  <option>Liter</option>
+                </select>
+                <div class="field-hint" id="hint-Mengeneinheit"></div>
+              </div>
+              <div class="form-group">
+                <label>Mindestlagermenge
+                  <span class="tooltip-icon" title="Für bestandsgeführte Materialien: die Menge, bei der automatisch nachbestellt werden soll.">?</span>
+                </label>
+                <input type="number" id="f-Mindestlagermenge" min="0" step="any" placeholder="optional"/>
+                <div class="field-hint" id="hint-Mindestlagermenge"></div>
+              </div>
+              <div class="form-group">
+                <label>Benötigt bis (Termin) <span class="req">*</span></label>
+                <input type="date" id="f-Termin"/>
+                <div class="field-hint" id="hint-Termin"></div>
+              </div>
+            </div>
+            <div class="wizard-footer">
+              <button class="btn btn-ghost" onclick="wBack(2)">← Zurück</button>
+              <button class="btn btn-primary" onclick="wNext(2)">Weiter →</button>
+            </div>
+          </div>
+
+          <!-- Step 3 -->
+          <div class="wizard-body hidden" id="wstep-3">
+            <h2>Beschaffungsdetails</h2>
+            <p class="step-hint">Art des Materials, Lieferant und Kostenstelle.</p>
+            <div class="form-grid">
+              <div class="form-group full">
+                <label>Beschaffungsart <span class="req">*</span></label>
+                <div class="radio-cards" id="beschaffungslogik-cards">
+                  <label class="radio-card">
+                    <input type="radio" name="Beschaffungslogik" value="Bestandsmaterial (bestandsgeführt)" checked/>
+                    <div class="rc-icon">📦</div>
+                    <div class="rc-title">Bestandsmaterial</div>
+                    <div class="rc-desc">Lagerartikel mit RGU-Stammdaten. Bestand wird bewirtschaftet – Mindestlagermenge angeben.</div>
+                  </label>
+                  <label class="radio-card">
+                    <input type="radio" name="Beschaffungslogik" value="Nicht-bestandsgeführtes Material"/>
+                    <div class="rc-icon">🆕</div>
+                    <div class="rc-title">Nicht-bestandsgeführtes Material</div>
+                    <div class="rc-desc">Projekt- oder einmalige Beschaffung ohne Lagerführung. Kein RGU-Stammdatz erforderlich.</div>
+                  </label>
+                </div>
+                <div class="bl-separator"><span>Zusätzlich kombinierbar</span></div>
+                <div class="radio-cards" id="beschaffungslogik-extra-cards">
+                  <div class="radio-card check-card" data-value="Direktes Material" onclick="toggleBLExtra(this)">
+                    <div class="rc-icon">🏭</div>
+                    <div class="rc-title">Direktes Material</div>
+                    <div class="rc-desc">Produktionsrelevant; fließt direkt ins Endprodukt ein (z. B. Rohstoffe, Halbzeuge, Fertigteile).</div>
+                  </div>
+                  <div class="radio-card check-card" data-value="Indirektes Material / Dienstleistung" onclick="toggleBLExtra(this)">
+                    <div class="rc-icon">🔧</div>
+                    <div class="rc-title">Indirektes Material / Dienstleistung</div>
+                    <div class="rc-desc">Nicht produktionsrelevant: Betriebsmittel, Verbrauchsmaterial, externe Dienstleistungen, Software.</div>
+                  </div>
+                </div>
+                <div class="field-hint" id="hint-Beschaffungslogik"></div>
+              </div>
+              <div class="form-group">
+                <label>Lieferant 1 <span class="req">*</span></label>
+                <input type="text" id="f-Lieferant" placeholder="Firmenname oder Lieferanten-Nr."/>
+                <div class="field-hint" id="hint-Lieferant"></div>
+                <button type="button" class="btn-add-lief" id="btn-add-lieferant-1" onclick="addLieferant(2)">+ Weiteren Lieferanten hinzufügen</button>
+              </div>
+              <div class="form-group lieferant-extra" id="lieferant-extra-2" style="display:none">
+                <label>Lieferant 2 (Alternative)</label>
+                <input type="text" id="f-Lieferant2" placeholder="optional"/>
+                <div class="field-hint" id="hint-Lieferant2"></div>
+                <button type="button" class="btn-add-lief" id="btn-add-lieferant-2" onclick="addLieferant(3)">+ Weiteren Lieferanten hinzufügen</button>
+              </div>
+              <div class="form-group lieferant-extra" id="lieferant-extra-3" style="display:none">
+                <label>Lieferant 3 (Alternative)</label>
+                <input type="text" id="f-Lieferant3" placeholder="optional"/>
+                <div class="field-hint" id="hint-Lieferant3"></div>
+                <button type="button" class="btn-add-lief" id="btn-add-lieferant-3" onclick="addLieferant(4)">+ Weiteren Lieferanten hinzufügen</button>
+              </div>
+              <div class="form-group lieferant-extra" id="lieferant-extra-4" style="display:none">
+                <label>Lieferant 4 (Alternative)</label>
+                <input type="text" id="f-Lieferant4" placeholder="optional"/>
+                <div class="field-hint" id="hint-Lieferant4"></div>
+              </div>
+              <div class="form-group full">
+                <label>Mengen × Einzelpreise <span class="req">*</span> <span class="field-sub">mehrere Zeilen möglich – Bestellvolumen wird summiert</span></label>
+                <div id="einzel-lines"></div>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="einzelLineAdd()" style="margin-top:2px">+ Zeile hinzufügen</button>
+              </div>
+              <div class="form-group">
+                <label>Bestellvolumen in € <span class="field-sub" id="bv-auto-note">automatisch berechnet</span></label>
+                <input type="number" id="f-GeschaetzterPreis" min="0" step="0.01" placeholder="0,00" readonly class="input-computed"/>
+                <div class="field-hint" id="hint-GeschaetzterPreis"></div>
+                <div id="preis-route-hint" class="info-box info" style="display:none;margin-top:6px"></div>
+                <label class="checkbox-inline" style="margin-top:8px;display:flex;align-items:center;gap:6px;font-size:.84rem;cursor:pointer">
+                  <input type="checkbox" id="f-LeadBuyerAbschluss" onchange="updatePreisHint()" style="width:15px;height:15px"/>
+                  Lead-Buyer-Abschluss (Angebotspflicht entfällt)
+                </label>
+              </div>
+              <div class="form-group">
+                <label>Kostenstelle</label>
+                <div class="tid-ac-wrap">
+                  <input type="text" id="f-Kostenstelle" placeholder="Nr. oder Bezeichnung…" autocomplete="off"/>
+                </div>
+                <div class="field-hint" id="hint-Kostenstelle"></div>
+              </div>
+              <div class="form-group">
+                <label>Abteilung</label>
+                <select id="f-Abteilung">
+                  <option value="">– bitte wählen –</option>
+                </select>
+                <div class="field-hint">Für die Gruppierung in „Gemeinsame Anfragen".</div>
+              </div>
+              <div class="form-group" id="wizard-attachments">
+                <label>Angebote anhängen <span id="attach-required-note" class="field-hint" style="display:inline;font-size:.78rem"></span></label>
+                <div id="wizard-drop-zone" class="drop-zone">
+                  <span class="drop-zone-text">📎 Dateien hier ablegen<br><small>oder klicken zum Auswählen (PDF, Mail, Excel, max. 5)</small></span>
+                </div>
+                <input type="file" id="wizard-file-input" accept=".pdf,.msg,.eml,.xlsx,.xls" multiple style="display:none">
+                <div id="wizard-file-list"></div>
+                <div class="field-hint">Weitere Angebote können Sie jederzeit in der Anfrage unter „Anhänge" nachreichen.</div>
+              </div>
+            </div>
+            <div class="wizard-footer">
+              <button class="btn btn-ghost" onclick="wBack(3)">← Zurück</button>
+              <button class="btn btn-primary" onclick="wNext(3)">Weiter →</button>
+            </div>
+          </div>
+
+          <!-- Step 4: Review -->
+          <div class="wizard-body hidden" id="wstep-4">
+            <h2>Überprüfung &amp; Einreichen</h2>
+            <p class="step-hint">Bitte prüfen Sie alle Angaben. Nach dem Einreichen prüft der <strong>Einkauf</strong> die Anfrage in der App. Bis zu seiner Entscheidung können Sie sie in „Meine Anfragen" zurückziehen.</p>
+            <div id="review-content"></div>
+            <div id="missing-cols-warn" class="info-box warn" style="display:none;margin-top:14px"></div>
+            <div class="wizard-footer">
+              <button class="btn btn-ghost" onclick="wBack(4)">← Zurück</button>
+              <button class="btn btn-success" id="btn-submit" onclick="submitRequest()">✓ Anfrage einreichen</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TABELLEN-IMPORTER -->
+      <div id="view-importer" class="view">
+        <!-- content rendered by initImporter() / renderImporter() -->
+      </div>
+
+      <!-- REPORTS -->
+      <div id="view-reports" class="view">
+        <!-- content rendered by initReports() / renderReports() -->
+      </div>
+
+      <!-- GEMEINSAME ANFRAGEN -->
+      <div id="view-gemeinsame" class="view">
+        <!-- content rendered by initGemeinsame() -->
+      </div>
+
+      <!-- SCHULUNG -->
+      <div id="view-schulung" class="view">
+        <!-- content rendered by initSchulung() -->
+      </div>
+
+      <!-- PROZESS -->
+      <div id="view-prozess" class="view">
+        <!-- content rendered by initProzess() -->
+      </div>
+
+      <!-- SAMMELANFRAGE (multi-position wizard) -->
+      <div id="view-multi" class="view">
+        <div class="wizard-wrap">
+          <div id="fav-bar-multi"></div>
+          <div class="si-karte" id="si-karte">
+            <div class="si-karte-text">
+              <strong>📊 Sammelanfrage aus Excel</strong>
+              <span>Für viele Positionen, etwa aus der Instandhaltung. „Excel-Vorlage öffnen“ legt die Vorlage in Ihrem OneDrive an und öffnet sie in Excel zum Bearbeiten. Excel speichert selbst, danach hier auf „Übernehmen“ klicken. Eigene Excel- oder CSV-Dateien gehen über „Datei importieren“ oder per Drag-and-drop auf diesen Kasten.</span>
+            </div>
+            <div class="si-karte-aktionen">
+              <button type="button" class="btn btn-primary btn-sm" id="si-btn-excel" onclick="siVorlageExcel()">📄 Excel-Vorlage öffnen</button>
+              <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('si-datei').click()">📥 Datei importieren</button>
+              <button type="button" class="btn btn-ghost btn-sm" onclick="siVorlageCsv()" title="Leere CSV-Datei mit der Kopfzeile herunterladen">CSV-Vorlage</button>
+              <input type="file" id="si-datei" accept=".xlsx,.xls,.xlsm,.csv" hidden onchange="siDateiGewaehlt(this)">
+            </div>
+            <div id="si-hinweis" class="si-hinweis hidden"></div>
+            <div id="si-vorlagen" class="si-vorlagen hidden"></div>
+          </div>
+          <div class="wizard-header">
+            <div class="wizard-steps" id="mwizard-steps">
+              <div class="wstep active" data-mstep="1"><span>1</span>Positionen</div>
+              <div class="wstep" data-mstep="2"><span>2</span>Allgemein</div>
+              <div class="wstep" data-mstep="3"><span>3</span>Beschaffung</div>
+              <div class="wstep" data-mstep="4"><span>4</span>Überprüfung</div>
+            </div>
+          </div>
+
+          <!-- Step 1: Positionen -->
+          <div class="wizard-body" id="mwstep-1">
+            <h2>Positionen erfassen</h2>
+            <p class="step-hint">Fügen Sie alle Artikel der Sammelanfrage hinzu.</p>
+            <div id="multi-positions-table">
+              <!-- rows rendered by JS -->
+            </div>
+            <div class="multi-total-bar" id="multi-total-bar">
+              Bestellvolumen gesamt: <strong id="mf-total-display">–</strong>
+            </div>
+            <button type="button" class="btn btn-ghost" style="margin-top:10px" onclick="addMultiPosition()">+ Position hinzufügen</button>
+            <div class="wizard-footer">
+              <span></span>
+              <button class="btn btn-primary" onclick="wMultiNext(1)">Weiter →</button>
+            </div>
+          </div>
+
+          <!-- Step 2: Allgemein -->
+          <div class="wizard-body hidden" id="mwstep-2">
+            <h2>Allgemeine Angaben</h2>
+            <p class="step-hint">Warengruppe, Priorität, Beschreibung und Termin für die gesamte Anfrage.</p>
+            <div class="form-grid">
+              <div class="form-group">
+                <label>Warengruppe <span class="req">*</span></label>
+                <select id="mf-Warengruppe">
+                  <option value="">– bitte wählen –</option>
+                  <option>4001 – Schrott</option>
+                  <option>4002 – Legierungen</option>
+                  <option>4103 – Bleche</option>
+                  <option>4116 – Kaufteile</option>
+                  <option>4211 – Kaufteile Formerei (Kühlm. ..)</option>
+                  <option>4304 – Strahlmittel</option>
+                  <option>4305 – Modellbaumaterial</option>
+                  <option>4306 – Formstoffkomponenten</option>
+                  <option>4307 – Eingußsysteme</option>
+                  <option>4308 – exotherme Kappen (Speiser)</option>
+                  <option>4309 – Gießfilter</option>
+                  <option>4310 – Kerne (bez. Kerne f. Gießerei)</option>
+                  <option>4311 – metallurgische Zusatzstoffe</option>
+                  <option>4312 – Hilfsstoffe Gießerei</option>
+                  <option>4313 – Feuerfestmaterial Ofen/Pfannen</option>
+                  <option>4314 – Kohleprodukte (Grafitelektr., Aufk...)</option>
+                  <option>4317 – externer Modellbau</option>
+                  <option>4318 – Befestigungsteile</option>
+                  <option>4319 – WENDESCHNEIDPLATTE</option>
+                  <option>4320 – Ersatzteile</option>
+                  <option>4321 – Schleif- und Fräsmittel</option>
+                  <option>4322 – Arbeitsschutzmittel</option>
+                  <option>4323 – Schweißbedarf</option>
+                  <option>4324 – Gemeinkostenmaterial</option>
+                  <option>4325 – Technische Gase</option>
+                  <option>4326 – Treibstoffe, Öle, Fette</option>
+                  <option>4328 – Werkzeug</option>
+                  <option>4329 – sonst. Hilfs- u. Betriebsstoffe</option>
+                  <option>4333 – Kooperation</option>
+                  <option>4334 – Reparatur</option>
+                  <option>4335 – Serviceleistung</option>
+                  <option>4336 – Entsorgung</option>
+                  <option>4337 – Büromaterial</option>
+                  <option>4338 – Mieten</option>
+                  <option>4340 – Investitionen</option>
+                  <option>4333 – Transporte</option>
+                  <option>4335 – Leiharbeiter</option>
+                  <option>2000 – Frachtkosten, sonstiges</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Priorität</label>
+                <select id="mf-Prioritaet">
+                  <option value="Normal">Normal</option>
+                  <option value="Hoch">Hoch</option>
+                  <option value="Dringend">Dringend</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Abteilung</label>
+                <select id="mf-Abteilung">
+                  <option value="">– bitte wählen –</option>
+                </select>
+                <div class="field-hint">Für die Gruppierung in „Gemeinsame Anfragen".</div>
+              </div>
+              <div class="form-group full">
+                <label>Beschreibung / Begründung</label>
+                <textarea id="mf-Beschreibung" rows="3" placeholder="Warum wird dieser Bedarf benötigt?"></textarea>
+              </div>
+            </div>
+            <div class="wizard-footer">
+              <button class="btn btn-ghost" onclick="wMultiBack(2)">← Zurück</button>
+              <button class="btn btn-primary" onclick="wMultiNext(2)">Weiter →</button>
+            </div>
+          </div>
+
+          <!-- Step 3: Beschaffung -->
+          <div class="wizard-body hidden" id="mwstep-3">
+            <h2>Beschaffungsdetails</h2>
+            <p class="step-hint">Art des Materials und Lieferant für die gesamte Anfrage.</p>
+            <div class="form-grid">
+              <div class="form-group full">
+                <label>Beschaffungsart <span class="req">*</span></label>
+                <div class="radio-cards" id="m-beschaffungslogik-cards">
+                  <label class="radio-card">
+                    <input type="radio" name="mBeschaffungslogik" value="Bestandsmaterial (bestandsgeführt)" checked/>
+                    <div class="rc-icon">📦</div>
+                    <div class="rc-title">Bestandsmaterial</div>
+                    <div class="rc-desc">Lagerartikel mit RGU-Stammdaten.</div>
+                  </label>
+                  <label class="radio-card">
+                    <input type="radio" name="mBeschaffungslogik" value="Nicht-bestandsgeführtes Material"/>
+                    <div class="rc-icon">🆕</div>
+                    <div class="rc-title">Nicht-bestandsgeführtes Material</div>
+                    <div class="rc-desc">Projekt- oder einmalige Beschaffung ohne Lagerführung.</div>
+                  </label>
+                </div>
+                <div class="bl-separator"><span>Zusätzlich kombinierbar</span></div>
+                <div class="radio-cards" id="m-beschaffungslogik-extra-cards">
+                  <div class="radio-card check-card" data-value="Direktes Material" onclick="toggleMBLExtra(this)">
+                    <div class="rc-icon">🏭</div>
+                    <div class="rc-title">Direktes Material</div>
+                    <div class="rc-desc">Produktionsrelevant; fließt direkt ins Endprodukt ein.</div>
+                  </div>
+                  <div class="radio-card check-card" data-value="Indirektes Material / Dienstleistung" onclick="toggleMBLExtra(this)">
+                    <div class="rc-icon">🔧</div>
+                    <div class="rc-title">Indirektes Material / Dienstleistung</div>
+                    <div class="rc-desc">Nicht produktionsrelevant: Betriebsmittel, Verbrauchsmaterial, externe Dienstleistungen.</div>
+                  </div>
+                </div>
+                <div class="field-hint" id="mhint-Beschaffungslogik"></div>
+              </div>
+              <div class="form-group">
+                <label>Lieferant 1 <span class="req">*</span></label>
+                <input type="text" id="mf-Lieferant" placeholder="Firmenname oder Lieferanten-Nr."/>
+                <button type="button" class="btn-add-lief" id="mbtn-add-lieferant-1" onclick="addMLieferant(2)">+ Weiteren Lieferanten hinzufügen</button>
+              </div>
+              <div class="form-group lieferant-extra" id="m-lieferant-extra-2" style="display:none">
+                <label>Lieferant 2 (Alternative)</label>
+                <input type="text" id="mf-Lieferant2" placeholder="optional"/>
+                <button type="button" class="btn-add-lief" id="mbtn-add-lieferant-2" onclick="addMLieferant(3)">+ Weiteren Lieferanten hinzufügen</button>
+              </div>
+              <div class="form-group lieferant-extra" id="m-lieferant-extra-3" style="display:none">
+                <label>Lieferant 3 (Alternative)</label>
+                <input type="text" id="mf-Lieferant3" placeholder="optional"/>
+                <button type="button" class="btn-add-lief" id="mbtn-add-lieferant-3" onclick="addMLieferant(4)">+ Weiteren Lieferanten hinzufügen</button>
+              </div>
+              <div class="form-group lieferant-extra" id="m-lieferant-extra-4" style="display:none">
+                <label>Lieferant 4 (Alternative)</label>
+                <input type="text" id="mf-Lieferant4" placeholder="optional"/>
+              </div>
+              <div class="form-group">
+                <label>Bestellvolumen gesamt in € <span class="field-sub">wird aus Positionen berechnet</span></label>
+                <input type="number" id="mf-GeschaetzterPreis" min="0" step="0.01" placeholder="0,00" readonly/>
+                <label class="checkbox-inline" style="margin-top:8px;display:flex;align-items:center;gap:6px;font-size:.84rem;cursor:pointer">
+                  <input type="checkbox" id="mf-LeadBuyerAbschluss" onchange="updateMultiAngebotHinweis()" style="width:15px;height:15px"/>
+                  Lead-Buyer-Abschluss (Angebotspflicht entfällt)
+                </label>
+              </div>
+              <div class="form-group" id="mwizard-attachments">
+                <label>Angebote anhängen <span id="mattach-required-note" class="field-hint" style="display:inline;font-size:.78rem"></span></label>
+                <div id="mwizard-drop-zone" class="drop-zone">
+                  <span class="drop-zone-text">📎 Dateien hier ablegen<br><small>oder klicken zum Auswählen (PDF, Mail, Excel, max. 5)</small></span>
+                </div>
+                <input type="file" id="mwizard-file-input" accept=".pdf,.msg,.eml,.xlsx,.xls" multiple style="display:none">
+                <div id="mwizard-file-list"></div>
+                <div class="field-hint">Weitere Angebote können Sie jederzeit in der Anfrage unter „Anhänge" nachreichen.</div>
+              </div>
+            </div>
+            <div class="wizard-footer">
+              <button class="btn btn-ghost" onclick="wMultiBack(3)">← Zurück</button>
+              <button class="btn btn-primary" onclick="wMultiNext(3)">Weiter →</button>
+            </div>
+          </div>
+
+          <!-- Step 4: Review -->
+          <div class="wizard-body hidden" id="mwstep-4">
+            <h2>Überprüfung &amp; Einreichen</h2>
+            <p class="step-hint">Bitte prüfen Sie alle Angaben. Nach dem Einreichen prüft der <strong>Einkauf</strong> die Anfrage in der App. Bis zu seiner Entscheidung können Sie sie in „Meine Anfragen" zurückziehen.</p>
+            <div id="multi-review-content"></div>
+            <div class="wizard-footer">
+              <button class="btn btn-ghost" onclick="wMultiBack(4)">← Zurück</button>
+              <button class="btn btn-success" id="btn-multi-submit" onclick="submitMultiRequest()">✓ Sammelanfrage einreichen</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- MINE / ALL — split layout: list left, detail panel right -->
+      <div id="view-mine" class="view view-split">
+        <div id="status-chips-mine" class="status-chips"></div>
+        <div class="split-layout" id="split-mine">
+          <div class="split-list">
+            <div class="view-toolbar">
+              <div class="search-box">
+                <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/></svg>
+                <input type="text" id="search-mine" placeholder="Suchen …" oninput="searchDebounced(() => filterView('mine'))"/>
+              </div>
+              <select id="sort-mine" class="sort-select" onchange="setMineSort(this.value)">
+                <option value="date-desc">Neueste zuerst</option>
+                <option value="date-asc">Älteste zuerst</option>
+                <option value="price-desc">Preis ↓</option>
+                <option value="price-asc">Preis ↑</option>
+                <option value="status">Nach Status</option>
+              </select>
+            </div>
+            <div id="list-mine" class="item-cards"></div>
+          </div>
+          <div class="split-panel hidden" id="panel-mine">
+            <div id="panel-mine-content"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="view-all" class="view view-split">
+        <div class="split-layout" id="split-all">
+          <div class="split-list">
+            <div class="view-toolbar">
+              <div class="search-box">
+                <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/></svg>
+                <input type="text" id="search-all" placeholder="Suchen …" oninput="searchDebounced(() => filterView('all'))"/>
+              </div>
+              <select id="filter-all-status" onchange="filterView('all')">
+                <option value="">Alle Status</option>
+              </select>
+            </div>
+            <div id="list-all" class="item-cards"></div>
+          </div>
+          <div class="split-panel hidden" id="panel-all">
+            <div id="panel-all-content"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- DETAIL (used from dashboard click) -->
+      <div id="view-detail" class="view">
+        <button class="btn btn-ghost back-btn" id="detail-back">← Zurück</button>
+        <div id="detail-content"></div>
+      </div>
+
+    </div><!-- /content -->
+  </main>
+</div><!-- /app -->
+
+<!-- Settings Modal -->
+<div id="settings-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeSettings()">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header">
+      <h3>⚙️ Einstellungen</h3>
+      <button class="modal-close" onclick="closeSettings()">×</button>
+    </div>
+    <div class="modal-body" id="settings-body"></div>
+  </div>
+</div>
+
+<!-- PDF Viewer Modal -->
+<div id="pdf-viewer-modal" class="pdf-viewer-modal" style="display:none" onclick="if(event.target===this)closePdfViewer()">
+  <div class="pdf-viewer-container">
+    <div class="pdf-viewer-header">
+      <span id="pdf-viewer-title" class="pdf-viewer-title">Dokument</span>
+      <div class="pdf-viewer-actions">
+        <button id="pdf-viewer-ext" class="btn btn-sm btn-outline">↗ In SharePoint öffnen</button>
+        <button class="btn btn-sm btn-ghost" onclick="closePdfViewer()">✕ Schließen</button>
+      </div>
+    </div>
+    <iframe id="pdf-viewer-iframe" src="about:blank" frameborder="0" allowfullscreen
+      style="flex:1;width:100%;border:none;background:#525659"></iframe>
+  </div>
+</div>
+
+<!-- Modal -->
+<div id="modal-overlay" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="modal-title">Bestellnummer eintragen</h3>
+      <button class="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-footer" id="modal-footer"></div>
+  </div>
+</div>
+
+<!-- Toasts -->
+<div id="toast-c"></div>
+
+<!-- SheetJS wird bei Bedarf via ensureXLSX() nachgeladen (Importer + Reports-Export) -->
+<script src="app.js"></script>
+<script src="prozess.js"></script>
+<script src="sammelimport.js"></script>
+</body>
+</html>
