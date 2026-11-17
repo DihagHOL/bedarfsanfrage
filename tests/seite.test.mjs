@@ -26,6 +26,7 @@ const K = {
   zweig: 'master',
   darfSchreiben: ['.github/workflows/auto-drafts.yml'],
   nichtOnline: ['scripts', 'tests'],
+  version: true,
 };
 
 let pass = 0, fail = 0;
@@ -118,7 +119,19 @@ if (K.workflow) {
   ok(!laeufe.some(t => /git (commit|push|add)\b/.test(t) || /contents:\s*write/.test(t)), 'Kein Lauf schreibt ins Repository zurück: kein Bot-Commit, kein Schreibrecht' + (K.darfSchreiben ? ' (bewusste Ausnahme: ' + K.darfSchreiben.join(', ') + ')' : ''));
   const kopiert = ((job.match(/cp -r ([^\n]+) _site\//) || [])[1] || '').trim().split(/\s+/).filter(Boolean);
   ok(kopiert.length > 0 && kopiert.every(p => gibt(p)), 'Alles, was der Lauf hochlädt, gibt es: ' + kopiert.join(' '));
-  if (K.version) ok(job.indexOf('sed -i') > 0 && job.indexOf('sed -i') < job.indexOf('cp -r '), 'Erst die Version setzen, dann zusammenstellen');
+  if (K.version) {
+    ok(job.indexOf('sed -i') > 0 && job.indexOf('sed -i') < job.indexOf('cp -r '), 'Erst die Version setzen, dann zusammenstellen');
+    // Ohne ?v= behält der Browser nach einer Veröffentlichung bis zu zehn Minuten die alten Dateien.
+    const sed = (job.match(/sed -i[^\n]*/) || [''])[0];
+    const ohne = [];
+    for (const seite of K.seiten) {
+      if (!sed.split(/\s+/).includes(seite)) ohne.push(seite + ' fehlt im Lauf');
+      const html = lies(seite);
+      const ziele = [...html.matchAll(/<script\b[^>]*\bsrc="([^"]+)"/g), ...html.matchAll(/<link\b[^>]*\brel="stylesheet"[^>]*\bhref="([^"]+)"/g), ...html.matchAll(/<link\b[^>]*\bhref="([^"]+)"[^>]*\brel="stylesheet"/g)].map(m => m[1]);
+      for (const z of ziele) if (!/^(https?:|\/\/|data:)/.test(z) && !/(^|\/)vendor\//.test(z) && !/\?v=[A-Za-z0-9._-]+$/.test(z)) ohne.push(seite + ': ' + z);
+    }
+    ok(ohne.length === 0, 'Jedes eigene Skript und Stylesheet trägt ?v=, der Lauf setzt den Commit ein' + (ohne.length ? ', es fehlt: ' + ohne.join(', ') : ''));
+  }
 
   const online = (p) => kopiert.some(k => p === k || p.startsWith(k + '/'));
   // Was die Seiten einbinden, muss in dem liegen, was hochgeladen wird.

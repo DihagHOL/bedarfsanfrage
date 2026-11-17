@@ -158,7 +158,7 @@ console.log("\nDie Seite zeigt, was die Liste nennt");
   pruefe(js.includes("m.datei") && js.includes(".haupt"), "prozess.js baut Reiter und Downloads aus der Liste");
   pruefe(js.includes("?modell=") && js.includes("?richtlinie="), "prozess.js verlinkt Modell und Regelwerk im RMS");
   pruefe(js.includes("@microsoft.graph.downloadUrl"), "prozess.js lädt aus dem RMS über die signierte Adresse, nicht über /content");
-  pruefe(html.indexOf('src="prozess.js"') > html.indexOf('src="app.js"'), "index.html lädt prozess.js nach app.js");
+  pruefe(html.indexOf('src="prozess.js') > html.indexOf('src="app.js'), "index.html lädt prozess.js nach app.js");
   pruefe(!/function initProzess\b/.test(app) && /function initProzess\b/.test(js), "initProzess gibt es genau einmal, in prozess.js");
   pruefe(!/\blet plState\b/.test(app), "app.js deklariert plState nicht mehr (sonst Doppeldeklaration)");
   pruefe(/START_ANSICHTEN = \[[^\]]*'prozess'/.test(app), "der Direktlink ?ansicht=prozess ist erlaubt");

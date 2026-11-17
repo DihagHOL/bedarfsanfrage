@@ -149,7 +149,7 @@ pruefe(quelle.includes("'@microsoft.graph.downloadUrl'") && !/[/]content['`]/.te
 
 console.log('Einbindung');
 const html = lies('index.html');
-pruefe(html.indexOf('src="sammelimport.js"') > html.indexOf('src="app.js"'), 'index.html lädt sammelimport.js nach app.js');
+pruefe(html.indexOf('src="sammelimport.js') > html.indexOf('src="app.js'), 'index.html lädt sammelimport.js nach app.js');
 pruefe(html.includes('id="si-karte"') && html.includes('siVorlageExcel()') && html.includes('id="si-datei"'), 'Kasten mit Vorlage und Import im Reiter Sammelanfrage');
 pruefe(html.includes('id="si-vorlagen"') && html.includes('id="si-hinweis"') && html.includes('id="si-btn-excel"'), 'Kasten mit Liste der Vorlagen und Hinweisfeld');
 pruefe(/renderFavBar[(]'multi'[)];[^}]*siVorlagenLaden[(][)]/.test(app), 'Reiter Sammelanfrage lädt die Vorlagen aus dem OneDrive');

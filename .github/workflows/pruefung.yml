@@ -70,6 +70,12 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4.4.0, auf den Commit festgelegt
 
+      # Ohne das lädt ein Browser nach einer Änderung weiter die alten Dateien.
+      - name: "Versionsparameter ?v=… auf den Commit setzen"
+        run: |
+          SHA="${GITHUB_SHA::8}"
+          sed -i -E "s/\?v=[A-Za-z0-9._-]+/?v=$SHA/g" index.html
+
       # Nur was die Seite braucht. Alles andere bleibt im Repository.
       - name: Dateien der Seite zusammenstellen
         run: |
