@@ -101,7 +101,9 @@ for (const seite of K.vorladen || []) {
   einstiege.forEach(folge);
   const importiert = [...huelle].filter(p => !einstiege.includes(p));
   const ohneModul = importiert.filter(p => !hinweise.some(h => h.art === 'script' && ort(h.ziel) === p));
-  if (einstiege.length) ok(ohneModul.length === 0, `${seite}: jedes importierte Modul hat seinen Hinweis (${importiert.length} Module)` + (ohneModul.length ? ', es fehlt: ' + ohneModul.join(', ') : ''));
+  if (einstiege.length && !K.importeOhneHinweis) ok(ohneModul.length === 0, `${seite}: jedes importierte Modul hat seinen Hinweis (${importiert.length} Module)` + (ohneModul.length ? ', es fehlt: ' + ohneModul.join(', ') : ''));
+  // Hier tragen die Importe keine Version, die Hinweise bekämen aber eine: Der Browser lüde das Modul doppelt.
+  if (einstiege.length && K.importeOhneHinweis) ok(importiert.every(p => !hinweise.some(h => ort(h.ziel) === p)), `${seite}: importierte Module haben bewusst keinen Hinweis (sonst doppelter Abruf)`);
   const verwaist = hinweise.filter(h => !(h.art === 'script' ? skripte : stile).includes(h.ziel) && !importiert.includes(ort(h.ziel))).map(h => h.ziel);
   ok(verwaist.length === 0, `${seite}: kein Hinweis ohne Tag (der Browser lüde sonst umsonst)` + (verwaist.length ? ': ' + verwaist.join(', ') : ''));
   ok(hinweise.length > 0 && hinweise.every(h => h.ort > csp && h.ort < ersterSkript), `${seite}: die Hinweise stehen hinter der Richtlinie und vor dem ersten Skript`);
@@ -133,7 +135,11 @@ if (K.workflow) {
     ok(ohne.length === 0, 'Jedes eigene Skript und Stylesheet trägt ?v=, der Lauf setzt den Commit ein' + (ohne.length ? ', es fehlt: ' + ohne.join(', ') : ''));
   }
 
-  const online = (p) => kopiert.some(k => p === k || p.startsWith(k + '/'));
+  // Einzelne Unterordner, die der Lauf zusätzlich hochlädt (der Rest ihres Ordners bleibt im Repository)
+  const zusatz = K.zusatzOnline || [];
+  if (zusatz.length) ok(zusatz.every(z => gibt(z) && job.includes('cp -r ' + z + ' _site/' + path.posix.dirname(z) + '/')),
+    'Zusätzlich hochgeladen wird nur: ' + zusatz.join(' '));
+  const online = (p) => kopiert.concat(zusatz).some(k => p === k || p.startsWith(k + '/'));
   // Was die Seiten einbinden, muss in dem liegen, was hochgeladen wird.
   const eingebunden = [];
   for (const seite of dateien.filter(p => p.endsWith('.html') && online(p))) {
@@ -158,7 +164,11 @@ if (K.workflow) {
     const muster = istOrdner
       ? ["'" + n + '/', '"' + n + '/', '`' + n + '/', "'./" + n + '/', '"./' + n + '/']
       : ["'" + n + "'", '"' + n + '"', "'./" + n + "'", '"./' + n + '"'];
-    for (const t of texte) if (muster.some(x => lies(t).includes(x))) gebraucht.push(t + ' braucht ' + n);
+    for (const t of texte) {
+      const text = zusatz.reduce((s, z) => s.split(z + '/').join(''), lies(t));
+      // K.nurErwaehnt: Stellen, die den Pfad nur in einem Hinweistext nennen und nichts laden.
+      if (muster.some(x => text.includes(x)) && !(K.nurErwaehnt || []).includes(t + ' braucht ' + n)) gebraucht.push(t + ' braucht ' + n);
+    }
   }
   ok(gebraucht.length === 0, 'Nichts Veröffentlichtes verweist auf etwas, das nicht online steht' + (gebraucht.length ? ': ' + gebraucht.join(', ') : ''));
 }
