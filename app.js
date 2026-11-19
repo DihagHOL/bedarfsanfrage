@@ -19,12 +19,14 @@ const FORM_FIELDS = [
   { key:'Beschreibung',          label:'Beschreibung',                   step:1, alsoTry:['Description','Beschreibung_x002f_Begruendung','Grund'] },
   { key:'Warengruppe',           label:'Warengruppe',                    step:1, required:true, alsoTry:['ProductCategory'] },
   { key:'Prioritaet',            label:'Priorität',                      step:1, alsoTry:['Priority','Priorit_x00e4_t'] },
-  { key:'AutoBedarfDatum',       label:'Datum zur Automatische Bedarfsanfrage', step:1, alsoTry:['AutomatischeBedarfsanfrageDatum','DatumAutomatischeBedarfsanfrage','DatumZurAutomatischenBedarfsanfrage','AutoBANFDatum'] },
+  // Wiederkehrender Bedarf: an diesem Tag legt der Auto-Entwurf-Lauf eine Kopie an. Seit 19.11.2026 nicht
+  // mehr in Schritt 1, sondern zum Ankreuzen im letzten Schritt, weil dort oft das Lieferdatum landete.
+  { key:'AutoBedarfDatum',       label:'Wiederkehrend: neue Anfrage am', step:1, alsoTry:['DatumzurAutomatischeBedarfsanfra','AutomatischeBedarfsanfrageDatum','DatumAutomatischeBedarfsanfrage','DatumZurAutomatischenBedarfsanfrage','AutoBANFDatum'] },
   // Step 2: Menge
   { key:'Menge',                 label:'Menge',                          step:2, required:true, alsoTry:['Quantity','Amount'] },
   { key:'Mengeneinheit',         label:'Mengeneinheit',                  step:2, required:true, alsoTry:['Unit','UnitOfMeasure'] },
   { key:'Mindestlagermenge',     label:'Mindestlagermenge',              step:2, alsoTry:['MinStock','MinLager'] },
-  { key:'Termin',                label:'Benötigt bis',                   step:2, required:true, alsoTry:['Deadline','DueDate','Ben_x00f6_tigtBis','Ben_x00f6_tigtbis'] },
+  { key:'Termin',                label:'Liefertermin',                   step:2, required:true, alsoTry:['Deadline','DueDate','Ben_x00f6_tigtBis','Ben_x00f6_tigtbis'] },
   // Step 3: Beschaffung
   { key:'Artikelnummer',         label:'Artikelnummer',                  step:1, alsoTry:['MaterialNumber','ItemNumber','Artikelnummer_x002f_Nummernangab'] },
   { key:'ExterneArtikelnummer',  label:'Externe Artikelnummer',          step:1, alsoTry:['ExternalItemNumber','ExtArtikelNr','ExterneArtikelnr'] },
@@ -63,6 +65,7 @@ const STATUS_STYLES = {
   'freigegeben':                        { bg:'#f3e8ff', color:'#7e22ce' },
   'abgelehnt':                          { bg:'#f3f4f6', color:'#374151' },
   'bestellt':                           { bg:'#dbeafe', color:'#1d4ed8' },
+  'erledigt (ohne bestellung)':         { bg:'#dcfce7', color:'#166534' },
   'erledigt':                           { bg:'#f3f4f6', color:'#374151' },
   'zurückgezogen':                      { bg:'#f3f4f6', color:'#6b7280' },
   'abgebrochen':                        { bg:'#f3f4f6', color:'#6b7280' },
@@ -464,6 +467,9 @@ async function bootDone() {
     $id('hdr-name').textContent = name;
     $id('hdr-mail').textContent = account?.username || '';
     navigate(startansichtHolen());
+    // Direktlink auf eine Anfrage (?anfrage=356), etwa aus der Freigabe in Teams oder per Mail
+    if (_startAnfrage && allItems.some(i => String(i.id) === _startAnfrage)) navigate('detail', _startAnfrage);
+    _startAnfrage = null;
   } catch(e) {
     $id('boot-sub').textContent = 'Fehler beim Laden: ' + e.message;
     $id('boot-spinner').style.display = 'none';
@@ -478,9 +484,16 @@ async function bootDone() {
 // ?ansicht=prozess&modell=freigabe. Die Rückkehr-Adresse der Anmeldung hat keine
 // Parameter, deshalb merkt sich die Seite den Wunsch bis nach der Anmeldung.
 const START_ANSICHTEN = ['dashboard', 'new', 'multi', 'mine', 'gemeinsame', 'reports', 'prozess', 'importer', 'schulung'];
+let _startAnfrage = null;   // ?anfrage=ID: nach dem Start diese Anfrage öffnen
 function merkeStartansicht() {
   try {
     const q = new URLSearchParams(location.search);
+    const anfrage = (q.get('anfrage') || '').replace(/[^0-9]/g, '').slice(0, 8);
+    if (anfrage) {
+      sessionStorage.setItem('banf_startansicht', JSON.stringify({ ansicht: 'anfrage', id: anfrage }));
+      history.replaceState(null, '', location.pathname);
+      return;
+    }
     const ansicht = (q.get('ansicht') || '').trim().toLowerCase();
     if (!START_ANSICHTEN.includes(ansicht)) return;
     sessionStorage.setItem('banf_startansicht', JSON.stringify({ ansicht, modell: (q.get('modell') || '').slice(0, 60) }));
@@ -493,6 +506,7 @@ function startansichtHolen() {
     s = JSON.parse(sessionStorage.getItem('banf_startansicht') || 'null');
     sessionStorage.removeItem('banf_startansicht');
   } catch { s = null; }
+  if (s && s.ansicht === 'anfrage' && s.id) { _startAnfrage = String(s.id); return 'dashboard'; }
   if (!s || !START_ANSICHTEN.includes(s.ansicht)) return 'dashboard';
   if (s.ansicht === 'prozess' && s.modell && typeof prozessStartModell === 'function') prozessStartModell(s.modell);
   return s.ansicht;
@@ -916,6 +930,7 @@ let accessListId        = null;
 let accessConfigItemId  = null;
 let accessUsers         = {}; // { 'upn@dihag.com': { dashboard:true, reports:true, importer:false } }
 let abteilungen         = []; // zentral gepflegte Abteilungsliste (Gruppierung in „Gemeinsame Anfragen")
+let abteilungAlias      = {}; // zusammengeführte Abteilungen: alter Name → neuer Name
 let abteilungenItemId   = null;
 
 function myUPN() { return (account?.username || '').trim().toLowerCase(); }
@@ -1004,11 +1019,40 @@ function myWarengruppen() {
 function canApproveItem(item) {
   if (isAdmin()) return true;
   if (!canAccess('einkauf')) return false;
+  // Einkäufer, die nur Zugeteiltes bearbeiten (etwa ein Azubi): nur Anfragen, die ihnen zugeteilt sind
+  if (nurZugeteilt()) return !!item && istMirZugeteilt(item);
   const allowed = myWarengruppen();
   if (!allowed.length) return true;
   if (!item) return false;
   const wgVal = getField(item, resolvedFields['Warengruppe'] || 'Warengruppe') || '';
   return allowed.includes(wgCodeOf(wgVal));
+}
+
+// Darf der Nutzer nur Anfragen bearbeiten, die ihm zugeteilt sind? (Flag nurZugeteilt in access)
+function nurZugeteilt() {
+  if (isAdmin()) return false;
+  for (const id of _myIdentities()) { const u = accessUsers[id]; if (u && u.nurZugeteilt) return true; }
+  return false;
+}
+function istMirZugeteilt(item) {
+  const field = getLockField();
+  if (!field || !item) return false;
+  const lock = parseLock(getField(item, field) || '');
+  return !!lock && lock.kind === 'reserve' && sperreAktiv(lock, item) && istMeineSperre(lock);
+}
+// Abteilung einer Anfrage auf die angelegte Abteilung abbilden. Zusammengeführte Abteilungen
+// (Einkauf und Wareneingang seit 19.11.2026) stehen in BANF_Konfiguration unter
+// „zusammengefuehrt": alter Name → neuer Name. Ältere Anfragen behalten ihren alten Wert.
+function abteilungKanon(wert) {
+  const v = String(wert || '').trim().toLowerCase();
+  if (!v) return null;
+  const direkt = abteilungen.find(a => a.trim().toLowerCase() === v);
+  if (direkt) return direkt;
+  for (const [alt, neu] of Object.entries(abteilungAlias || {})) {
+    if (alt.trim().toLowerCase() === v)
+      return abteilungen.find(a => a.trim().toLowerCase() === String(neu).trim().toLowerCase()) || null;
+  }
+  return null;
 }
 
 // Abteilungen, die der aktuelle Nutzer in „Gemeinsame Anfragen" sehen darf.
@@ -1018,7 +1062,7 @@ function myAbteilungen() {
   const set = new Set();
   for (const id of _myIdentities()) {
     const u = accessUsers[id];
-    if (u && Array.isArray(u.abteilungen)) u.abteilungen.forEach(a => set.add(a));
+    if (u && Array.isArray(u.abteilungen)) u.abteilungen.forEach(a => set.add(abteilungKanon(a) || a));
   }
   // Nur angelegte Abteilungen gelten (entfernte Zuordnungen fallen weg).
   return abteilungen.filter(a => set.has(a));
@@ -1061,7 +1105,11 @@ async function loadAccessConfig() {
     const abtItem = (res.value || []).find(it => (it.fields?.Title || '') === ABTEILUNG_ITEM_TITLE);
     if (abtItem) {
       abteilungenItemId = abtItem.id;
-      try { abteilungen = JSON.parse(_decodeSpText(abtItem.fields?.ConfigValue) || '{}').list || []; } catch {}
+      try {
+        const cfg = JSON.parse(_decodeSpText(abtItem.fields?.ConfigValue) || '{}') || {};
+        abteilungen = cfg.list || [];
+        abteilungAlias = (cfg.zusammengefuehrt && typeof cfg.zusammengefuehrt === 'object') ? cfg.zusammengefuehrt : {};
+      } catch {}
     }
   } catch (e) {
     console.warn('[Zugriff] Konfiguration konnte nicht geladen werden:', e.message);
@@ -1074,7 +1122,9 @@ async function saveAbteilungen() {
   try {
     const listId = await _findConfigList();
     if (!listId) { toast("Liste 'BANF_Konfiguration' nicht gefunden – siehe Konsole.", 'error'); return; }
-    const fields = { Title: ABTEILUNG_ITEM_TITLE, ConfigValue: JSON.stringify({ list: abteilungen }) };
+    // Die Zuordnung zusammengeführter Abteilungen bleibt beim Speichern erhalten
+    const wert = Object.keys(abteilungAlias || {}).length ? { list: abteilungen, zusammengefuehrt: abteilungAlias } : { list: abteilungen };
+    const fields = { Title: ABTEILUNG_ITEM_TITLE, ConfigValue: JSON.stringify(wert) };
     if (abteilungenItemId) {
       await gPatch(`/sites/${siteId}/lists/${listId}/items/${abteilungenItemId}/fields`, fields);
     } else {
@@ -1091,8 +1141,10 @@ async function saveAbteilungen() {
 // Admin-UI-Helfer für die Abteilungsliste
 function renderAbteilungRows() {
   if (!abteilungen.length) return '<p class="su-empty">Noch keine Abteilungen angelegt.</p>';
+  const herkunft = a => Object.entries(abteilungAlias || {}).filter(([, neu]) => neu === a).map(([alt]) => alt);
   return abteilungen.map(a =>
-    `<div class="access-row"><span class="su-email">${esc(a)}</span>` +
+    `<div class="access-row"><span class="su-email">${esc(a)}${herkunft(a).length
+      ? ` <span class="abt-alias">zusammengeführt aus ${esc(herkunft(a).join(', '))}</span>` : ''}</span>` +
     `<button class="su-del" title="Entfernen" onclick="removeAbteilung('${escJs(a)}')">✕</button></div>`).join('');
 }
 function addAbteilung() {
@@ -1463,11 +1515,89 @@ function filterDashboard(soft) {
       items.sort((a,b) => (parseFloat(getField(a,priceKey))||0) - (parseFloat(getField(b,priceKey))||0)); break;
     case 'status':
       items.sort((a,b) => statusAnzeige(a).localeCompare(statusAnzeige(b))); break;
+    case 'lieferant':   // Anfragen zum selben Lieferanten untereinander, ohne Lieferant am Ende
+      items.sort((a,b) => lieferantSchluessel(a).localeCompare(lieferantSchluessel(b), 'de')
+        || new Date(b.createdDateTime) - new Date(a.createdDateTime)); break;
     default: // date-desc
       items.sort((a,b) => new Date(b.createdDateTime) - new Date(a.createdDateTime));
   }
 
-  _renderCards($id('list-dashboard'), items, soft, 'Keine Anfragen für diesen Status.');
+  const box = $id('list-dashboard');
+  $id('dash-ansicht-karten')?.classList.toggle('active', dashAnsicht !== 'tabelle');
+  $id('dash-ansicht-tabelle')?.classList.toggle('active', dashAnsicht === 'tabelle');
+  if (dashAnsicht === 'tabelle') { dashTabelleRendern(box, items); return; }
+  _renderCards(box, items, soft, 'Keine Anfragen für diesen Status.');
+}
+
+// ── DASHBOARD ALS TABELLE ─────────────────────────────────────────────────────
+// Rückmeldung Einkauf 19.11.2026: schneller Überblick über die Lieferanten, um mehrere Anfragen
+// zum selben Lieferanten zu bündeln. Umschalter Karten/Tabelle, die Wahl merkt sich der Browser.
+// Bei „Nach Lieferant" bekommt jeder Lieferant eine Kopfzeile mit Anzahl und Volumen.
+let dashAnsicht = (() => { try { return localStorage.getItem('banf_dash_ansicht') === 'tabelle' ? 'tabelle' : 'karten'; } catch { return 'karten'; } })();
+function setDashAnsicht(a) {
+  dashAnsicht = a === 'tabelle' ? 'tabelle' : 'karten';
+  try { localStorage.setItem('banf_dash_ansicht', dashAnsicht); } catch { /* nur Komfort */ }
+  filterDashboard();
+}
+function dashSortSetzen(v) {
+  const sel = $id('sort-dashboard'); if (sel) sel.value = v;
+  setDashSort(v);
+}
+function lieferantVon(i) { return String(getField(i, resolvedFields['Lieferant'] || 'Lieferant') || '').trim(); }
+function lieferantSchluessel(i) { return lieferantVon(i).toLowerCase() || String.fromCharCode(65535); }
+function dashTabelleRendern(container, items) {
+  if (!container) return;
+  container.classList.add('dash-tabelle-modus');
+  if (!items.length) { container.innerHTML = emptyState('Keine Anfragen für diesen Status.'); return; }
+  const scroller = container.closest('.split-list');
+  const pos = scroller ? scroller.scrollTop : 0;
+  const gezeigt = items.slice(0, LIST_ROW_CAP);
+  container.innerHTML = dashTabelleHtml(gezeigt, dashSortOrder === 'lieferant')
+    + (items.length > LIST_ROW_CAP ? `<div class="list-cap-note">Erste ${LIST_ROW_CAP} von ${items.length} angezeigt. Suche und Filter grenzen ein.</div>` : '');
+  if (scroller) scroller.scrollTop = pos;
+}
+function dashTabelleHtml(items, gruppieren) {
+  const rf = (i, k) => getField(i, resolvedFields[k] || k) || '';
+  const kopf = (text, sort, cls = '') => sort
+    ? `<th class="dt-sort${cls}${dashSortOrder === sort ? ' aktiv' : ''}" onclick="dashSortSetzen('${sort}')" title="Danach sortieren">${text}</th>`
+    : `<th class="${cls.trim()}">${text}</th>`;
+  const zeile = i => {
+    const preis = parseFloat(rf(i, 'GeschaetzterPreis')) || 0;
+    const resv  = reservationOf(i);
+    const kl = ['dt-zeile', istArchiv(i) ? 'is-archiv' : '', isOverdue(i) ? 'is-overdue' : '',
+      panelItemId === String(i.id) ? 'selected' : ''].filter(Boolean).join(' ');
+    return `<tr class="${kl}" data-id="${i.id}" onclick="openPanel('${i.id}')">
+      <td class="dt-id">#${i.id}</td>
+      <td class="dt-titel">${prioDot(rf(i, 'Prioritaet'))}${esc(cleanTitle(rf(i, 'Title')))}${istArchiv(i) ? ' <span class="dt-marke">Archiv</span>' : ''}${resv ? ` <span class="dt-marke dt-resv" title="Zuständig">🔑 ${esc(resv.by)}</span>` : ''}</td>
+      <td>${esc(lieferantVon(i)) || '<span class="dt-leer">ohne</span>'}</td>
+      <td class="dt-nw">${statusBadge(getStatusVal(i))}</td>
+      <td class="dt-r dt-nw">${preis ? fmtEuro(preis) : ''}</td>
+      <td class="dt-nw">${rf(i, 'Termin') ? fmtDate(rf(i, 'Termin')) : ''}</td>
+      <td>${esc(rf(i, 'Warengruppe'))}</td>
+      <td>${esc(rf(i, 'Abteilung'))}</td>
+      <td>${esc(i.createdBy?.user?.displayName || '')}</td>
+      <td class="dt-nw">${i.createdDateTime ? fmtDate(i.createdDateTime) : ''}</td>
+    </tr>`;
+  };
+  let rows = '', letzter = null;
+  for (const i of items) {
+    if (gruppieren) {
+      const name = lieferantVon(i) || 'Ohne Lieferant';
+      if (name.toLowerCase() !== letzter) {
+        letzter = name.toLowerCase();
+        const gruppe = items.filter(x => (lieferantVon(x) || 'Ohne Lieferant').toLowerCase() === letzter);
+        const summe  = gruppe.reduce((s, x) => s + (parseFloat(rf(x, 'GeschaetzterPreis')) || 0), 0);
+        const offen  = gruppe.filter(x => isOffenStatus(getStatusVal(x))).length;
+        rows += `<tr class="dt-gruppe"><td colspan="10">🏭 <strong>${esc(name)}</strong>`
+          + ` · ${anzahl(gruppe.length, 'Anfrage', 'Anfragen')}${offen ? `, davon ${offen} offen` : ''} · ${fmtEuro(summe)}</td></tr>`;
+      }
+    }
+    rows += zeile(i);
+  }
+  return `<div class="dash-tabelle-wrap"><table class="dash-tabelle">
+    <thead><tr>${kopf('Nr.', '')}${kopf('Bezeichnung', '')}${kopf('Lieferant', 'lieferant')}${kopf('Status', 'status')}${kopf('Volumen', 'price-desc', ' dt-r')}
+      ${kopf('Liefertermin', '')}${kopf('Warengruppe', '')}${kopf('Abteilung', '')}${kopf('Angelegt von', '')}${kopf('Angelegt', 'date-desc')}</tr></thead>
+    <tbody>${rows}</tbody></table></div>`;
 }
 
 // Render-Performance: nur die ersten LIST_ROW_CAP Karten darstellen
@@ -1701,7 +1831,7 @@ function filterView(type, soft) {
 
   // hideCompleted: filter out terminal states in Meine Anfragen
   if (type === 'mine' && userSettings.hideCompleted && !mineStatusFilter) {
-    items = items.filter(i => !/^(bestellt|erledigt|abgelehnt)$/i.test(getStatusVal(i)));
+    items = items.filter(i => !/^(bestellt|abgelehnt|zur[üu]ckgezogen)$|^erledigt/i.test(getStatusVal(i)));
   }
 
   if (search) items = items.filter(i =>
@@ -1979,6 +2109,7 @@ function statusColorFor(val) {
   if (/freigegeben/.test(v))            return { bg:'#f3e8ff', color:'#7e22ce' };
   if (/abgelehnt/.test(v))              return { bg:'#f3f4f6', color:'#374151' };
   if (/bestellt/.test(v))               return { bg:'#dbeafe', color:'#1d4ed8' };
+  if (/erledigt.*ohne bestellung/.test(v)) return { bg:'#dcfce7', color:'#166534' };
   if (/erledigt|abgeschlossen/.test(v)) return { bg:'#f3f4f6', color:'#374151' };
   return { bg:'#f0f9ff', color:'#0369a1' };
 }
@@ -2105,6 +2236,24 @@ function statusTimeline(statusVal, item) {
     out.push(row(spLabel(stages[0]), '✓', 'ap-ok', 'Antragsteller', creator, null, false, false));
     const wLabel = (statusChoices.find(c => /zur[üu]ckgezogen|abgebrochen|storniert|zur[üu]ckgenommen/i.test(String(c).trim())) || sv || 'Zurückgezogen').trim();
     out.push(row(wLabel, '↩', 'ap-cancel', null, null, null, false, false));
+    return out.join('');
+  }
+
+  // Ohne Bestellung abgeschlossen: Antragsteller, die erteilten Freigaben, dann der Abschluss mit
+  // Person und Begründung aus dem Kommentar (doOhneBestellung).
+  if (/^erledigt/i.test(sv)) {
+    out.push(row(spLabel(stages[0]), '✓', 'ap-ok', 'Antragsteller', creator, null, false, false));
+    const einkaufBy = resolvePersonField(fields, 'Entscheider_x002a_in') || (item && item._einkaufApprover) || null;
+    if (einkaufBy) out.push(row('Genehmigt (Einkauf)', '✓', 'ap-ok', 'Einkauf', einkaufBy, null, false, true));
+    for (const st of stages) {
+      if (!st.approverField || /entscheider/i.test(st.approverField)) continue;
+      const actor = resolvePersonField(fields, st.approverField);
+      if (actor) out.push(row(displayLabel(st, true), '✓', 'ap-ok', st.role, actor, String(fields[st.commentField] || '').trim(), false, true));
+    }
+    const ob = parseKommentare(getField(item, getKommentarCol())).filter(k => k.text.startsWith(OB_PRAEFIX)).pop();
+    const obBy = ob ? (ob.header.split(' ' + String.fromCharCode(8211) + ' ').pop() || null) : null;
+    const obGrund = ob ? ob.text.slice(OB_PRAEFIX.length).trim() : '';
+    out.push(row(sv, '✓', 'ap-ok', 'Einkauf', obBy, obGrund, true, false));
     return out.join('');
   }
 
@@ -2984,6 +3133,9 @@ function applyWizardPrefill(data) {
 function initWizard() {
   wizardData = {};
   showStep(1);
+  // Wiederkehrender Bedarf (letzter Schritt): ohne Haken, Datumsfeld verborgen und leer
+  const wkHaken = $id('f-Wiederkehrend'); if (wkHaken) wkHaken.checked = false;
+  wiederkehrendUmschalten();
   // Artikelnummer + Kostenstelle autocomplete in wizard
   const wArtNr = $id('f-Artikelnummer');
   if (wArtNr) initTidAutocomplete(wArtNr, key => $id('f-' + key));
@@ -3097,7 +3249,6 @@ function wNext(step) {
       Prioritaet:           $id('f-Prioritaet').value,
       Artikelnummer:        $id('f-Artikelnummer').value.trim(),
       ExterneArtikelnummer: $id('f-ExterneArtikelnummer')?.value.trim() || '',
-      AutoBedarfDatum:      $id('f-AutoBedarfDatum')?.value || '',
     };
     updatePreisHint(); // die Warengruppe entscheidet mit über die Controlling-Stufe
   } else if (step === 2) {
@@ -3330,7 +3481,7 @@ function buildReview() {
       ${reviewSection('Mengengaben', [
         ['Menge', d.Menge && d.Mengeneinheit ? `${d.Menge} ${d.Mengeneinheit}` : d.Menge],
         ['Mindestlagermenge', d.Mindestlagermenge],
-        ['Benötigt bis', d.Termin ? fmtDate(d.Termin) : null],
+        ['Liefertermin', d.Termin ? fmtDate(d.Termin) : null],
       ])}
       ${reviewSection('Beschaffungsdetails', [
         ['Beschaffungsart', d.Beschaffungslogik],
@@ -3509,6 +3660,24 @@ async function patchRetry(path, fields, retries404 = 6, delay404 = 2000) {
   throw new Error('PATCH fehlgeschlagen – alle Kandidatenfelder versucht.');
 }
 
+// Wiederkehrender Bedarf im letzten Schritt (Rückmeldung Einkauf 19.11.2026: im ersten Schritt
+// landete dort oft das Lieferdatum, daraus entstanden ungewollte Auto-Entwürfe). Liefert das
+// Datum, '' ohne Haken oder false bei einer ungültigen Eingabe (mit Hinweis).
+function wiederkehrendDatum() {
+  if (!$id('f-Wiederkehrend')?.checked) return '';
+  const v = $id('f-AutoBedarfDatum')?.value || '';
+  if (!v) { toast('Bitte das Datum für die neue Anfrage angeben oder den Haken entfernen.', 'error'); return false; }
+  const heute = new Date(); heute.setHours(0, 0, 0, 0);
+  if (new Date(v + 'T00:00:00') <= heute) { toast('Das Datum für die neue Anfrage muss in der Zukunft liegen.', 'error'); return false; }
+  const termin = String(wizardData.step2?.Termin || '').slice(0, 10);
+  if (termin && termin === v) { toast('Das ist der Liefertermin. Für einen wiederkehrenden Bedarf ein späteres Datum wählen.', 'error'); return false; }
+  return v;
+}
+function wiederkehrendUmschalten() {
+  const an = !!$id('f-Wiederkehrend')?.checked;
+  const feld = $id('wk-feld'); if (feld) feld.hidden = !an;
+  if (!an) { const d = $id('f-AutoBedarfDatum'); if (d) d.value = ''; }
+}
 async function submitRequest() {
   const btn = $id('btn-submit');
   btn.disabled = true;
@@ -3516,6 +3685,10 @@ async function submitRequest() {
 
   try {
     const d = { ...wizardData.step1, ...wizardData.step2, ...wizardData.step3 };
+    // Wiederkehrender Bedarf: zählt nur mit Haken im letzten Schritt
+    const wk = wiederkehrendDatum();
+    if (wk === false) { btn.disabled = false; btn.textContent = '✓ Anfrage einreichen'; return; }
+    if (wk) d.AutoBedarfDatum = wk;
     const allFields = buildFields(d, FORM_FIELDS);
 
     if (!allFields['Title']) { toast('Titel fehlt.', 'error'); btn.disabled=false; btn.textContent='✓ Anfrage einreichen'; return; }
@@ -3872,7 +4045,7 @@ const REPORT_COLS = [
   { key:'Kostenstelle',     label:'Kostenstelle',   type:'text', get:i => _rf(i,'Kostenstelle') },
   { key:'Bestellnummer',    label:'Bestell-Nr.',    type:'text', get:i => _rf(i,'Bestellnummer') },
   { key:'Artikelnummer',    label:'Artikel-Nr.',    type:'text', get:i => _rf(i,'Artikelnummer') },
-  { key:'Termin',           label:'Benötigt bis',   type:'date', get:i => _rf(i,'Termin') },
+  { key:'Termin',           label:'Liefertermin',   type:'date', get:i => _rf(i,'Termin') },
   { key:'creator',          label:'Ersteller',      type:'text', get:i => i.createdBy?.user?.displayName || i.createdBy?.user?.email || '' },
   { key:'created',          label:'Erstellt am',    type:'date', get:i => i.createdDateTime || '' },
   { key:'archiv',           label:'Archiv',         type:'text', get:i => istArchiv(i) ? 'ja' : 'nein' },
@@ -3956,8 +4129,8 @@ function renderReports() {
         ${num('rep-preis-max','Volumen bis €','max')}
         ${dat('rep-created-from','Erstellt von')}
         ${dat('rep-created-to','Erstellt bis')}
-        ${dat('rep-termin-from','Benötigt von')}
-        ${dat('rep-termin-to','Benötigt bis')}
+        ${dat('rep-termin-from','Liefertermin von')}
+        ${dat('rep-termin-to','Liefertermin bis')}
       </div>
       <div class="rep-active" id="rep-active"></div>
       <div class="rep-table-wrap">
@@ -4048,7 +4221,7 @@ const REP_LABELS = {
   search:'Suche', status:'Status', wg:'Warengruppe', ma:'Mitarbeiter', prio:'Priorität',
   ba:'Beschaffungsart', lieferant:'Lieferant', kst:'Kostenstelle', be:'Bestell-Nr.',
   preisMin:'Volumen ab', preisMax:'Volumen bis', createdFrom:'Erstellt von', createdTo:'Erstellt bis',
-  terminFrom:'Benötigt von', terminTo:'Benötigt bis',
+  terminFrom:'Liefertermin von', terminTo:'Liefertermin bis',
 };
 
 function _restoreReportFilters() {
@@ -4261,8 +4434,8 @@ function initGemeinsame() {
   // schreibung auf die zugeordnete Schreibweise abgebildet; Anfragen ohne (oder mit
   // nicht sichtbarer) Abteilung bleiben außen vor.
   const myAbt   = myAbteilungen();
-  const byLower = new Map(myAbt.map(a => [a.trim().toLowerCase(), a]));
-  const configuredOf = it => byLower.get(String(getField(it, abtKey) || '').trim().toLowerCase()) || null;
+  // Alte Werte zusammengeführter Abteilungen (etwa „Wareneingang") landen bei der neuen Gruppe
+  const configuredOf = it => { const k = abteilungKanon(getField(it, abtKey)); return k && myAbt.includes(k) ? k : null; };
 
   const open    = (allItems || []).filter(i => isOffenStatus(getStatusVal(i)) && configuredOf(i));
   const odCount = open.filter(isOverdue).length;
@@ -4345,7 +4518,9 @@ function initSchulung() {
         <h2>1 · Überblick</h2>
         <p>Die Navigation links führt zu den Hauptbereichen:</p>
         <ul>
-          <li><b>Dashboard:</b> Liste aller Anfragen mit Status-Chips, Warengruppen- und Mitarbeiterfilter.</li>
+          <li><b>Dashboard:</b> Liste aller Anfragen mit Status-Chips, Warengruppen- und Mitarbeiterfilter,
+              als Karten oder als Tabelle. In der Tabelle sortiert „Nach Lieferant" die Anfragen je Lieferant
+              untereinander, mit Anzahl und Volumen. So lassen sich Anfragen zum selben Lieferanten bündeln.</li>
           <li><b>Neue Anfrage:</b> Assistent für eine einzelne Position.</li>
           <li><b>Sammelanfrage:</b> Assistent für mehrere Positionen in einer Anfrage.</li>
           <li><b>Meine Anfragen:</b> nur Ihre eigenen Anfragen.</li>
@@ -4367,12 +4542,15 @@ function initSchulung() {
         <ol>
           <li><b>Bedarf:</b> Bezeichnung und Warengruppe (Pflicht). Geben Sie eine Artikelnummer
               ein, dann schlägt das Tool Bezeichnung und Warengruppe vor.</li>
-          <li><b>Menge:</b> Menge, Mengeneinheit und „Benötigt bis"-Termin.</li>
+          <li><b>Menge:</b> Menge, Mengeneinheit und <b>Liefertermin</b>: bis wann die Ware im Werk sein
+              muss. Das ist kein Termin für die Genehmigung.</li>
           <li><b>Beschaffung:</b> Beschaffungsart, Lieferant(en), Kostenstelle, <b>Abteilung</b>
               und <b>Bestellvolumen in € (Pflicht)</b>. Die Abteilung steuert, in welcher Gruppe
               die Anfrage unter „Gemeinsame Anfragen" erscheint. Anhand des Volumens zeigt das Tool
               den erforderlichen Genehmigungsweg an (z. B. Anzahl Angebote).</li>
-          <li><b>Prüfen & Einreichen:</b> Zusammenfassung kontrollieren und absenden.</li>
+          <li><b>Prüfen & Einreichen:</b> Zusammenfassung kontrollieren und absenden. Für einen
+              <b>wiederkehrenden Bedarf</b> setzen Sie hier den Haken und das Datum der neuen Anfrage.
+              An diesem Tag legt das System eine Kopie als Entwurf an. Das ist nicht der Liefertermin.</li>
         </ol>
         <div class="schulung-tip">💡 Über das Feld „Externe Artikelnummer" erfassen Sie bei
           Katalogware die Lieferanten-Nummer.</div>
@@ -4387,7 +4565,7 @@ function initSchulung() {
            angefragt werden.</p>
         <ol>
           <li><b>Positionen erfassen:</b> Pro Zeile Artikelnummer, Bezeichnung, Menge, ME,
-              <b>Preis</b>, <b>Benötigt bis</b> und <b>Kostenstelle</b>. Mit „+ Position
+              <b>Preis</b>, <b>Liefertermin</b> und <b>Kostenstelle</b>. Mit „+ Position
               hinzufügen" beliebig erweitern.</li>
           <li>Das <b>Bestellvolumen</b> wird automatisch aus den Einzelpreisen summiert.</li>
           <li>Warengruppe, Priorität, Abteilung und Beschaffungsart gelten für die gesamte Anfrage.</li>
@@ -4458,6 +4636,14 @@ function initSchulung() {
           </div>
         </div>
 
+        <p style="margin-top:14px"><b>Ohne Bestellung:</b> Braucht es keine Bestellung, etwa bei einer
+           kostenlosen Entsorgung, schließt der Einkauf die Anfrage mit Begründung ab. Das geht in der
+           Prüfung des Einkaufs und nach der Freigabe. Die Anfrage steht dann auf
+           <b>Erledigt (ohne Bestellung)</b>, die Begründung steht im Verlauf.</p>
+        <div class="schulung-tip">🏷 In der Prüfung setzt der Einkauf bei Bedarf das Kennzeichen
+          <b>Lead-Buyer-Abschluss</b>. Dann entfallen die Angebotspflicht und die Freigabe des strategischen
+          Einkaufs. Der Genehmigungsweg im Panel zeigt das sofort an.</div>
+
         <p style="margin-top:14px"><b>Ablehnung:</b> Lehnt eine Stufe ab, wechselt die Anfrage
            sofort auf <b>Abgelehnt</b>, die folgenden Stufen entfallen. Lehnt Controlling,
            Werkleitung oder strategischer Einkauf ab, bekommen Sie eine Mail. Lehnt der Einkauf ab,
@@ -4479,6 +4665,8 @@ function initSchulung() {
            Bestellnummer, Lieferdatum, tatsächlichen Preis und Angebote.</p>
         <div class="schulung-tip">⚠️ Ist eine <b>Bestellnummer (BE)</b> bereits bei einer anderen
           Anfrage hinterlegt, warnt das Tool sofort. So vermeiden Sie Doppelbestellungen.</div>
+        <div class="schulung-tip">✓ Keine Bestellung nötig? Mit „Ohne Bestellung abschließen" und einer
+          Begründung setzen Sie die Anfrage auf <b>Erledigt (ohne Bestellung)</b>.</div>
       </section>
 
       <section class="schulung-sec" id="sch-6">
@@ -4533,11 +4721,15 @@ function initSchulung() {
               Sie nur diese an. Denselben Filter gibt es im Dashboard und in „Meine Anfragen".
               Archiv-Anfragen aus der Zeit vor dem ${PRODUKTIV_AB_TEXT} sind davon ausgenommen.</li>
           <li><b>Reservieren:</b> Mit „🔑 Für mich reservieren" belegen Sie eine Anfrage zur
-              Bearbeitung für sich. Andere Einkäufer sehen dann, dass Sie daran arbeiten. Mit
-              „Reservierung aufheben" geben Sie sie wieder frei.</li>
+              Bearbeitung für sich. Andere Einkäufer sehen dann, dass Sie daran arbeiten. Die Reservierung
+              gilt bis zum Abschluss der Anfrage. Mit „Reservierung aufheben" geben Sie sie früher frei.</li>
+          <li><b>Zuteilen:</b> Mit „👤 Zuteilen" übergeben Sie eine Anfrage einem anderen Einkäufer. Er ist
+              dann zuständig, bis die Anfrage abgeschlossen ist. Wer in den Einstellungen „nur Zugeteiltes"
+              hat, etwa ein Auszubildender, bearbeitet nur Anfragen, die ihm zugeteilt sind.</li>
         </ul>
         <div class="schulung-tip">💡 Die Abteilungen und die Zuordnung der Nutzer pflegt die
-          Administration in den Einstellungen.</div>
+          Administration in den Einstellungen. Einkauf und Wareneingang sind seit dem 19.11.2026 eine
+          gemeinsame Gruppe „Einkauf/Wareneingang", ältere Anfragen beider Abteilungen erscheinen dort.</div>
       </section>
 
       <section class="schulung-sec" id="sch-9">
@@ -4549,7 +4741,8 @@ function initSchulung() {
            per Mail oder in Microsoft Teams.</p>
         <p><b>Warum kann ich eine Anfrage nicht bearbeiten?</b><br>
            Antragsteller können eine Anfrage nur im Status „In Prüfung (Einkauf)" bearbeiten.
-           Der zuständige Einkauf kann sie jederzeit bearbeiten, auch Archiv-Anfragen.</p>
+           Der zuständige Einkauf kann sie jederzeit bearbeiten, auch Archiv-Anfragen. Ist die Anfrage
+           einem anderen Einkäufer zugeteilt oder von ihm reserviert, ist sie für Sie gesperrt.</p>
         <p><b>Was bedeutet die Marke „Archiv"?</b><br>
            Die Anfrage wurde vor dem Produktivstart am ${PRODUKTIV_AB_TEXT} angelegt. Sie ist grau
            hinterlegt, zählt weiter mit und bleibt bearbeitbar. Als überfällig gilt sie nicht mehr.</p>
@@ -4627,7 +4820,7 @@ function applyMultiPrefill(fav) {
   const setVal = (id, v) => { const el = $id(id); if (el && v != null && v !== '') el.value = v; };
   _setSelectFlexible('mf-Warengruppe', data.Warengruppe);
   _setSelectFlexible('mf-Prioritaet', data.Prioritaet);
-  _setSelectFlexible('mf-Abteilung', data.Abteilung);
+  _setSelectFlexible('mf-Abteilung', abteilungKanon(data.Abteilung) || data.Abteilung);
   setVal('mf-Beschreibung', data.Beschreibung);
   setVal('mf-Lieferant', data.Lieferant);
   setVal('mf-Lieferant2', data.Lieferant2);
@@ -4728,7 +4921,7 @@ function renderMultiPositions() {
             oninput="multiPosChange(${i},'preis',this.value); updateMultiTotal()"/>
         </div>
         <div class="multi-pos-field" style="flex:0 0 140px">
-          <label>Benötigt bis</label>
+          <label title="Bis wann die Ware im Werk sein muss">Liefertermin</label>
           <input type="date" class="mpos-termin" data-idx="${i}"
             value="${esc(String(pos.termin || ''))}"
             oninput="multiPosChange(${i},'termin',this.value)"/>
@@ -5137,7 +5330,7 @@ function reservationOf(item) {
   const field = getLockField();
   if (!field) return null;
   const lock = parseLock(getField(item, field) || '');
-  return (lock && lock.kind === 'reserve' && lock.expiresAt > new Date()) ? lock : null;
+  return (lock && lock.kind === 'reserve' && sperreAktiv(lock, item)) ? lock : null;
 }
 
 function itemCard(item) {
@@ -5178,7 +5371,7 @@ function itemCard(item) {
         ${menge && me ? `<span class="ic-tag">⚖ ${esc(menge)} ${esc(me)}</span>` : ''}
         ${ks      ? `<span class="ic-tag">KST ${esc(ks)}</span>` : ''}
         ${liefant ? `<span class="ic-tag">🏭 ${esc(liefant)}</span>` : ''}
-        ${termin  ? `<span class="ic-tag">📅 bis ${fmtDate(termin)}</span>` : ''}
+        ${termin  ? `<span class="ic-tag" title="Liefertermin: bis dahin muss die Ware im Werk sein">🚚 Liefertermin ${fmtDate(termin)}</span>` : ''}
       </div>
       <div class="ic-footer">
         <span class="ic-by">${creator ? `👤 ${esc(creator)}` : ''} ${created ? `· ${created}` : ''}</span>
@@ -5249,7 +5442,7 @@ function compactRow(item) {
     wg     ? `<span class="cr2-tag cr2-wg">${esc(wg)}</span>` : '',
     beschl ? `<span class="cr2-tag">${beschlShort(beschl)}</span>` : '',
     menge && me ? `<span class="cr2-tag">⚖ ${esc(menge)} ${esc(me)}</span>` : '',
-    termin ? `<span class="cr2-tag">📅 ${fmtDate(termin)}</span>` : '',
+    termin ? `<span class="cr2-tag" title="Liefertermin">🚚 ${fmtDate(termin)}</span>` : '',
   ].filter(Boolean).join('');
 
   return `
@@ -5370,7 +5563,7 @@ async function openPanel(itemId) {
   $id(`panel-${currentView}`).classList.remove('hidden');
   $id(`split-${currentView}`).classList.add('has-panel');
 
-  document.querySelectorAll('.item-card').forEach(c =>
+  document.querySelectorAll('.item-card, .dt-zeile').forEach(c =>
     c.classList.toggle('selected', c.dataset.id === panelItemId));
 
   bindPanelEvents(itemId);
@@ -5392,7 +5585,7 @@ function closePanel() {
   panelItemId = null;
   panelEditMode = false;
   _vhLoaded = {};
-  document.querySelectorAll('.item-card').forEach(c => c.classList.remove('selected'));
+  document.querySelectorAll('.item-card, .dt-zeile').forEach(c => c.classList.remove('selected'));
 }
 
 function bindPanelEvents(itemId) {
@@ -5412,6 +5605,14 @@ function bindPanelEvents(itemId) {
   pq('#panel-fav')?.addEventListener('click', () => saveItemAsFavorite(itemId));
   pq('#panel-reserve')?.addEventListener('click', () => reserveForMe(itemId));
   pq('#panel-unreserve')?.addEventListener('click', () => releaseReservation(itemId));
+  // Zuteilen, Lead-Buyer, ohne Bestellung abschließen (Rückmeldung Einkauf 19.11.2026)
+  pq('#panel-zuteilen')?.addEventListener('click', () => { const f = pq('#zuteilen-form'); if (f) f.hidden = !f.hidden; });
+  pq('#btn-zuteilen-abbrechen')?.addEventListener('click', () => { const f = pq('#zuteilen-form'); if (f) f.hidden = true; });
+  pq('#btn-zuteilen-ok')?.addEventListener('click', () => zuteilen(itemId, pq('#zuteilen-wer')?.value || ''));
+  pq('#aab-leadbuyer')?.addEventListener('change', e => setzeLeadBuyer(itemId, e.target.checked));
+  pq('#btn-ob')?.addEventListener('click', () => { const f = pq('#ob-form'); if (f) { f.hidden = false; pq('#ob-grund')?.focus(); } });
+  pq('#btn-ob-abbrechen')?.addEventListener('click', () => { const f = pq('#ob-form'); if (f) f.hidden = true; });
+  pq('#btn-ob-ok')?.addEventListener('click', () => doOhneBestellung(itemId, pq('#ob-grund')?.value || ''));
 
   // Genehmigungsaktion-Buttons
   pq('#btn-approve')?.addEventListener('click', () => doApprove(itemId));
@@ -5619,9 +5820,11 @@ function bindPanelEditEvents(itemId) {
 async function savePanelEdits(itemId, panelRoot) {
   const data = {};
   (panelRoot || document).querySelectorAll('.pf-input[data-key]').forEach(inp => {
-    data[inp.dataset.key] = inp.value;
+    data[inp.dataset.key] = inp.type === 'checkbox' ? inp.checked : inp.value;
   });
   const fields = buildFields(data, FORM_FIELDS);
+  // Ein geleertes Datum für den wiederkehrenden Bedarf wirklich löschen (buildFields lässt Leeres weg)
+  if (data.AutoBedarfDatum === '' && resolvedFields['AutoBedarfDatum']) fields[resolvedFields['AutoBedarfDatum']] = null;
   if (!Object.keys(fields).length) return;
 
   const btn = panelRoot?.querySelector('#panel-save') || $id('panel-save');
@@ -5650,7 +5853,7 @@ async function savePanelEdits(itemId, panelRoot) {
 async function saveEdits(itemId) {
   const data = {};
   document.querySelectorAll('.pf-input[data-key]').forEach(inp => {
-    data[inp.dataset.key] = inp.value;
+    data[inp.dataset.key] = inp.type === 'checkbox' ? inp.checked : inp.value;
   });
   const fields = buildFields(data, FORM_FIELDS);
   if (!Object.keys(fields).length) return;
@@ -5992,14 +6195,14 @@ function renderPanel(item, editMode = false) {
   // Lock state for the edit button
   const lockField   = getLockField();
   const lockData    = parseLock(lockField ? (getField(item, lockField) || '') : '');
-  const isLocked    = lockData && lockData.expiresAt > new Date();
+  const isLocked    = sperreAktiv(lockData, item);
   const me          = account?.name || account?.username || '';
-  const lockedByMe   = isLocked && lockData.by === me;
+  const lockedByMe   = isLocked && istMeineSperre(lockData);
   const isReserved   = isLocked && lockData.kind === 'reserve';
   const reservedByMe = isReserved && lockedByMe;
   const lockBadge   =
-      isReserved && !lockedByMe ? `<span class="panel-lock-badge">🔑 ${esc(lockData.by)} hat reserviert</span>`
-    : reservedByMe              ? `<span class="panel-lock-badge panel-lock-mine">🔑 Für dich reserviert</span>`
+      isReserved && !lockedByMe ? `<span class="panel-lock-badge">🔑 Zuständig: ${esc(lockData.by)}</span>`
+    : reservedByMe              ? `<span class="panel-lock-badge panel-lock-mine">🔑 Du bist zuständig</span>`
     : isLocked && !lockedByMe   ? `<span class="panel-lock-badge">🔒 ${esc(lockData.by)} bearbeitet gerade</span>`
     : '';
 
@@ -6043,12 +6246,49 @@ function renderPanel(item, editMode = false) {
     : (isLocked && !lockedByMe) ? ''
     : `<button class="btn btn-outline btn-sm" id="panel-reserve" title="Für dich zur Bearbeitung reservieren">🔑 Für mich reservieren</button>`;
 
+  // Zuteilen an einen Einkäufer (Rückmeldung 19.11.2026). Nicht für Einkäufer, die selbst nur
+  // Zugeteiltes bearbeiten. Die Zuteilung gilt wie eine Reservierung bis zum Abschluss.
+  const canZuteilen = !isMineView && !editMode && !!lockField && canApproveItem(item) && !nurZugeteilt() && isOffenStatus(statusVal);
+  const zuteilenBtn = canZuteilen
+    ? `<button class="btn btn-outline btn-sm" id="panel-zuteilen" title="Einem Einkäufer zur Bearbeitung zuteilen">👤 Zuteilen</button>` : '';
+  const zuteilenForm = canZuteilen ? `
+    <div class="zuteilen-form" id="zuteilen-form" hidden>
+      <label for="zuteilen-wer">Zuständig</label>
+      <select id="zuteilen-wer" class="pf-input">
+        <option value="">niemand (Zuteilung aufheben)</option>
+        ${einkaeuferListe().map(e => `<option value="${esc(e.upn)}"${isReserved && lockData.upn === e.upn ? ' selected' : ''}>${esc(e.name)}</option>`).join('')}
+      </select>
+      <button class="btn btn-primary btn-sm" id="btn-zuteilen-ok">Zuteilen</button>
+      <button class="btn btn-ghost btn-sm" id="btn-zuteilen-abbrechen">Abbrechen</button>
+    </div>` : '';
+
+  // Ohne Bestellung abschließen (z. B. kostenlose Entsorgung): Einkauf, aus „In Prüfung (Einkauf)"
+  // oder „Freigegeben" (auch „In Bestellung", falls es den Wert gibt), mit Pflicht-Begründung.
+  // Nur wenn die Statusspalte den Wert kennt.
+  const istEinkaufPruefung = /pr[üu]fung/i.test(statusVal) && /einkauf/i.test(statusVal) && !/strategisch/i.test(statusVal);
+  const canOhneBestellung = !editMode && !isMineView && !!obStatusWahl() && canApproveItem(item)
+    && (istEinkaufPruefung || /^(freigegeben|in bestellung)$/i.test((statusVal || '').trim()));
+  const obBanner = canOhneBestellung ? `
+    <div class="ob-banner" id="ob-banner">
+      <div class="ob-row">
+        <span class="ob-hint">Keine Bestellung nötig, etwa bei einer kostenlosen Leistung?</span>
+        <button class="btn btn-outline btn-sm" id="btn-ob">✓ Ohne Bestellung abschließen</button>
+      </div>
+      <div class="ob-form" id="ob-form" hidden>
+        <textarea id="ob-grund" class="pf-comment-textarea" rows="2" placeholder="Begründung (Pflicht), z. B. kostenlose Entsorgung"></textarea>
+        <div class="aab-buttons" style="margin-top:6px">
+          <button class="btn btn-success btn-sm" id="btn-ob-ok">✓ Abschließen</button>
+          <button class="btn btn-ghost btn-sm" id="btn-ob-abbrechen">Abbrechen</button>
+        </div>
+      </div>
+    </div>` : '';
+
   const buttons = editMode
     ? `${orderBtn}
        <button class="btn btn-primary btn-sm" id="panel-save">💾 Speichern</button>
        <button class="btn btn-ghost btn-sm" id="panel-cancel">✕ Abbrechen</button>
        <button class="btn btn-outline btn-sm" id="panel-history">📋 Verlauf</button>`
-    : `${editBtn} ${orderBtn} ${reserveBtn}
+    : `${editBtn} ${orderBtn} ${reserveBtn} ${zuteilenBtn}
        <button class="btn btn-outline btn-sm" id="panel-history">📋 Verlauf</button>
        ${favBtn}`;
 
@@ -6059,8 +6299,11 @@ function renderPanel(item, editMode = false) {
     && /pr[üu]fung/i.test(statusVal) && /einkauf/i.test(statusVal) && !/strategisch/i.test(statusVal);
   const approvalActionBanner = needsApproval ? `
     <div class="approval-action-banner" id="approval-action-banner">
-      <div class="aab-title">⏳ Genehmigung ausstehend – Einkauf</div>
+      <div class="aab-title">⏳ Genehmigung ausstehend: Einkauf</div>
       <div class="aab-hint">Bitte prüfen Sie die Anfrage und erteilen Sie Ihre Entscheidung:</div>
+      <label class="aab-lb" title="Bei einem Lead-Buyer-Abschluss entfallen die Angebotspflicht und die Freigabe des strategischen Einkaufs">
+        <input type="checkbox" id="aab-leadbuyer"${leadBuyer ? ' checked' : ''}> Lead-Buyer-Abschluss
+      </label>
       <div class="aab-buttons">
         <button class="btn btn-success btn-sm" id="btn-approve">✅ Genehmigen</button>
         <button class="btn btn-danger  btn-sm" id="btn-reject">❌ Ablehnen</button>
@@ -6090,9 +6333,11 @@ function renderPanel(item, editMode = false) {
       <div class="panel-byline">von ${esc(createdBy)} · ${createdAt}</div>
       ${lockBadge}
       <div class="panel-actions">${buttons}</div>
+      ${zuteilenForm}
     </div>
 
     ${approvalActionBanner}
+    ${obBanner}
     ${withdrawBanner}
     <div class="panel-body">
       <div class="pf-section">
@@ -6118,6 +6363,10 @@ function renderPanel(item, editMode = false) {
         ${fRow(FORM_FIELDS.find(f=>f.key==='Lieferant'),        'text')}
         ${fRow(FORM_FIELDS.find(f=>f.key==='GeschaetzterPreis'),'number')}
         ${fRow(FORM_FIELDS.find(f=>f.key==='Kostenstelle'),     'text')}
+        ${editMode
+          ? (canApproveItem(item) && resolvedFields['LeadBuyerAbschluss']
+            ? `<div class="pf-row"><span class="pf-label">Lead-Buyer-Abschluss</span><label class="pf-check"><input type="checkbox" class="pf-input" data-key="LeadBuyerAbschluss"${leadBuyer ? ' checked' : ''}> Ja</label></div>` : '')
+          : (leadBuyer ? `<div class="pf-row"><span class="pf-label">Lead-Buyer-Abschluss</span><span class="pf-val">Ja</span></div>` : '')}
         ${gesamtHint ? `<div class="info-box info" style="margin-top:8px;font-size:.78rem">${gesamtHint}</div>` : ''}
       </div>
       ${(() => {
@@ -6178,7 +6427,7 @@ function renderPanel(item, editMode = false) {
                 <th class="pos-th pos-right">Menge</th>
                 <th class="pos-th">ME</th>
                 <th class="pos-th pos-right">Einzelpreis (€)</th>
-                <th class="pos-th">Benötigt bis</th>
+                <th class="pos-th">Liefertermin</th>
                 <th class="pos-th">Kostenstelle</th>
                 ${canEditPos ? '<th class="pos-th"></th>' : ''}
               </tr></thead>
@@ -6302,20 +6551,34 @@ function getLockField() {
 }
 function parseLock(raw) {
   if (!raw) return null;
-  // Format: „Name|ISO-Zeit" = kurzer Edit-Lock, „Name|ISO-Zeit|R" = Reservierung.
+  // Format: „Name|ISO-Zeit" = kurzer Edit-Lock, „Name|ISO-Zeit|R" = Reservierung,
+  // „Name|ISO-Zeit|R|anmeldename" = Reservierung oder Zuteilung mit Anmeldenamen (seit 19.11.2026).
   const parts = String(raw).split('|');
   if (parts.length < 2) return null;
   const expiresAt = new Date(parts[1]);
   if (isNaN(expiresAt.getTime())) return null;
-  return { by: parts[0], expiresAt, kind: parts[2] === 'R' ? 'reserve' : 'edit' };
+  return { by: parts[0], expiresAt, kind: parts[2] === 'R' ? 'reserve' : 'edit', upn: String(parts[3] || '').trim().toLowerCase() };
 }
+// Eine Reservierung oder Zuteilung gilt bis zum Abschluss der Anfrage (Rückmeldung des Einkaufs
+// vom 19.11.2026), ein Edit-Lock nur bis zu seiner Ablaufzeit.
+function sperreAktiv(lock, item) {
+  if (!lock) return false;
+  if (lock.kind === 'reserve') return isOffenStatus(getStatusVal(item));
+  return lock.expiresAt > new Date();
+}
+function istMeineSperre(lock) {
+  if (!lock) return false;
+  if (lock.upn) return _myIdentities().has(lock.upn);
+  return lock.by === (account?.name || account?.username || '');
+}
+function meinAnmeldename() { return String(account?.username || '').trim().toLowerCase(); }
 async function tryAcquireLock(itemId) {
   const field = getLockField();
   const item  = allItems.find(i => String(i.id) === String(itemId));
   const me    = account?.name || account?.username || 'Unbekannt';
   if (field && item) {
     const lock = parseLock(getField(item, field));
-    if (lock && lock.expiresAt > new Date() && lock.by !== me) {
+    if (lock && sperreAktiv(lock, item) && !istMeineSperre(lock)) {
       if (lock.kind === 'reserve') {
         toast(`Für „${lock.by}" reserviert.`, 'error');
       } else {
@@ -6324,7 +6587,7 @@ async function tryAcquireLock(itemId) {
       }
       return false;
     }
-    if (lock && lock.by === me && lock.kind === 'reserve' && lock.expiresAt > new Date()) {
+    if (lock && lock.kind === 'reserve' && sperreAktiv(lock, item) && istMeineSperre(lock)) {
       // Eigene Reservierung bleibt bestehen; Bearbeitung erlaubt, kein 15-Min-Edit-Lock.
       return true;
     }
@@ -6346,7 +6609,7 @@ async function releaseLock(itemId, force = false) {
   const item = allItems.find(i => String(i.id) === key);
   const me   = account?.name || account?.username || 'Unbekannt';
   const lock = parseLock(getField(item, field));
-  if (!lock || lock.by !== me) return; // never release someone else's lock
+  if (!lock || !istMeineSperre(lock)) return; // never release someone else's lock
   if (lock.kind === 'reserve' && !force) return; // Reservierung nur auf ausdrücklichen Wunsch lösen
   try {
     await gPatch(`/sites/${siteId}/lists/${listId}/items/${key}/fields`, { [field]: '' });
@@ -6368,23 +6631,25 @@ async function autoReleaseLock(itemId) {
   }
 }
 // ── Reservierung („Schlüssel") ────────────────────────────────────────────────
-// Ein Einkäufer kann eine laufende Anfrage für sich zur Bearbeitung reservieren.
-// Gespeichert im selben Sperrfeld wie der Edit-Lock, aber mit „|R"-Kennzeichen und
-// längerer Haltezeit. Die Reservierung wird nur ausdrücklich wieder gelöst.
-const RESERVE_HOURS = 8;
+// Ein Einkäufer kann eine laufende Anfrage für sich zur Bearbeitung reservieren oder einem
+// Kollegen zuteilen. Gespeichert im selben Sperrfeld wie der Edit-Lock, mit „|R"-Kennzeichen.
+// Sie gilt bis zum Abschluss der Anfrage (sperreAktiv) oder bis sie ausdrücklich gelöst wird.
+// Die lange Ablaufzeit hält sie auch in Browsern mit älterem Stand.
+const RESERVE_HOURS = 24 * 365;
 async function reserveForMe(itemId) {
   const field = getLockField();
   if (!field) { toast('Reservieren nicht möglich: kein Sperrfeld in SharePoint.', 'error'); return; }
   const item = allItems.find(i => String(i.id) === String(itemId));
   const me   = account?.name || account?.username || 'Unbekannt';
   const lock = parseLock(getField(item, field));
-  if (lock && lock.expiresAt > new Date() && lock.by !== me) {
+  if (lock && sperreAktiv(lock, item) && !istMeineSperre(lock)) {
     toast(`Bereits für „${lock.by}" belegt.`, 'error'); return;
   }
   const until = new Date(Date.now() + RESERVE_HOURS * 60 * 60 * 1000).toISOString();
+  const wert  = `${String(me).split('|').join('/')}|${until}|R|${meinAnmeldename()}`;
   try {
-    await gPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, { [field]: `${me}|${until}|R` });
-    if (item?.fields) item.fields[field] = `${me}|${until}|R`;
+    await gPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, { [field]: wert });
+    if (item?.fields) item.fields[field] = wert;
     toast('🔑 Für dich reserviert.', 'success');
   } catch (e) {
     console.warn('[reserve] failed:', e.message);
@@ -6394,6 +6659,83 @@ async function reserveForMe(itemId) {
   const updated   = allItems.find(i => String(i.id) === String(itemId));
   const panelRoot = $id(`panel-${currentView}-content`);
   if (updated && panelRoot) { panelRoot.innerHTML = renderPanel(updated); bindPanelEvents(itemId); }
+}
+// Einkäufer für „Zuteilen": alle mit Einkauf-Recht. Namen aus der Konfiguration (name), sonst aus
+// den Anfragen (angelegt oder geändert von), sonst der Teil vor dem @.
+function einkaeuferListe() {
+  const namen = new Map();
+  for (const it of allItems || []) for (const u of [it.createdBy?.user, it.lastModifiedBy?.user]) {
+    if (u?.email && u.displayName) namen.set(String(u.email).toLowerCase(), u.displayName);
+  }
+  return Object.entries(accessUsers || {})
+    .filter(([upn, p]) => p && p.einkauf && upn.includes('@'))
+    .map(([upn, p]) => ({ upn: upn.toLowerCase(), name: String(p.name || namen.get(upn.toLowerCase()) || upn.split('@')[0]).split('|').join('/') }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'de'));
+}
+// Eine Anfrage einem Einkäufer zuteilen (leer = Zuteilung aufheben). Technisch eine Reservierung
+// mit dessen Namen und Anmeldenamen, sichtbar als 🔑 an Karte und Panel.
+async function zuteilen(itemId, upn) {
+  const field = getLockField();
+  if (!field) { toast('Zuteilen nicht möglich: kein Sperrfeld in SharePoint.', 'error'); return; }
+  const item = allItems.find(i => String(i.id) === String(itemId));
+  if (!canApproveItem(item) || nurZugeteilt()) { toast('Keine Berechtigung zum Zuteilen.', 'error'); return; }
+  const ziel = einkaeuferListe().find(e => e.upn === String(upn || '').toLowerCase());
+  const wert = ziel ? `${ziel.name}|${new Date(Date.now() + RESERVE_HOURS * 36e5).toISOString()}|R|${ziel.upn}` : '';
+  try {
+    await gPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, { [field]: wert });
+    if (item?.fields) item.fields[field] = wert;
+    toast(ziel ? `👤 ${ziel.name} zugeteilt.` : 'Zuteilung aufgehoben.', 'success');
+  } catch (e) { toast('Zuteilen fehlgeschlagen: ' + e.message, 'error'); return; }
+  await loadItems(false);
+  const updated   = allItems.find(i => String(i.id) === String(itemId));
+  const panelRoot = $id(`panel-${currentView}-content`);
+  if (updated && panelRoot) { panelRoot.innerHTML = renderPanel(updated); bindPanelEvents(itemId); }
+}
+// Lead-Buyer-Kennzeichen direkt aus der Prüfung des Einkaufs setzen (Rückmeldung 19.11.2026).
+// Der Flow liest es beim Start der Freigaben, deshalb nur vor „Genehmigt (Einkauf)" sinnvoll.
+async function setzeLeadBuyer(itemId, an) {
+  const col  = resolvedFields['LeadBuyerAbschluss'];
+  const item = allItems.find(i => String(i.id) === String(itemId));
+  if (!col) { toast('Die Spalte Lead-Buyer-Abschluss fehlt in SharePoint.', 'error'); return; }
+  if (!canApproveItem(item)) { toast('Keine Berechtigung.', 'error'); return; }
+  try {
+    await gPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, { [col]: !!an });
+    if (item?.fields) item.fields[col] = !!an;
+    toast(an ? 'Lead-Buyer-Abschluss gesetzt.' : 'Lead-Buyer-Abschluss entfernt.', 'success');
+  } catch (e) { toast('Speichern fehlgeschlagen: ' + e.message, 'error'); }
+  const panelRoot = $id(`panel-${currentView}-content`);
+  const upd = allItems.find(i => String(i.id) === String(itemId));
+  if (upd && panelRoot) { panelRoot.innerHTML = renderPanel(upd); bindPanelEvents(itemId); }
+}
+// Ohne Bestellung abschließen, etwa bei kostenloser Entsorgung (Rückmeldung 19.11.2026). Der Einkauf
+// setzt „Erledigt (ohne Bestellung)" aus „In Prüfung (Einkauf)" oder „Freigegeben". Die Begründung
+// steht als Eintrag in den Kommentaren, Entscheider und Genehmigungskommentar bleiben unberührt.
+const OB_PRAEFIX = 'Ohne Bestellung abgeschlossen:';
+function obStatusWahl() { return statusChoices.find(c => /^erledigt.*ohne bestellung/i.test(String(c).trim())) || null; }
+async function doOhneBestellung(itemId, grund) {
+  grund = String(grund || '').trim();
+  if (grund.length < 3) { toast('Bitte eine Begründung angeben.', 'error'); return; }
+  const item = allItems.find(i => String(i.id) === String(itemId));
+  if (!canApproveItem(item)) { toast('Keine Berechtigung.', 'error'); return; }
+  const wahl = obStatusWahl();
+  if (!wahl) { toast('Den Status „Erledigt (ohne Bestellung)" gibt es in SharePoint noch nicht.', 'error'); return; }
+  const statusCol  = resolvedFields['Status'] || 'Status';
+  const kCol       = getKommentarCol();
+  const vorher     = String(getField(item, kCol) || '').trim();
+  const author     = account?.name || account?.username || 'Unbekannt';
+  const dt         = new Date().toLocaleString('de-DE', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
+  const LF         = String.fromCharCode(10);
+  const eintrag    = `[${dt} ${String.fromCharCode(8211)} ${author}]: ${OB_PRAEFIX} ${grund}`;
+  const kommentare = vorher ? vorher + LF + '---' + LF + eintrag : eintrag;
+  try {
+    await gPatch(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`, { [statusCol]: wahl, [kCol]: kommentare });
+    if (item?.fields) { item.fields[statusCol] = wahl; item.fields[kCol] = kommentare; }
+    toast('✓ Ohne Bestellung abgeschlossen.', 'success');
+  } catch (e) { toast('Abschließen fehlgeschlagen: ' + e.message, 'error'); return; }
+  await loadItems(false);
+  const upd = allItems.find(i => String(i.id) === String(itemId));
+  const panelRoot = $id(`panel-${currentView}-content`);
+  if (upd && panelRoot) { panelRoot.innerHTML = renderPanel(upd); bindPanelEvents(itemId); }
 }
 async function releaseReservation(itemId) {
   await releaseLock(itemId, true);
@@ -6492,9 +6834,13 @@ function openSettings() {
     const wgAssigned = p.warengruppen || [];
     const wgOptsList = warengruppenOptions();
     // Warengruppen-Beschränkung nur für Einkäufer sinnvoll. Leer = alle Warengruppen.
+    // „nur Zugeteiltes": bearbeitet nur Anfragen, die ihm ein Einkäufer zugeteilt hat (etwa ein Azubi).
     const wgLine = p.einkauf ? `
       <div class="access-abt access-wg">
         <span class="access-abt-lbl" title="Einkauf nur für diese Materialgruppen (leer = alle)">🛒</span>
+        <label class="nz-wrap" title="Bearbeitet nur Anfragen, die ihm ein Einkäufer zugeteilt hat">
+          <input type="checkbox" ${p.nurZugeteilt ? 'checked' : ''}
+            onchange="setAccess('${escJs(upn)}','nurZugeteilt',this.checked)"> nur Zugeteiltes</label>
         ${wgAssigned.length
           ? wgAssigned.map(c => `<span class="abt-chip">${esc(wgLabelForCode(c))}<button class="abt-chip-x" title="Entfernen" onclick="toggleUserWarengruppe('${escJs(upn)}','${escJs(c)}',false)">✕</button></span>`).join('')
           : `<span class="wg-all-hint">alle Warengruppen</span>`}
@@ -6515,7 +6861,7 @@ function openSettings() {
     return `
     <div class="access-row-wrap">
       <div class="access-row">
-        <span class="su-email" title="${esc(upn)}">${esc(upn)}</span>
+        <span class="su-email" title="${esc(upn)}">${p.name ? `<b>${esc(p.name)}</b> ` : ''}${esc(upn)}</span>
         <label class="tgl-wrap" title="Dashboard">
           <input type="checkbox" ${p.dashboard ? 'checked' : ''}
             onchange="setAccess('${escJs(upn)}','dashboard',this.checked)"><span class="tgl"></span></label>

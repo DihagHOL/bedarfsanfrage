@@ -351,6 +351,54 @@ body {
 }
 .archiv-trenner strong { color: #17509e; }
 
+/* ── Rückmeldung Einkauf 19.11.2026: Zuteilen, ohne Bestellung, Lead-Buyer, wiederkehrend ── */
+.zuteilen-form { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 8px; padding: 8px 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; }
+.zuteilen-form label { font-size: .78rem; font-weight: 600; color: #475569; }
+.zuteilen-form select { min-width: 0; max-width: 100%; flex: 1 1 180px; }
+.aab-lb { display: flex; align-items: center; gap: 7px; margin: 6px 0 8px; font-size: .82rem; color: #1e293b; cursor: pointer; }
+.aab-lb input { width: 16px; height: 16px; }
+.ob-banner { margin: 10px 16px 0; padding: 10px 12px; border: 1px dashed #86efac; border-radius: 10px; background: #f0fdf4; }
+.ob-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.ob-hint { font-size: .8rem; color: #166534; }
+.ob-form { margin-top: 8px; }
+.ob-form textarea { width: 100%; }
+.pf-check { display: inline-flex; align-items: center; gap: 6px; font-size: .84rem; }
+.nz-wrap { display: inline-flex; align-items: center; gap: 5px; font-size: .74rem; color: #475569; margin-right: 6px; white-space: nowrap; }
+.abt-alias { font-size: .72rem; color: #64748b; font-weight: 400; }
+.wiederkehrend { margin-top: 16px; padding: 12px 14px; border: 1px solid #e2e8f0; border-radius: 10px; background: #f8fafc; }
+.wk-haken { display: flex; align-items: center; gap: 8px; font-size: .86rem; font-weight: 600; color: #1e293b; cursor: pointer; }
+.wk-haken input { width: 16px; height: 16px; }
+.wk-feld { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; max-width: 420px; }
+.wk-feld label { font-size: .8rem; font-weight: 600; color: #374151; }
+.wk-feld input { border: 1px solid #d1d5db; border-radius: 7px; padding: 8px 11px; font: inherit; max-width: 220px; }
+.form-group .field-sub, .wk-feld .field-sub { font-weight: 400; }
+
+/* Dashboard als Tabelle */
+.ansicht-umschalter { display: inline-flex; border: 1px solid #d1d5db; border-radius: 8px; overflow: hidden; }
+.ansicht-umschalter .btn { border-radius: 0; border: none; }
+.ansicht-umschalter .btn.active { background: #17509e; color: #fff; }
+.dash-tabelle-wrap { overflow-x: auto; background: #fff; border: 1px solid #e5e9ef; border-radius: 10px; }
+.dash-tabelle { width: 100%; border-collapse: collapse; font-size: .8rem; }
+.dash-tabelle th { position: sticky; top: 0; z-index: 1; background: #f8fafc; text-align: left; font-weight: 600; color: #475569; padding: 7px 10px; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
+.dash-tabelle th.dt-sort { cursor: pointer; }
+.dash-tabelle th.dt-sort:hover { color: #17509e; }
+.dash-tabelle th.dt-sort.aktiv { color: #17509e; text-decoration: underline; }
+.dash-tabelle td { padding: 6px 10px; border-bottom: 1px solid #f1f5f9; vertical-align: top; color: #1e293b; }
+.dash-tabelle .dt-r { text-align: right; }
+.dash-tabelle .dt-nw { white-space: nowrap; }
+.dash-tabelle .dt-id { color: #64748b; white-space: nowrap; }
+.dash-tabelle .dt-titel { min-width: 180px; font-weight: 600; }
+.dash-tabelle .dt-leer { color: #9ca3af; font-style: italic; font-weight: 400; }
+.dt-zeile { cursor: pointer; }
+.dt-zeile:hover td { background: #f8fafc; }
+.dt-zeile.selected td { background: #eff4ff; }
+.dt-zeile.is-overdue td { background: #fef2f2; }
+.dt-zeile.is-overdue td:first-child { box-shadow: inset 3px 0 0 #dc2626; }
+.dt-zeile.is-archiv td { background: #f3f4f6; color: #6b7280; }
+.dt-gruppe td { background: #eef4fb; color: #1a2644; font-size: .8rem; padding: 7px 10px; border-top: 2px solid #c9d8ea; }
+.dt-marke { display: inline-block; font-size: .68rem; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: #e2e5ea; color: #475569; white-space: nowrap; }
+.dt-marke.dt-resv { background: #fef3c7; color: #92400e; }
+
 /* ── Reservierung („Schlüssel") ── */
 .ic-tag.ic-reserved, .cr2-tag.cr2-reserved { background: #fef3c7; color: #92400e; font-weight: 600; }
 .panel-lock-badge.panel-lock-mine { background: #dbeafe; color: #1e40af; border-color: #93c5fd; }

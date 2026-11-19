@@ -44,7 +44,7 @@ const SI_SPALTEN = [
   { key: 'art2',         titel: 'Beschaffungsart 2',                       pflicht: true,  breite: 34, hinweis: 'Direktes Material oder indirektes Material / Dienstleistung.', alias: ['beschaffungsart2'] },
   { key: 'lieferant',    titel: 'Lieferant',                               pflicht: true,  breite: 20, hinweis: '', alias: ['lieferant', 'lieferrant'] },
   { key: 'preis',        titel: 'Einzelpreis (€ netto)',                   pflicht: true,  breite: 16, hinweis: 'Preis je Einheit.', alias: ['einzelpreis*', 'preis'] },
-  { key: 'termin',       titel: 'Benötigt bis',                            pflicht: false, breite: 14, hinweis: 'Datum, zum Beispiel 31.12.2026.', alias: ['benotigtbis', 'benoetigtbis', 'termin', 'liefertermin'] },
+  { key: 'termin',       titel: 'Liefertermin',                            pflicht: false, breite: 14, hinweis: 'Bis wann die Ware im Werk sein muss, zum Beispiel 31.12.2026.', alias: ['liefertermin*', 'benotigtbis', 'benoetigtbis', 'termin'] },
 ];
 // Werte wie im Assistenten der Sammelanfrage (Auswahl und „Zusätzlich kombinierbar“)
 const SI_ART1 = ['Bestandsmaterial (bestandsgeführt)', 'Nicht-bestandsgeführtes Material'];
@@ -133,6 +133,9 @@ function siAbteilung(v) {
   if (!s) return { wert: '' };
   const liste = (typeof abteilungen !== 'undefined' && Array.isArray(abteilungen)) ? abteilungen : [];
   if (!liste.length) return { wert: s };
+  // Zusammengeführte Abteilungen: „Wareneingang" aus einer alten Datei wird zur neuen Gruppe
+  const kanon = (typeof abteilungKanon === 'function') ? abteilungKanon(s) : null;
+  if (kanon) return { wert: kanon };
   const exakt = liste.find(a => a.toLowerCase() === s.toLowerCase());
   if (exakt) return { wert: exakt };
   const gleich = liste.filter(a => siNorm(a) === siNorm(s));
@@ -394,7 +397,7 @@ function siVorlageXlsx(heute = new Date()) {
     siPruefung({ bereich: bereich('art1'), formel: 'Liste_Art1', titel: 'Beschaffungsart 1', text: 'Bitte aus der Liste wählen.' }),
     siPruefung({ bereich: bereich('art2'), formel: 'Liste_Art2', titel: 'Beschaffungsart 2', text: 'Bitte aus der Liste wählen.' }),
     siPruefung({ typ: 'decimal', operator: 'greaterThanOrEqual', bereich: bereich('preis'), formel: '0', titel: 'Einzelpreis', text: 'Bitte den Preis je Einheit als Zahl eintragen.' }),
-    siPruefung({ typ: 'date', operator: 'greaterThan', bereich: bereich('termin'), formel: '36526', titel: 'Benötigt bis', text: 'Bitte ein Datum eintragen, zum Beispiel 31.12.2026.' }),
+    siPruefung({ typ: 'date', operator: 'greaterThan', bereich: bereich('termin'), formel: '36526', titel: 'Liefertermin', text: 'Bitte ein Datum eintragen, zum Beispiel 31.12.2026.' }),
   ].filter(Boolean);
   const spaltenStil = { artnr: 2, typnr: 2, kostenstelle: 2, preis: 3, termin: 4 };
   const blattDaten = siBlattXml({

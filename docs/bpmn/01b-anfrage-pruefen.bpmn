@@ -6,21 +6,23 @@
     <bpmn:messageFlow id="Msg_A_ang_P_Lief" name="Angebotsanfrage" sourceRef="A_ang" targetRef="P_Lief" />
   </bpmn:collaboration>
   <bpmn:process id="Process_Bedarfsanfrage_Einkauf" name="Anfrage prüfen und entscheiden" isExecutable="false">
-    <bpmn:documentation>Der Einkauf prüft die Anfrage in der App. Zuständig ist, wem die Warengruppe in der Zugriffssteuerung zugeordnet ist, ohne Zuordnung sind es alle Einkäufer. Fehlen Angebote nach Regelwerk, holt der Einkauf sie beim Lieferanten ein und hängt sie an. Danach genehmigt er oder lehnt mit Grund ab. Die App speichert Status und Entscheider. Eine Mail geht dabei nicht raus, der Antragsteller sieht das Ergebnis in Meine Anfragen.
+    <bpmn:documentation>Der Einkauf prüft die Anfrage in der App. Zuständig ist, wem die Warengruppe in der Zugriffssteuerung zugeordnet ist, ohne Zuordnung sind es alle Einkäufer. Ein Einkäufer kann die Anfrage für sich reservieren oder einem Kollegen zuteilen, beides gilt bis zum Abschluss. Wer nur Zugeteiltes bearbeitet, etwa ein Auszubildender, prüft nur die ihm zugeteilten Anfragen. Fehlen Angebote nach Regelwerk, holt der Einkauf sie beim Lieferanten ein und hängt sie an. Bei einem Lead-Buyer-Abschluss setzt er das Kennzeichen. Danach genehmigt er, lehnt mit Grund ab oder schließt die Anfrage mit Grund ohne Bestellung ab, etwa bei einer kostenlosen Leistung. Die App speichert Status und Entscheider. Eine Mail geht dabei nicht raus, der Antragsteller sieht das Ergebnis in Meine Anfragen.
 Eingebunden in: Bedarfsanfrage.
 Anwender-Ansicht: https://bedarfsanfrage.dihag-extern.com/?ansicht=prozess&amp;modell=pruefen
 Im Einklang mit den Richtlinien: Konzernfachregelung Prozessmanagement; ISMS-Richtlinie Aufbewahrungsfristen und -pflichten
 [[rms:policies=120,119]]</bpmn:documentation>
     <bpmn:laneSet id="LaneSet_P_Pruef">
-      <bpmn:lane id="LA" name="Einkauf"><bpmn:flowNodeRef>A_start</bpmn:flowNodeRef><bpmn:flowNodeRef>A_res</bpmn:flowNodeRef><bpmn:flowNodeRef>A_gw1</bpmn:flowNodeRef><bpmn:flowNodeRef>A_ang</bpmn:flowNodeRef><bpmn:flowNodeRef>A_bew</bpmn:flowNodeRef><bpmn:flowNodeRef>A_gw2</bpmn:flowNodeRef><bpmn:flowNodeRef>A_grund</bpmn:flowNodeRef></bpmn:lane>
+      <bpmn:lane id="LA" name="Einkauf"><bpmn:flowNodeRef>A_start</bpmn:flowNodeRef><bpmn:flowNodeRef>A_res</bpmn:flowNodeRef><bpmn:flowNodeRef>A_gw1</bpmn:flowNodeRef><bpmn:flowNodeRef>A_ang</bpmn:flowNodeRef><bpmn:flowNodeRef>A_bew</bpmn:flowNodeRef><bpmn:flowNodeRef>A_gw2</bpmn:flowNodeRef><bpmn:flowNodeRef>A_ohne</bpmn:flowNodeRef><bpmn:flowNodeRef>A_endOhne</bpmn:flowNodeRef><bpmn:flowNodeRef>A_grund</bpmn:flowNodeRef></bpmn:lane>
       <bpmn:lane id="LB" name="Bedarfsanfrage-App"><bpmn:flowNodeRef>B_ok</bpmn:flowNodeRef><bpmn:flowNodeRef>B_endOk</bpmn:flowNodeRef><bpmn:flowNodeRef>B_ab</bpmn:flowNodeRef><bpmn:flowNodeRef>B_endAb</bpmn:flowNodeRef></bpmn:lane>
     </bpmn:laneSet>
       <bpmn:startEvent id="A_start" name="Anfrage steht auf In Prüfung (Einkauf)"><bpmn:outgoing>Flow_A_start_A_res</bpmn:outgoing></bpmn:startEvent>
-      <bpmn:userTask id="A_res" name="Anfrage reservieren und Angaben prüfen"><bpmn:incoming>Flow_A_start_A_res</bpmn:incoming><bpmn:outgoing>Flow_A_res_A_gw1</bpmn:outgoing></bpmn:userTask>
+      <bpmn:userTask id="A_res" name="Anfrage reservieren oder zuteilen und Angaben prüfen"><bpmn:incoming>Flow_A_start_A_res</bpmn:incoming><bpmn:outgoing>Flow_A_res_A_gw1</bpmn:outgoing></bpmn:userTask>
       <bpmn:exclusiveGateway id="A_gw1" name="Angebote vollständig?"><bpmn:incoming>Flow_A_res_A_gw1</bpmn:incoming><bpmn:outgoing>Flow_A_gw1_A_bew</bpmn:outgoing><bpmn:outgoing>Flow_A_gw1_A_ang</bpmn:outgoing></bpmn:exclusiveGateway>
       <bpmn:userTask id="A_ang" name="Angebote beim Lieferanten einholen und anhängen"><bpmn:incoming>Flow_A_gw1_A_ang</bpmn:incoming><bpmn:outgoing>Flow_A_ang_A_bew</bpmn:outgoing></bpmn:userTask>
-      <bpmn:userTask id="A_bew" name="Bedarf, Preis und Lieferant bewerten"><bpmn:incoming>Flow_A_gw1_A_bew</bpmn:incoming><bpmn:incoming>Flow_A_ang_A_bew</bpmn:incoming><bpmn:outgoing>Flow_A_bew_A_gw2</bpmn:outgoing></bpmn:userTask>
-      <bpmn:exclusiveGateway id="A_gw2" name="Bedarf genehmigen?"><bpmn:incoming>Flow_A_bew_A_gw2</bpmn:incoming><bpmn:outgoing>Flow_A_gw2_B_ok</bpmn:outgoing><bpmn:outgoing>Flow_A_gw2_A_grund</bpmn:outgoing></bpmn:exclusiveGateway>
+      <bpmn:userTask id="A_bew" name="Bedarf, Preis und Lieferant bewerten, Lead-Buyer kennzeichnen"><bpmn:incoming>Flow_A_gw1_A_bew</bpmn:incoming><bpmn:incoming>Flow_A_ang_A_bew</bpmn:incoming><bpmn:outgoing>Flow_A_bew_A_gw2</bpmn:outgoing></bpmn:userTask>
+      <bpmn:exclusiveGateway id="A_gw2" name="Wie entscheidet der Einkauf?"><bpmn:incoming>Flow_A_bew_A_gw2</bpmn:incoming><bpmn:outgoing>Flow_A_gw2_B_ok</bpmn:outgoing><bpmn:outgoing>Flow_A_gw2_A_grund</bpmn:outgoing><bpmn:outgoing>Flow_A_gw2_A_ohne</bpmn:outgoing></bpmn:exclusiveGateway>
+      <bpmn:userTask id="A_ohne" name="Ohne Bestellung abschließen und Grund eintragen"><bpmn:incoming>Flow_A_gw2_A_ohne</bpmn:incoming><bpmn:outgoing>Flow_A_ohne_A_endOhne</bpmn:outgoing></bpmn:userTask>
+      <bpmn:endEvent id="A_endOhne" name="Erledigt (ohne Bestellung)"><bpmn:incoming>Flow_A_ohne_A_endOhne</bpmn:incoming></bpmn:endEvent>
       <bpmn:userTask id="A_grund" name="Ablehnungsgrund eintragen"><bpmn:incoming>Flow_A_gw2_A_grund</bpmn:incoming><bpmn:outgoing>Flow_A_grund_B_ab</bpmn:outgoing></bpmn:userTask>
       <bpmn:serviceTask id="B_ok" name="Status Genehmigt (Einkauf) speichern"><bpmn:incoming>Flow_A_gw2_B_ok</bpmn:incoming><bpmn:outgoing>Flow_B_ok_B_endOk</bpmn:outgoing></bpmn:serviceTask>
       <bpmn:endEvent id="B_endOk" name="Vom Einkauf genehmigt"><bpmn:incoming>Flow_B_ok_B_endOk</bpmn:incoming></bpmn:endEvent>
@@ -32,12 +34,14 @@ Im Einklang mit den Richtlinien: Konzernfachregelung Prozessmanagement; ISMS-Ric
       <bpmn:sequenceFlow id="Flow_A_gw1_A_ang" sourceRef="A_gw1" targetRef="A_ang" name="nein" />
       <bpmn:sequenceFlow id="Flow_A_ang_A_bew" sourceRef="A_ang" targetRef="A_bew" />
       <bpmn:sequenceFlow id="Flow_A_bew_A_gw2" sourceRef="A_bew" targetRef="A_gw2" />
-      <bpmn:sequenceFlow id="Flow_A_gw2_B_ok" sourceRef="A_gw2" targetRef="B_ok" name="ja" />
-      <bpmn:sequenceFlow id="Flow_A_gw2_A_grund" sourceRef="A_gw2" targetRef="A_grund" name="nein" />
+      <bpmn:sequenceFlow id="Flow_A_gw2_B_ok" sourceRef="A_gw2" targetRef="B_ok" name="genehmigen" />
+      <bpmn:sequenceFlow id="Flow_A_gw2_A_grund" sourceRef="A_gw2" targetRef="A_grund" name="ablehnen" />
+      <bpmn:sequenceFlow id="Flow_A_gw2_A_ohne" sourceRef="A_gw2" targetRef="A_ohne" name="ohne Bestellung" />
       <bpmn:sequenceFlow id="Flow_B_ok_B_endOk" sourceRef="B_ok" targetRef="B_endOk" />
       <bpmn:sequenceFlow id="Flow_A_grund_B_ab" sourceRef="A_grund" targetRef="B_ab" />
       <bpmn:sequenceFlow id="Flow_B_ab_B_endAb" sourceRef="B_ab" targetRef="B_endAb" />
-      <bpmn:textAnnotation id="An_zust"><bpmn:text>Zuständig ist, wem die Warengruppe zugeordnet ist. Reservieren hält die Anfrage 8 Std.</bpmn:text></bpmn:textAnnotation>
+      <bpmn:sequenceFlow id="Flow_A_ohne_A_endOhne" sourceRef="A_ohne" targetRef="A_endOhne" />
+      <bpmn:textAnnotation id="An_zust"><bpmn:text>Zuständig ist, wem die Warengruppe zugeordnet ist. Reservierung und Zuteilung gelten bis zum Abschluss.</bpmn:text></bpmn:textAnnotation>
       <bpmn:association id="Assoc_An_zust" associationDirection="None" sourceRef="A_res" targetRef="An_zust" />
       <bpmn:textAnnotation id="An_mail"><bpmn:text>Keine Mail. Der Antragsteller sieht Status und Grund in Meine Anfragen.</bpmn:text></bpmn:textAnnotation>
       <bpmn:association id="Assoc_An_mail" associationDirection="None" sourceRef="A_grund" targetRef="An_mail" />
@@ -54,6 +58,8 @@ Im Einklang mit den Richtlinien: Konzernfachregelung Prozessmanagement; ISMS-Ric
       <bpmndi:BPMNShape id="A_ang_di" bpmnElement="A_ang" bioc:stroke="#C2410C" bioc:fill="#FFE3C8" color:background-color="#FFE3C8" color:border-color="#C2410C"><dc:Bounds x="709" y="208" width="132" height="84" /></bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="A_bew_di" bpmnElement="A_bew" bioc:stroke="#C2410C" bioc:fill="#FFE3C8" color:background-color="#FFE3C8" color:border-color="#C2410C"><dc:Bounds x="879" y="88" width="132" height="84" /></bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="A_gw2_di" bpmnElement="A_gw2" isMarkerVisible="true" bioc:stroke="#8A6100" bioc:fill="#FFF8DB" color:background-color="#FFF8DB" color:border-color="#8A6100"><dc:Bounds x="1090" y="105" width="50" height="50" /><bpmndi:BPMNLabel><dc:Bounds x="1015" y="73" width="96" height="28" /></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_ohne_di" bpmnElement="A_ohne" bioc:stroke="#C2410C" bioc:fill="#FFE3C8" color:background-color="#FFE3C8" color:border-color="#C2410C"><dc:Bounds x="1219" y="208" width="132" height="84" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_endOhne_di" bpmnElement="A_endOhne" bioc:stroke="#1E7B3A" bioc:fill="#DDF3E4" color:background-color="#DDF3E4" color:border-color="#1E7B3A"><dc:Bounds x="1437" y="232" width="36" height="36" /><bpmndi:BPMNLabel><dc:Bounds x="1395" y="273" width="120" height="28" /></bpmndi:BPMNLabel></bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="A_grund_di" bpmnElement="A_grund" bioc:stroke="#C2410C" bioc:fill="#FFE3C8" color:background-color="#FFE3C8" color:border-color="#C2410C"><dc:Bounds x="1219" y="88" width="132" height="84" /></bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="B_ok_di" bpmnElement="B_ok" bioc:stroke="#1A2644" bioc:fill="#DCE5F2" color:background-color="#DCE5F2" color:border-color="#1A2644"><dc:Bounds x="1219" y="348" width="132" height="84" /></bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="B_endOk_di" bpmnElement="B_endOk" bioc:stroke="#1E7B3A" bioc:fill="#DDF3E4" color:background-color="#DDF3E4" color:border-color="#1E7B3A"><dc:Bounds x="1437" y="372" width="36" height="36" /><bpmndi:BPMNLabel><dc:Bounds x="1395" y="413" width="120" height="28" /></bpmndi:BPMNLabel></bpmndi:BPMNShape>
@@ -65,15 +71,17 @@ Im Einklang mit den Richtlinien: Konzernfachregelung Prozessmanagement; ISMS-Ric
       <bpmndi:BPMNEdge id="Flow_A_gw1_A_ang_di" bpmnElement="Flow_A_gw1_A_ang"><di:waypoint x="605" y="155" /><di:waypoint x="605" y="250" /><di:waypoint x="709" y="250" /><bpmndi:BPMNLabel><dc:Bounds x="613" y="233" width="38" height="14" /></bpmndi:BPMNLabel></bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="Flow_A_ang_A_bew_di" bpmnElement="Flow_A_ang_A_bew"><di:waypoint x="841" y="250" /><di:waypoint x="860" y="250" /><di:waypoint x="860" y="130" /><di:waypoint x="879" y="130" /></bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="Flow_A_bew_A_gw2_di" bpmnElement="Flow_A_bew_A_gw2"><di:waypoint x="1011" y="130" /><di:waypoint x="1090" y="130" /></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="Flow_A_gw2_B_ok_di" bpmnElement="Flow_A_gw2_B_ok"><di:waypoint x="1115" y="155" /><di:waypoint x="1115" y="390" /><di:waypoint x="1219" y="390" /><bpmndi:BPMNLabel><dc:Bounds x="1123" y="373" width="25" height="14" /></bpmndi:BPMNLabel></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="Flow_A_gw2_A_grund_di" bpmnElement="Flow_A_gw2_A_grund"><di:waypoint x="1140" y="130" /><di:waypoint x="1219" y="130" /><bpmndi:BPMNLabel><dc:Bounds x="1146" y="113" width="38" height="14" /></bpmndi:BPMNLabel></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_A_gw2_B_ok_di" bpmnElement="Flow_A_gw2_B_ok"><di:waypoint x="1115" y="155" /><di:waypoint x="1115" y="390" /><di:waypoint x="1219" y="390" /><bpmndi:BPMNLabel><dc:Bounds x="1123" y="373" width="76" height="14" /></bpmndi:BPMNLabel></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_A_gw2_A_grund_di" bpmnElement="Flow_A_gw2_A_grund"><di:waypoint x="1140" y="130" /><di:waypoint x="1219" y="130" /><bpmndi:BPMNLabel><dc:Bounds x="1146" y="113" width="63" height="14" /></bpmndi:BPMNLabel></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_A_gw2_A_ohne_di" bpmnElement="Flow_A_gw2_A_ohne"><di:waypoint x="1115" y="155" /><di:waypoint x="1115" y="250" /><di:waypoint x="1219" y="250" /><bpmndi:BPMNLabel><dc:Bounds x="1123" y="233" width="108" height="14" /></bpmndi:BPMNLabel></bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="Flow_B_ok_B_endOk_di" bpmnElement="Flow_B_ok_B_endOk"><di:waypoint x="1351" y="390" /><di:waypoint x="1437" y="390" /></bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="Flow_A_grund_B_ab_di" bpmnElement="Flow_A_grund_B_ab"><di:waypoint x="1351" y="130" /><di:waypoint x="1370" y="130" /><di:waypoint x="1370" y="510" /><di:waypoint x="1389" y="510" /></bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="Flow_B_ab_B_endAb_di" bpmnElement="Flow_B_ab_B_endAb"><di:waypoint x="1521" y="510" /><di:waypoint x="1607" y="510" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_A_ohne_A_endOhne_di" bpmnElement="Flow_A_ohne_A_endOhne"><di:waypoint x="1351" y="250" /><di:waypoint x="1437" y="250" /></bpmndi:BPMNEdge>
       <bpmndi:BPMNShape id="An_zust_di" bpmnElement="An_zust" bioc:stroke="#6B7280" bioc:fill="#FFFFFF" color:background-color="#FFFFFF" color:border-color="#6B7280"><dc:Bounds x="360" y="219" width="150" height="62" /></bpmndi:BPMNShape>
       <bpmndi:BPMNEdge id="Assoc_An_zust_di" bpmnElement="Assoc_An_zust"><di:waypoint x="435" y="172" /><di:waypoint x="435" y="219" /></bpmndi:BPMNEdge>
-      <bpmndi:BPMNShape id="An_mail_di" bpmnElement="An_mail" bioc:stroke="#6B7280" bioc:fill="#FFFFFF" color:background-color="#FFFFFF" color:border-color="#6B7280"><dc:Bounds x="1210" y="219" width="150" height="62" /></bpmndi:BPMNShape>
-      <bpmndi:BPMNEdge id="Assoc_An_mail_di" bpmnElement="Assoc_An_mail"><di:waypoint x="1285" y="172" /><di:waypoint x="1285" y="219" /></bpmndi:BPMNEdge>
+      <bpmndi:BPMNShape id="An_mail_di" bpmnElement="An_mail" bioc:stroke="#6B7280" bioc:fill="#FFFFFF" color:background-color="#FFFFFF" color:border-color="#6B7280"><dc:Bounds x="1380" y="99" width="150" height="62" /></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Assoc_An_mail_di" bpmnElement="Assoc_An_mail"><di:waypoint x="1351" y="130" /><di:waypoint x="1380" y="130" /></bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="Msg_A_ang_P_Lief_di" bpmnElement="Msg_A_ang_P_Lief"><di:waypoint x="775" y="292" /><di:waypoint x="775" y="650" /><bpmndi:BPMNLabel><dc:Bounds x="783" y="601" width="170" height="27" /></bpmndi:BPMNLabel></bpmndi:BPMNEdge>
     </bpmndi:BPMNPlane>
   </bpmndi:BPMNDiagram>

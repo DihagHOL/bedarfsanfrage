@@ -97,7 +97,9 @@ async function gAll(path) {
     const dd = new Date(d);
     if (isNaN(dd.getTime()) || dd > todayEnd) return false;
     const st = String(f[statusCol.name] || '').toLowerCase();
-    return !/entwurf|automatisch erstellt/.test(st); // Entwürfe nicht erneut kopieren
+    // Entwürfe nicht erneut kopieren. Abgelehnte und zurückgezogene Anfragen auch nicht: Dort stand
+    // das Datum fast immer versehentlich (oft das Lieferdatum), Rückmeldung Einkauf 19.11.2026.
+    return !/entwurf|automatisch erstellt|abgelehnt|zur[üu]ckgezogen/.test(st);
   });
 
   console.log(`ℹ️  ${items.length} Elemente geladen, ${due.length} fällig.`);

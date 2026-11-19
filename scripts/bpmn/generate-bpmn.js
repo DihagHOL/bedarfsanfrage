@@ -123,9 +123,12 @@ const HAUPT = {
       + 'erfasst die Anfrage in der App, gespeichert wird sie in der SharePoint-Liste Bedarfsanfrage auf '
       + 'gruppe_shb. Solange der Einkauf nicht entschieden hat, kann er sie zurückziehen. Öffnet der '
       + 'zuständige Einkauf die Anfrage, setzt die App den Status auf In Prüfung (Einkauf). Der Einkauf '
-      + 'genehmigt oder lehnt in der App ab. Nach der Genehmigung läuft der Freigabe-Flow in Power '
-      + 'Automate. Ist die Anfrage freigegeben, bestellt der Einkauf im ERP und trägt Bestellnummer, '
-      + 'Liefertermin und Preis ein. Dann steht sie auf Bestellt.',
+      + 'genehmigt, lehnt ab oder schließt die Anfrage ohne Bestellung ab, etwa bei einer kostenlosen '
+      + 'Leistung. Nach der Genehmigung läuft der Freigabe-Flow in Power Automate. Ist die Anfrage '
+      + 'freigegeben, bestellt der Einkauf im ERP und trägt Bestellnummer, Liefertermin und Preis ein. '
+      + 'Dann steht sie auf Bestellt. Braucht es keine Bestellung, schließt der Einkauf sie mit Grund ab '
+      + '(Erledigt, ohne Bestellung). Anfragen vor dem Produktivstart am 16.11.2026 sind Archiv: grau '
+      + 'markiert, weiter bearbeitbar, nie überfällig.',
   pools: [
     {
       id: 'P_Banf', name: 'DIHAG SHB · Bedarfsanfrage', main: true,
@@ -144,15 +147,19 @@ const HAUPT = {
         { id: 'C_open', k: 'user', n: 'Anfrage im Dashboard oder unter Gemeinsame Anfragen öffnen', lane: 'LC', c: 3, r: 0 },
         { id: 'B_adv', k: 'service', n: 'Status auf In Prüfung (Einkauf) setzen', lane: 'LB', c: 4, r: 0 },
         { id: 'C_pruef', k: 'call', ref: 'pruefen', n: 'Anfrage prüfen und entscheiden', lane: 'LC', c: 5, r: 0 },
-        { id: 'C_gw', k: 'gw', n: 'Vom Einkauf genehmigt?', lane: 'LC', c: 6, r: 0 },
+        { id: 'C_gw', k: 'gw', n: 'Wie entscheidet der Einkauf?', lane: 'LC', c: 6, r: 0 },
         { id: 'C_endAb', k: 'end', n: 'Vom Einkauf abgelehnt', lane: 'LC', c: 7, r: 1, tone: 'err' },
+        { id: 'C_endOhne', k: 'end', n: 'Ohne Bestellung erledigt', lane: 'LC', c: 5, r: 1 },
         { id: 'D_frei', k: 'call', ref: 'freigabe', n: 'Freigabelauf durchlaufen', lane: 'LD', c: 7, r: 0 },
         { id: 'D_gw', k: 'gw', n: 'Freigegeben?', lane: 'LD', c: 8, r: 0 },
         { id: 'D_endAb', k: 'end', n: 'In der Freigabe abgelehnt', lane: 'LD', c: 8, r: 1, tone: 'err' },
-        { id: 'C_best', k: 'user', n: 'Bestellung im ERP auslösen', lane: 'LC', c: 9, r: 0 },
-        { id: 'C_daten', k: 'user', n: 'Bestellnummer, Liefertermin und Preis eintragen', lane: 'LC', c: 10, r: 0 },
-        { id: 'B_best', k: 'service', n: 'Bestellnummer prüfen und Status Bestellt setzen', lane: 'LB', c: 11, r: 0 },
-        { id: 'B_end', k: 'end', n: 'Bedarf bestellt', lane: 'LB', c: 12, r: 0 },
+        { id: 'C_gw3', k: 'gw', n: 'Bestellung nötig?', lane: 'LC', c: 9, r: 0 },
+        { id: 'C_ohne', k: 'user', n: 'Ohne Bestellung abschließen und Grund eintragen', lane: 'LC', c: 10, r: 1 },
+        { id: 'C_endOhne2', k: 'end', n: 'Nach der Freigabe ohne Bestellung erledigt', lane: 'LC', c: 11, r: 1 },
+        { id: 'C_best', k: 'user', n: 'Bestellung im ERP auslösen', lane: 'LC', c: 10, r: 0 },
+        { id: 'C_daten', k: 'user', n: 'Bestellnummer, Liefertermin und Preis eintragen', lane: 'LC', c: 11, r: 0 },
+        { id: 'B_best', k: 'service', n: 'Bestellnummer prüfen und Status Bestellt setzen', lane: 'LB', c: 12, r: 0 },
+        { id: 'B_end', k: 'end', n: 'Bedarf bestellt', lane: 'LB', c: 13, r: 0 },
       ],
       flows: [
         F('A_start', 'A_erf'),
@@ -163,11 +170,15 @@ const HAUPT = {
         F('C_open', 'B_adv'),
         F('B_adv', 'C_pruef'),
         F('C_pruef', 'C_gw'),
-        F('C_gw', 'D_frei', 'ja'),
-        F('C_gw', 'C_endAb', 'nein'),
+        F('C_gw', 'D_frei', 'genehmigt'),
+        F('C_gw', 'C_endAb', 'abgelehnt'),
+        F('C_gw', 'C_endOhne', 'ohne Bestellung'),
         F('D_frei', 'D_gw'),
-        F('D_gw', 'C_best', 'ja'),
+        F('D_gw', 'C_gw3', 'ja'),
         F('D_gw', 'D_endAb', 'nein'),
+        F('C_gw3', 'C_best', 'ja'),
+        F('C_gw3', 'C_ohne', 'nein'),
+        F('C_ohne', 'C_endOhne2'),
         F('C_best', 'C_daten'),
         F('C_daten', 'B_best'),
         F('B_best', 'B_end'),
@@ -176,7 +187,7 @@ const HAUPT = {
         { id: 'An_zur', of: 'A_zur', lane: 'LA', c: 3, r: 1, w: 220, h: 62,
           text: 'Geht nur, solange der Einkauf nicht entschieden hat (Eingereicht oder In Prüfung Einkauf). Die App setzt den Status Zurückgezogen.' },
         { id: 'An_open', of: 'C_open', lane: 'LC', c: 3, r: 1, w: 200, h: 62,
-          text: 'Keine Mail bei neuen Anfragen. Was über 48 Std offen ist, markiert die App rot.' },
+          text: 'Keine Mail bei neuen Anfragen. Ab 48 Std offen markiert die App rot, Anfragen vor dem 16.11.2026 nicht.' },
         { id: 'An_adv', of: 'B_adv', lane: 'LB', c: 4, r: 1, w: 150, h: 62,
           text: 'Nur beim zuständigen Einkauf. Ein Auto-Entwurf wandert genauso in die Prüfung.' },
       ],
@@ -197,7 +208,9 @@ const ERFASSEN = {
       + 'Sammelanfrage mit mehreren Positionen. Favoriten und Wiedervorlagen füllen den Assistenten vor. '
       + 'Aus Menge und Einzelpreis rechnet die App das Bestellvolumen und zeigt den Genehmigungsweg nach '
       + 'Regelwerk. Ab 500 € verlangt das Regelwerk Angebote, beim Lead-Buyer-Abschluss entfällt die '
-      + 'Pflicht. Mit dem Einreichen speichert die App die Anfrage mit dem Status Eingereicht.',
+      + 'Pflicht. Als Liefertermin gibt er an, bis wann die Ware im Werk sein muss. Einen wiederkehrenden '
+      + 'Bedarf kreuzt er im letzten Schritt an und nennt das Datum der neuen Anfrage. Mit dem Einreichen '
+      + 'speichert die App die Anfrage mit dem Status Eingereicht.',
   pools: [
     {
       id: 'P_Erf', name: 'DIHAG SHB · Anfrage erfassen', main: true,
@@ -238,7 +251,7 @@ const ERFASSEN = {
         { id: 'An_ang', of: 'B_vol', lane: 'LB', c: 4, r: 1, w: 200, h: 62,
           text: 'Der Genehmigungsweg nennt die Angebote nach Regelwerk: ab 500 € 2 bis 5, beim Lead-Buyer-Abschluss keine.' },
         { id: 'An_save', of: 'B_save', lane: 'LB', c: 8, r: 1, w: 200, h: 62,
-          text: 'Ein Datum zur automatischen Bedarfsanfrage merkt die Anfrage für den Auto-Entwurf vor.' },
+          text: 'Mit Haken „wiederkehrender Bedarf" und Datum merkt die App die Anfrage für den Auto-Entwurf vor. Nicht der Liefertermin.' },
       ],
     },
   ],
@@ -251,10 +264,14 @@ const PRUEFEN = {
   kennung: 'Process_Bedarfsanfrage_Einkauf',
   policies: ['120', '119'],
   doku: 'Der Einkauf prüft die Anfrage in der App. Zuständig ist, wem die Warengruppe in der '
-      + 'Zugriffssteuerung zugeordnet ist, ohne Zuordnung sind es alle Einkäufer. Fehlen Angebote nach '
-      + 'Regelwerk, holt der Einkauf sie beim Lieferanten ein und hängt sie an. Danach genehmigt er oder '
-      + 'lehnt mit Grund ab. Die App speichert Status und Entscheider. Eine Mail geht dabei nicht raus, '
-      + 'der Antragsteller sieht das Ergebnis in Meine Anfragen.',
+      + 'Zugriffssteuerung zugeordnet ist, ohne Zuordnung sind es alle Einkäufer. Ein Einkäufer kann die '
+      + 'Anfrage für sich reservieren oder einem Kollegen zuteilen, beides gilt bis zum Abschluss. Wer nur '
+      + 'Zugeteiltes bearbeitet, etwa ein Auszubildender, prüft nur die ihm zugeteilten Anfragen. Fehlen '
+      + 'Angebote nach Regelwerk, holt der Einkauf sie beim Lieferanten ein und hängt sie an. Bei einem '
+      + 'Lead-Buyer-Abschluss setzt er das Kennzeichen. Danach genehmigt er, lehnt mit Grund ab oder schließt '
+      + 'die Anfrage mit Grund ohne Bestellung ab, etwa bei einer kostenlosen Leistung. Die App speichert '
+      + 'Status und Entscheider. Eine Mail geht dabei nicht raus, der Antragsteller sieht das Ergebnis in '
+      + 'Meine Anfragen.',
   pools: [
     {
       id: 'P_Pruef', name: 'DIHAG SHB · Anfrage prüfen und entscheiden', main: true,
@@ -264,16 +281,19 @@ const PRUEFEN = {
       ],
       nodes: [
         { id: 'A_start', k: 'start', n: 'Anfrage steht auf In Prüfung (Einkauf)', lane: 'LA', c: 0, r: 0 },
-        { id: 'A_res', k: 'user', n: 'Anfrage reservieren und Angaben prüfen', lane: 'LA', c: 1, r: 0 },
+        { id: 'A_res', k: 'user', n: 'Anfrage reservieren oder zuteilen und Angaben prüfen', lane: 'LA', c: 1, r: 0 },
         { id: 'A_gw1', k: 'gw', n: 'Angebote vollständig?', lane: 'LA', c: 2, r: 0 },
         { id: 'A_ang', k: 'user', n: 'Angebote beim Lieferanten einholen und anhängen', lane: 'LA', c: 3, r: 1 },
-        { id: 'A_bew', k: 'user', n: 'Bedarf, Preis und Lieferant bewerten', lane: 'LA', c: 4, r: 0 },
-        { id: 'A_gw2', k: 'gw', n: 'Bedarf genehmigen?', lane: 'LA', c: 5, r: 0 },
+        { id: 'A_bew', k: 'user', n: 'Bedarf, Preis und Lieferant bewerten, Lead-Buyer kennzeichnen', lane: 'LA', c: 4, r: 0 },
+        { id: 'A_gw2', k: 'gw', n: 'Wie entscheidet der Einkauf?', lane: 'LA', c: 5, r: 0 },
+        { id: 'A_ohne', k: 'user', n: 'Ohne Bestellung abschließen und Grund eintragen', lane: 'LA', c: 6, r: 1 },
+        { id: 'A_endOhne', k: 'end', n: 'Erledigt (ohne Bestellung)', lane: 'LA', c: 7, r: 1 },
         { id: 'A_grund', k: 'user', n: 'Ablehnungsgrund eintragen', lane: 'LA', c: 6, r: 0 },
         { id: 'B_ok', k: 'service', n: 'Status Genehmigt (Einkauf) speichern', lane: 'LB', c: 6, r: 0 },
         { id: 'B_endOk', k: 'end', n: 'Vom Einkauf genehmigt', lane: 'LB', c: 7, r: 0 },
         { id: 'B_ab', k: 'service', n: 'Status Abgelehnt mit Grund speichern', lane: 'LB', c: 7, r: 1 },
         { id: 'B_endAb', k: 'end', n: 'Vom Einkauf abgelehnt', lane: 'LB', c: 8, r: 1, tone: 'err' },
+
       ],
       flows: [
         F('A_start', 'A_res'),
@@ -282,16 +302,18 @@ const PRUEFEN = {
         F('A_gw1', 'A_ang', 'nein'),
         F('A_ang', 'A_bew'),
         F('A_bew', 'A_gw2'),
-        F('A_gw2', 'B_ok', 'ja'),
-        F('A_gw2', 'A_grund', 'nein'),
+        F('A_gw2', 'B_ok', 'genehmigen'),
+        F('A_gw2', 'A_grund', 'ablehnen'),
+        F('A_gw2', 'A_ohne', 'ohne Bestellung'),
         F('B_ok', 'B_endOk'),
         F('A_grund', 'B_ab'),
         F('B_ab', 'B_endAb'),
+        F('A_ohne', 'A_endOhne'),
       ],
       annotations: [
         { id: 'An_zust', of: 'A_res', lane: 'LA', c: 1, r: 1, w: 150, h: 62,
-          text: 'Zuständig ist, wem die Warengruppe zugeordnet ist. Reservieren hält die Anfrage 8 Std.' },
-        { id: 'An_mail', of: 'A_grund', lane: 'LA', c: 6, r: 1, w: 150, h: 62,
+          text: 'Zuständig ist, wem die Warengruppe zugeordnet ist. Reservierung und Zuteilung gelten bis zum Abschluss.' },
+        { id: 'An_mail', of: 'A_grund', lane: 'LA', c: 7, r: 0, w: 150, h: 62,
           text: 'Keine Mail. Der Antragsteller sieht Status und Grund in Meine Anfragen.' },
       ],
     },
@@ -381,10 +403,11 @@ const AUTOENTWURF = {
   name: 'Auto-Entwurf (Wiedervorlage)',
   kennung: 'Process_Bedarfsanfrage_AutoEntwurf',
   policies: ['120', '111'],
-  doku: 'Für wiederkehrende Bedarfe. Hat eine Anfrage ein Datum zur automatischen Bedarfsanfrage, legt '
-      + 'ein täglicher Lauf in GitHub Actions an diesem Tag eine Kopie als Entwurf an (Status '
-      + 'Automatisch erstellter Entwurf) und leert das Datum an der Vorlage, damit kein zweiter Entwurf '
-      + 'entsteht. Öffnet der Einkauf den Entwurf, wandert er wie eine eingereichte Anfrage in die Prüfung.',
+  doku: 'Für wiederkehrende Bedarfe. Kreuzt der Antragsteller im letzten Schritt „wiederkehrender Bedarf" '
+      + 'an und setzt ein Datum, legt ein täglicher Lauf in GitHub Actions an diesem Tag eine Kopie als '
+      + 'Entwurf an (Status Automatisch erstellter Entwurf) und leert das Datum an der Vorlage, damit kein '
+      + 'zweiter Entwurf entsteht. Abgelehnte und zurückgezogene Anfragen kopiert der Lauf nicht. Öffnet '
+      + 'der Einkauf den Entwurf, wandert er wie eine eingereichte Anfrage in die Prüfung.',
   pools: [
     {
       id: 'P_Auto', name: 'DIHAG SHB · Auto-Entwurf', main: true,
@@ -393,7 +416,7 @@ const AUTOENTWURF = {
       ],
       nodes: [
         { id: 'A_start', k: 'timerStart', n: 'Täglich um 6 Uhr', lane: 'LA', c: 0, r: 0, lp: 'above' },
-        { id: 'A_suche', k: 'service', n: 'Fällige Wiedervorlagen suchen', lane: 'LA', c: 1, r: 0 },
+        { id: 'A_suche', k: 'service', n: 'Fällige, nicht abgelehnte Wiedervorlagen suchen', lane: 'LA', c: 1, r: 0 },
         { id: 'A_gw', k: 'gw', n: 'Fällige Anfrage gefunden?', lane: 'LA', c: 2, r: 0 },
         { id: 'A_nichts', k: 'end', n: 'Nichts fällig', lane: 'LA', c: 3, r: 1, tone: 'plan' },
         { id: 'A_kopie', k: 'service', n: 'Kopie als Entwurf anlegen', lane: 'LA', c: 3, r: 0 },

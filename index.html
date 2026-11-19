@@ -124,7 +124,12 @@
                 <option value="price-desc">Preis ↓</option>
                 <option value="price-asc">Preis ↑</option>
                 <option value="status">Nach Status</option>
+                <option value="lieferant">Nach Lieferant</option>
               </select>
+              <div class="ansicht-umschalter" role="group" aria-label="Darstellung">
+                <button type="button" class="btn btn-sm btn-ghost" id="dash-ansicht-karten" onclick="setDashAnsicht('karten')" title="Als Karten">▦ Karten</button>
+                <button type="button" class="btn btn-sm btn-ghost" id="dash-ansicht-tabelle" onclick="setDashAnsicht('tabelle')" title="Als Tabelle, gut zum Bündeln nach Lieferant">☰ Tabelle</button>
+              </div>
               <button class="btn btn-sm btn-primary" data-view="new" style="white-space:nowrap">+ Neue Anfrage</button>
             </div>
             <div id="list-dashboard" class="item-cards"></div>
@@ -230,13 +235,7 @@
                 </select>
                 <div class="field-hint" id="hint-Prioritaet"></div>
               </div>
-              <div class="form-group full">
-                <label>Datum zur automatischen Bedarfsanfrage
-                  <span class="field-sub">optional – Erinnerung: zu diesem Datum wird automatisch ein Entwurf erstellt</span>
-                </label>
-                <input type="date" id="f-AutoBedarfDatum"/>
-                <div class="field-hint" id="hint-AutoBedarfDatum"></div>
-              </div>
+
             </div>
             <div class="wizard-footer">
               <span></span>
@@ -276,7 +275,9 @@
                 <div class="field-hint" id="hint-Mindestlagermenge"></div>
               </div>
               <div class="form-group">
-                <label>Benötigt bis (Termin) <span class="req">*</span></label>
+                <label>Liefertermin (spätestens) <span class="req">*</span>
+                  <span class="field-sub">Bis wann die Ware im Werk sein muss. Kein Termin für die Genehmigung.</span>
+                </label>
                 <input type="date" id="f-Termin"/>
                 <div class="field-hint" id="hint-Termin"></div>
               </div>
@@ -396,6 +397,17 @@
             <h2>Überprüfung &amp; Einreichen</h2>
             <p class="step-hint">Bitte prüfen Sie alle Angaben. Nach dem Einreichen prüft der <strong>Einkauf</strong> die Anfrage in der App. Bis zu seiner Entscheidung können Sie sie in „Meine Anfragen" zurückziehen.</p>
             <div id="review-content"></div>
+            <div class="wiederkehrend" id="wiederkehrend-box">
+              <label class="wk-haken"><input type="checkbox" id="f-Wiederkehrend" onchange="wiederkehrendUmschalten()"/>
+                🔁 Wiederkehrender Bedarf: diese Anfrage später automatisch neu anlegen</label>
+              <div class="wk-feld" id="wk-feld" hidden>
+                <label for="f-AutoBedarfDatum">Neue Anfrage am</label>
+                <input type="date" id="f-AutoBedarfDatum"/>
+                <div class="field-sub">An diesem Tag legt das System eine Kopie dieser Anfrage als Entwurf für den Einkauf an.
+                  Das ist <b>nicht</b> der Liefertermin, den tragen Sie in Schritt 2 ein.</div>
+                <div class="field-hint" id="hint-AutoBedarfDatum"></div>
+              </div>
+            </div>
             <div id="missing-cols-warn" class="info-box warn" style="display:none;margin-top:14px"></div>
             <div class="wizard-footer">
               <button class="btn btn-ghost" onclick="wBack(4)">← Zurück</button>

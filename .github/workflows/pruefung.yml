@@ -48,6 +48,9 @@ jobs:
       - name: Sammelimport
         run: node tests/test-sammelimport.mjs
 
+      - name: Einkauf (Zuteilung, ohne Bestellung, Tabelle, Abteilungen)
+        run: node tests/test-einkauf.mjs
+
       - name: Verdrahtung der Seite (Schrift, Veröffentlichung)
         run: node tests/seite.test.mjs
 

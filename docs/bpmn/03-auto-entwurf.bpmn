@@ -5,7 +5,7 @@
     <bpmn:participant id="P_Auto" name="DIHAG SHB · Auto-Entwurf" processRef="Process_Bedarfsanfrage_AutoEntwurf" />
   </bpmn:collaboration>
   <bpmn:process id="Process_Bedarfsanfrage_AutoEntwurf" name="Auto-Entwurf (Wiedervorlage)" isExecutable="false">
-    <bpmn:documentation>Für wiederkehrende Bedarfe. Hat eine Anfrage ein Datum zur automatischen Bedarfsanfrage, legt ein täglicher Lauf in GitHub Actions an diesem Tag eine Kopie als Entwurf an (Status Automatisch erstellter Entwurf) und leert das Datum an der Vorlage, damit kein zweiter Entwurf entsteht. Öffnet der Einkauf den Entwurf, wandert er wie eine eingereichte Anfrage in die Prüfung.
+    <bpmn:documentation>Für wiederkehrende Bedarfe. Kreuzt der Antragsteller im letzten Schritt „wiederkehrender Bedarf&quot; an und setzt ein Datum, legt ein täglicher Lauf in GitHub Actions an diesem Tag eine Kopie als Entwurf an (Status Automatisch erstellter Entwurf) und leert das Datum an der Vorlage, damit kein zweiter Entwurf entsteht. Abgelehnte und zurückgezogene Anfragen kopiert der Lauf nicht. Öffnet der Einkauf den Entwurf, wandert er wie eine eingereichte Anfrage in die Prüfung.
 Anwender-Ansicht: https://bedarfsanfrage.dihag-extern.com/?ansicht=prozess&amp;modell=autoentwurf
 Im Einklang mit den Richtlinien: Konzernfachregelung Prozessmanagement; ISMS-Richtlinie Sichere Softwareentwicklung
 [[rms:policies=120,111]]</bpmn:documentation>
@@ -13,7 +13,7 @@ Im Einklang mit den Richtlinien: Konzernfachregelung Prozessmanagement; ISMS-Ric
       <bpmn:lane id="LA" name="Automatik (GitHub Actions)"><bpmn:flowNodeRef>A_start</bpmn:flowNodeRef><bpmn:flowNodeRef>A_suche</bpmn:flowNodeRef><bpmn:flowNodeRef>A_gw</bpmn:flowNodeRef><bpmn:flowNodeRef>A_nichts</bpmn:flowNodeRef><bpmn:flowNodeRef>A_kopie</bpmn:flowNodeRef><bpmn:flowNodeRef>A_leeren</bpmn:flowNodeRef><bpmn:flowNodeRef>A_end</bpmn:flowNodeRef></bpmn:lane>
     </bpmn:laneSet>
       <bpmn:startEvent id="A_start" name="Täglich um 6 Uhr"><bpmn:outgoing>Flow_A_start_A_suche</bpmn:outgoing><bpmn:timerEventDefinition id="A_start_def" /></bpmn:startEvent>
-      <bpmn:serviceTask id="A_suche" name="Fällige Wiedervorlagen suchen"><bpmn:incoming>Flow_A_start_A_suche</bpmn:incoming><bpmn:outgoing>Flow_A_suche_A_gw</bpmn:outgoing></bpmn:serviceTask>
+      <bpmn:serviceTask id="A_suche" name="Fällige, nicht abgelehnte Wiedervorlagen suchen"><bpmn:incoming>Flow_A_start_A_suche</bpmn:incoming><bpmn:outgoing>Flow_A_suche_A_gw</bpmn:outgoing></bpmn:serviceTask>
       <bpmn:exclusiveGateway id="A_gw" name="Fällige Anfrage gefunden?"><bpmn:incoming>Flow_A_suche_A_gw</bpmn:incoming><bpmn:outgoing>Flow_A_gw_A_kopie</bpmn:outgoing><bpmn:outgoing>Flow_A_gw_A_nichts</bpmn:outgoing></bpmn:exclusiveGateway>
       <bpmn:endEvent id="A_nichts" name="Nichts fällig"><bpmn:incoming>Flow_A_gw_A_nichts</bpmn:incoming></bpmn:endEvent>
       <bpmn:serviceTask id="A_kopie" name="Kopie als Entwurf anlegen"><bpmn:incoming>Flow_A_gw_A_kopie</bpmn:incoming><bpmn:outgoing>Flow_A_kopie_A_leeren</bpmn:outgoing></bpmn:serviceTask>

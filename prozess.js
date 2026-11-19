@@ -271,9 +271,9 @@ const PZ_PANEL = {
             <li>${pzChip('a-app', 'App')}speichert die Anfrage mit dem Status Eingereicht in der SharePoint-Liste. Eine Mail an den Einkauf geht nicht raus.</li>
             <li>${pzChip('a-mensch', 'Antragsteller')}kann die Anfrage in „Meine Anfragen" zurückziehen, solange der Einkauf nicht entschieden hat. Sie steht dann auf Zurückgezogen und ist aus der Bearbeitung.</li>
             <li>${pzChip('a-mensch', 'Einkauf')}sieht neue Anfragen im Dashboard und unter Gemeinsame Anfragen. Was seit über 48 Stunden offen ist, markiert die App rot. Anfragen aus der Zeit vor dem Produktivstart am 16.11.2026 sind grau als Archiv markiert und davon ausgenommen, bearbeiten lassen sie sich weiter. Öffnet der zuständige Einkäufer die Anfrage, setzt die App den Status auf In Prüfung (Einkauf).</li>
-            <li>${pzChip('a-mensch', 'Einkauf')}reserviert die Anfrage bei Bedarf für sich, holt fehlende Angebote ein, hängt sie an und genehmigt oder lehnt mit Grund ab. Bei einer Ablehnung geht keine Mail raus, der Antragsteller sieht sie in „Meine Anfragen".</li>
+            <li>${pzChip('a-mensch', 'Einkauf')}reserviert die Anfrage für sich oder teilt sie einem Kollegen zu, beides gilt bis zum Abschluss. Er holt fehlende Angebote ein, hängt sie an und setzt bei einem Lead-Buyer-Abschluss das Kennzeichen. Dann genehmigt er, lehnt mit Grund ab oder schließt die Anfrage mit Grund ohne Bestellung ab. Bei einer Ablehnung geht keine Mail raus, der Antragsteller sieht sie in „Meine Anfragen".</li>
             <li>${pzChip('a-auto', 'Power Automate')}startet mit dem Status Genehmigt (Einkauf) den Freigabelauf und holt je nach Art und Betrag die Freigaben ein. Ob freigegeben oder abgelehnt, der Antragsteller bekommt vom Flow eine Mail.</li>
-            <li>${pzChip('a-mensch', 'Einkauf')}bestellt die freigegebene Anfrage im ERP und trägt Bestellnummer, Liefertermin und tatsächlichen Preis ein. Steht die Bestellnummer schon an einer anderen Anfrage, warnt die App. Danach steht die Anfrage auf Bestellt.</li>
+            <li>${pzChip('a-mensch', 'Einkauf')}bestellt die freigegebene Anfrage im ERP und trägt Bestellnummer, Liefertermin und tatsächlichen Preis ein. Steht die Bestellnummer schon an einer anderen Anfrage, warnt die App. Danach steht die Anfrage auf Bestellt. Braucht es keine Bestellung, etwa bei einer kostenlosen Entsorgung, schließt er sie mit Grund ab: Erledigt (ohne Bestellung).</li>
           </ol>
         </div>
         <div class="pz-side">
@@ -295,7 +295,7 @@ const PZ_PANEL = {
             <li>${pzChip('a-mensch', 'Antragsteller')}wählt Einzel- oder Sammelanfrage. Zur Artikelnummer schlägt die App Bezeichnung und Warengruppe aus dem Artikelstamm vor. Viele Positionen, etwa aus der Instandhaltung, lassen sich in der Excel-Vorlage erfassen und von dort als Sammelanfrage übernehmen.</li>
             <li>${pzChip('a-mensch', 'Antragsteller')}gibt Beschaffungsart, Lieferanten, Kostenstelle und Abteilung an. Die Abteilung bestimmt, unter welcher Gruppe die Anfrage in Gemeinsame Anfragen erscheint.</li>
             <li>${pzChip('a-app', 'App')}summiert das Bestellvolumen aus Menge und Einzelpreis und zeigt den Genehmigungsweg.</li>
-            <li>${pzChip('a-mensch', 'Antragsteller')}hängt vorhandene Angebote an, prüft die Zusammenfassung und reicht ein.</li>
+            <li>${pzChip('a-mensch', 'Antragsteller')}hängt vorhandene Angebote an, prüft die Zusammenfassung und reicht ein. Einen wiederkehrenden Bedarf kreuzt er hier an und nennt das Datum der neuen Anfrage. Das ist nicht der Liefertermin.</li>
           </ol>
         </div>
         <div class="pz-side">
@@ -336,16 +336,16 @@ const PZ_PANEL = {
   },
   autoentwurf: {
     titel: '🔁 Auto-Entwurf',
-    lead: 'Für wiederkehrende Bedarfe. Wer beim Erfassen ein Datum zur automatischen Bedarfsanfrage setzt, '
-        + 'bekommt an diesem Tag eine Kopie der Anfrage als Entwurf. Öffnet der Einkauf den Entwurf, läuft er '
-        + 'wie eine eingereichte Anfrage weiter.',
+    lead: 'Für wiederkehrende Bedarfe. Wer im letzten Schritt des Assistenten „wiederkehrender Bedarf" ankreuzt '
+        + 'und ein Datum setzt, bekommt an diesem Tag eine Kopie der Anfrage als Entwurf. Öffnet der Einkauf '
+        + 'den Entwurf, läuft er wie eine eingereichte Anfrage weiter.',
     danach: `
       <div class="pz-steps-wrap">
         <div>
           <h4 class="pz-box-title">Schritt für Schritt</h4>
           <ol class="pz-steps">
-            <li>${pzChip('a-mensch', 'Antragsteller')}setzt beim Erfassen ein Datum zur automatischen Bedarfsanfrage.</li>
-            <li>${pzChip('a-auto', 'GitHub Actions')}sucht jeden Morgen gegen 6 Uhr (im Sommer 7 Uhr) die Anfragen, deren Datum heute oder früher ist.</li>
+            <li>${pzChip('a-mensch', 'Antragsteller')}kreuzt im letzten Schritt „wiederkehrender Bedarf" an und setzt das Datum der neuen Anfrage. Das ist nicht der Liefertermin, ein gleiches Datum weist die App ab.</li>
+            <li>${pzChip('a-auto', 'GitHub Actions')}sucht jeden Morgen gegen 6 Uhr (im Sommer 7 Uhr) die Anfragen, deren Datum heute oder früher ist. Abgelehnte und zurückgezogene Anfragen lässt er aus.</li>
             <li>${pzChip('a-auto', 'GitHub Actions')}legt je fällige Anfrage eine Kopie mit dem Status Automatisch erstellter Entwurf an. Status, Entscheider und Bestelldaten kopiert er nicht.</li>
             <li>${pzChip('a-auto', 'GitHub Actions')}leert das Datum an der Vorlage, damit kein zweiter Entwurf entsteht.</li>
             <li>${pzChip('a-mensch', 'Einkauf')}findet den Entwurf im Dashboard. Öffnet er ihn, setzt die App den Status auf In Prüfung (Einkauf). Ab hier gilt der Hauptprozess.</li>

@@ -4,7 +4,11 @@ Ein geplanter **GitHub-Actions-Cron** (`.github/workflows/auto-drafts.yml`) füh
 `scripts/auto-drafts.mjs` aus. Das Skript meldet sich **app-only** an Microsoft Graph an,
 sucht Anfragen mit fälligem Feld **„Datum zur Automatische Bedarfsanfrage"** und legt je
 einen Entwurf (Status **„Automatisch erstellter Entwurf"**) an; danach wird das Quelldatum
-geleert.
+geleert. Abgelehnte und zurückgezogene Anfragen kopiert es nicht.
+
+In der App setzt der Antragsteller das Datum seit dem 19.11.2026 nur noch über den Haken
+**„Wiederkehrender Bedarf"** im letzten Schritt des Assistenten. Vorher stand das Feld im ersten
+Schritt, dort landete oft das Lieferdatum und erzeugte ungewollte Entwürfe.
 
 Damit das läuft, ist **einmalig** ein app-only-Zugang nötig (Azure-Admin):
 

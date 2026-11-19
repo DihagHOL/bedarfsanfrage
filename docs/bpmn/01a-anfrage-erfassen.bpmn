@@ -4,7 +4,7 @@
     <bpmn:participant id="P_Erf" name="DIHAG SHB · Anfrage erfassen" processRef="Process_Bedarfsanfrage_Erfassen" />
   </bpmn:collaboration>
   <bpmn:process id="Process_Bedarfsanfrage_Erfassen" name="Anfrage erfassen und einreichen" isExecutable="false">
-    <bpmn:documentation>Der Antragsteller erfasst den Bedarf im Assistenten der App, als Einzelanfrage oder als Sammelanfrage mit mehreren Positionen. Favoriten und Wiedervorlagen füllen den Assistenten vor. Aus Menge und Einzelpreis rechnet die App das Bestellvolumen und zeigt den Genehmigungsweg nach Regelwerk. Ab 500 € verlangt das Regelwerk Angebote, beim Lead-Buyer-Abschluss entfällt die Pflicht. Mit dem Einreichen speichert die App die Anfrage mit dem Status Eingereicht.
+    <bpmn:documentation>Der Antragsteller erfasst den Bedarf im Assistenten der App, als Einzelanfrage oder als Sammelanfrage mit mehreren Positionen. Favoriten und Wiedervorlagen füllen den Assistenten vor. Aus Menge und Einzelpreis rechnet die App das Bestellvolumen und zeigt den Genehmigungsweg nach Regelwerk. Ab 500 € verlangt das Regelwerk Angebote, beim Lead-Buyer-Abschluss entfällt die Pflicht. Als Liefertermin gibt er an, bis wann die Ware im Werk sein muss. Einen wiederkehrenden Bedarf kreuzt er im letzten Schritt an und nennt das Datum der neuen Anfrage. Mit dem Einreichen speichert die App die Anfrage mit dem Status Eingereicht.
 Eingebunden in: Bedarfsanfrage.
 Anwender-Ansicht: https://bedarfsanfrage.dihag-extern.com/?ansicht=prozess&amp;modell=erfassen
 Im Einklang mit den Richtlinien: Konzernfachregelung Prozessmanagement; ISMS-Richtlinie Aufbewahrungsfristen und -pflichten
@@ -40,7 +40,7 @@ Im Einklang mit den Richtlinien: Konzernfachregelung Prozessmanagement; ISMS-Ric
       <bpmn:association id="Assoc_An_fav" associationDirection="None" sourceRef="A_start" targetRef="An_fav" />
       <bpmn:textAnnotation id="An_ang"><bpmn:text>Der Genehmigungsweg nennt die Angebote nach Regelwerk: ab 500 € 2 bis 5, beim Lead-Buyer-Abschluss keine.</bpmn:text></bpmn:textAnnotation>
       <bpmn:association id="Assoc_An_ang" associationDirection="None" sourceRef="B_vol" targetRef="An_ang" />
-      <bpmn:textAnnotation id="An_save"><bpmn:text>Ein Datum zur automatischen Bedarfsanfrage merkt die Anfrage für den Auto-Entwurf vor.</bpmn:text></bpmn:textAnnotation>
+      <bpmn:textAnnotation id="An_save"><bpmn:text>Mit Haken „wiederkehrender Bedarf&quot; und Datum merkt die App die Anfrage für den Auto-Entwurf vor. Nicht der Liefertermin.</bpmn:text></bpmn:textAnnotation>
       <bpmn:association id="Assoc_An_save" associationDirection="None" sourceRef="B_save" targetRef="An_save" />
   </bpmn:process>
   <bpmndi:BPMNDiagram id="Diagram_erfassen">
