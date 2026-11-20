@@ -147,6 +147,14 @@ const knopf = quelle.slice(quelle.indexOf('async function siVorlageExcel()'), qu
 pruefe(knopf.length > 100 && knopf.includes('siVorlageHochladen()') && !knopf.includes('siHerunterladen('), '„Excel-Vorlage öffnen“ legt im OneDrive an und lädt nichts herunter');
 pruefe(quelle.includes("'@microsoft.graph.downloadUrl'") && !/[/]content['`]/.test(quelle.replace(':/content?', '')), 'Übernehmen liest über die Download-Adresse, nicht über /content');
 
+console.log('Priorität');
+pruefe(S.siPrioNormal() === 'Normal', 'ohne geladene Spalte: Normal');
+kontext.resolvedFields.Prioritaet = 'Priorit_x00e4_t';
+kontext.colByKey.Priorit_x00e4_t = { choice: { choices: ['HIGH', 'NORMAL', 'LOW'] } };
+pruefe(S.siPrioNormal() === 'NORMAL' && S.siSchritte({ warengruppe: 'X', beschreibung: '', abteilung: 'AV' })[0].Prioritaet === 'NORMAL',
+  'Import schreibt den Normalwert der Spalte (NORMAL)');
+pruefe(/ids = fd\.key === 'Prioritaet' \? \['f-Prioritaet', 'mf-Prioritaet'\]/.test(app), 'Sammelassistent bekommt die Prioritätswerte der Spalte');
+
 console.log('Einbindung');
 const html = lies('index.html');
 pruefe(html.indexOf('src="sammelimport.js') > html.indexOf('src="app.js'), 'index.html lädt sammelimport.js nach app.js');

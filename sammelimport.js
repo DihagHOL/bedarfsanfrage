@@ -821,9 +821,14 @@ function siVorschau() {
   document.querySelector('#modal-overlay .modal')?.classList.add('modal-wide');
   $id('modal-overlay').classList.remove('hidden');
 }
+// Normalwert der Prioritätsspalte, wie ihn auch die Assistenten schreiben (in der Liste NORMAL)
+function siPrioNormal() {
+  const col = (typeof colByKey !== 'undefined' && typeof resolvedFields !== 'undefined') ? colByKey[resolvedFields.Prioritaet] : null;
+  return (col?.choice?.choices || []).find(c => /^(normal|standard)$/i.test(String(c).trim())) || 'Normal';
+}
 function siSchritte(g) {
   return [
-    { Warengruppe: g.warengruppe, Prioritaet: 'Normal', Beschreibung: g.beschreibung, Abteilung: g.abteilung },
+    { Warengruppe: g.warengruppe, Prioritaet: siPrioNormal(), Beschreibung: g.beschreibung, Abteilung: g.abteilung },
     { Beschaffungslogik: g.beschaffungslogik, Lieferant: g.lieferant, Lieferant2: '', Lieferant3: '', Lieferant4: '',
       GeschaetzterPreis: g.summe, LeadBuyerAbschluss: false },
   ];
@@ -899,6 +904,6 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     SI_SPALTEN, SI_ART1, SI_ART2, siNorm, siZahl, siText, siDatum, siEinheit, siWarengruppe, siAbteilung,
     siArt1, siArt2, siCsvZeilen, siKopfFinden, siAuswerten, siVorlageXlsx, siVorlageCsvText, siZip, siCrc32,
-    siVorlageName, siBearbeitenUrl, siDriveId, siStatus, siZeitText,
+    siVorlageName, siBearbeitenUrl, siDriveId, siStatus, siZeitText, siPrioNormal, siSchritte,
   };
 }

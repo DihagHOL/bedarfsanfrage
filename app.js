@@ -680,10 +680,14 @@ async function discoverSP() {
     if (!colName) continue;
     const col = colByKey[colName];
     if (!col?.choice?.choices?.length) continue;
-    const el = document.getElementById('f-' + fd.key);
-    if (!el || el.tagName !== 'SELECT') continue;
-    el.innerHTML = fd.required ? '' : '<option value="">– bitte wählen –</option>';
-    for (const c of col.choice.choices) el.add(new Option(c, c));
+    // Priorität auch im Sammelassistenten, sonst schreibt er Normal/Hoch statt der Spaltenwerte
+    const ids = fd.key === 'Prioritaet' ? ['f-Prioritaet', 'mf-Prioritaet'] : ['f-' + fd.key];
+    for (const id of ids) {
+      const el = document.getElementById(id);
+      if (!el || el.tagName !== 'SELECT') continue;
+      el.innerHTML = fd.required ? '' : '<option value="">– bitte wählen –</option>';
+      for (const c of col.choice.choices) el.add(new Option(c, c));
+    }
   }
 
   // ── Status-Spalte mit SP-Liste synchronisieren ────────────────────────────
