@@ -64,7 +64,7 @@ const STATUS_STYLES = {
   'in prüfung (controlling)':           { bg:'#ccfbf1', color:'#0f766e' },
   'freigegeben':                        { bg:'#f3e8ff', color:'#7e22ce' },
   'abgelehnt':                          { bg:'#f3f4f6', color:'#374151' },
-  'bestellt':                           { bg:'#dbeafe', color:'#1d4ed8' },
+  'bestellt':                           { bg:'#d5e2f2', color:'#17509e' },
   'erledigt (ohne bestellung)':         { bg:'#dcfce7', color:'#166534' },
   'erledigt':                           { bg:'#f3f4f6', color:'#374151' },
   'zurückgezogen':                      { bg:'#f3f4f6', color:'#6b7280' },
@@ -73,7 +73,7 @@ const STATUS_STYLES = {
   'in prüfung':                         { bg:'#ccfbf1', color:'#0f766e' },
   'angefragt':                          { bg:'#f0f9ff', color:'#0369a1' },
   'in bearbeitung':                     { bg:'#fffbeb', color:'#b45309' },
-  'offen':                              { bg:'#eff6ff', color:'#1d4ed8' },
+  'offen':                              { bg:'#e9f0f8', color:'#17509e' },
 };
 
 const SYSTEM_FIELDS = new Set([
@@ -1686,7 +1686,7 @@ function isOpenStatus(s) {
 }
 
 const KANBAN_COLS = [
-  { id:'eingereicht', label:'Eingereicht',  icon:'📋', match: s => !s || /eingereicht|angefragt|offen/.test(s.toLowerCase()),  bg:'#eff6ff', border:'#bfdbfe', dot:'#1d4ed8' },
+  { id:'eingereicht', label:'Eingereicht',  icon:'📋', match: s => !s || /eingereicht|angefragt|offen/.test(s.toLowerCase()),  bg:'#e9f0f8', border:'#b9cfe6', dot:'#17509e' },
   { id:'pruefung',    label:'In Prüfung',   icon:'⏳', match: s => /prüfung|bearbeitung/.test((s||'').toLowerCase()),           bg:'#fffbeb', border:'#fde68a', dot:'#b45309' },
   { id:'freigegeben', label:'Freigegeben',  icon:'✓',  match: s => /freigegeben/.test((s||'').toLowerCase()),                  bg:'#f0fdf4', border:'#bbf7d0', dot:'#15803d' },
   { id:'bestellt',    label:'Bestellt',     icon:'📦', match: s => /bestellt|erledigt/.test((s||'').toLowerCase()),             bg:'#faf5ff', border:'#e9d5ff', dot:'#7e22ce' },
@@ -2112,7 +2112,7 @@ function statusColorFor(val) {
   if (/prüf|pruef|prüf/.test(v))        return { bg:'#ccfbf1', color:'#0f766e' };
   if (/freigegeben/.test(v))            return { bg:'#f3e8ff', color:'#7e22ce' };
   if (/abgelehnt/.test(v))              return { bg:'#f3f4f6', color:'#374151' };
-  if (/bestellt/.test(v))               return { bg:'#dbeafe', color:'#1d4ed8' };
+  if (/bestellt/.test(v))               return { bg:'#d5e2f2', color:'#17509e' };
   if (/erledigt.*ohne bestellung/.test(v)) return { bg:'#dcfce7', color:'#166534' };
   if (/erledigt|abgeschlossen/.test(v)) return { bg:'#f3f4f6', color:'#374151' };
   return { bg:'#f0f9ff', color:'#0369a1' };
@@ -6820,7 +6820,7 @@ async function openPdfViewer(relUrl, fileName) {
       <div style="text-align:center;padding:32px">
         <p style="font-size:1rem;margin-bottom:20px">PDF kann nicht direkt angezeigt werden<br>(SP blockiert Einbettung).</p>
         <button onclick="parent.document.getElementById('pdf-viewer-ext').click()"
-          style="padding:10px 24px;background:#1a56db;color:#fff;border:none;border-radius:8px;
+          style="padding:10px 24px;background:#17509e;color:#fff;border:none;border-radius:8px;
           font-size:1rem;cursor:pointer">↗ In SharePoint öffnen</button>
       </div></body></html>`;
   }

@@ -20,7 +20,7 @@ const gibt = (p) => fs.existsSync(path.join(ROOT, p));
 /* Was für diese Anwendung gilt */
 const K = {
   seiten: ['index.html'],
-  schrift: { name: 'Inter', css: 'style.css' },
+  schrift: { name: 'Exo', css: 'style.css' },
   workflow: '.github/workflows/pruefung.yml',
   pruefJob: 'pruefung',
   zweig: 'master',
