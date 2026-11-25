@@ -13,9 +13,6 @@ on:
   push:
     branches: [master]
   pull_request:
-  # Manuell neu starten, etwa wenn GitHub beim Veröffentlichen hakt. Ein erneuter Versuch
-  # im selben Lauf scheitert dort an zwei gleichnamigen Paketen (25.11.2026).
-  workflow_dispatch:
   workflow_dispatch: {}   # manueller Lauf über den Actions-Tab, veröffentlicht master neu
 
 # Nur lesen: Der Lauf braucht keine Schreibrechte am Repository.
