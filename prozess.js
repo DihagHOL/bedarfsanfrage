@@ -320,7 +320,8 @@ const PZ_PANEL = {
             <li>${pzChip('a-auto', 'Power Automate')}gibt eine Anfrage ohne geschätzten Preis zurück an den Einkauf (In Prüfung (Einkauf)) und schreibt dem, der genehmigt hat, eine Mail. Eine Freigabe startet dann nicht.</li>
             <li>${pzChip('a-auto', 'Power Automate')}setzt bei indirektem Material und bei den Warengruppen 2000, 4333 bis 4338 und 4340 den Status In Prüfung (Controlling) und schickt dem Controlling die Genehmigung.</li>
             <li>${pzChip('a-auto', 'Power Automate')}setzt ab 1.500 € In Prüfung (Werkleitung), ab 10.000 € ohne Lead-Buyer-Abschluss danach In Prüfung (strategischer Einkauf), und schickt jeweils die Genehmigung.</li>
-            <li>${pzChip('a-mensch', 'Genehmiger')}antworten in Teams oder per Mail. Lehnt eine Stufe ab, setzt der Flow Abgelehnt und die folgenden Stufen entfallen.</li>
+            <li>${pzChip('a-auto', 'Power Automate')}schickt mit jeder Genehmigung die Positionen und die Angebote als Anhang. Dateien über etwa 4 MB stehen nur in der App, der Link „Anfrage in der App öffnen“ führt hin. Vor Werkleitung und strategischem Einkauf holt der Flow die Angebote neu, nachgereichte Angebote sind also dabei.</li>
+            <li>${pzChip('a-mensch', 'Genehmiger')}antworten in Teams oder per Mail, ohne die App öffnen zu müssen. Lehnt eine Stufe ab, setzt der Flow Abgelehnt und die folgenden Stufen entfallen.</li>
             <li>${pzChip('a-auto', 'Power Automate')}setzt am Ende Freigegeben und schreibt dem Antragsteller eine Mail, bei einer Ablehnung ebenso.</li>
           </ol>
         </div>
@@ -330,6 +331,7 @@ const PZ_PANEL = {
             <tr><td>${pzChip('t-ok', 'Verlauf')}</td><td>Im Verlauf einer Anfrage stehen nur die Stufen, die für sie gelten.</td></tr>
             <tr><td>${pzChip('t-gate', 'Erste Antwort')}</td><td>Sind für eine Stufe mehrere Genehmiger hinterlegt, zählt die erste Antwort.</td></tr>
             <tr><td>${pzChip('t-err', 'Abgelehnt')}</td><td>Die Anfrage ist beendet. Für den Bedarf braucht es eine neue Anfrage.</td></tr>
+            <tr><td>${pzChip('t-ok', 'Angebote')}</td><td>Ein Angebot, das während einer laufenden Freigabe nachgereicht wird, sieht die nächste Stufe. Die Stufe, die gerade prüft, hat es nur über den Link in die App.</td></tr>
             <tr><td>${pzChip('a-auto', 'Empfänger')}</td><td>Je Stufe fest im Flow hinterlegt. Änderungen macht die IT im Flow.</td></tr>
           </table>
         </div>

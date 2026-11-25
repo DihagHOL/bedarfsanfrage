@@ -335,7 +335,10 @@ const FREIGABE = {
       + 'eine Mail. Eine Freigabe startet dann nicht. Das Controlling prüft indirektes Material und die Warengruppen 2000, 4333 bis '
       + '4338 und 4340, die Werkleitung ab 1.500 € '
       + 'Bestellvolumen, der strategische Einkauf ab 10.000 € und nur ohne Lead-Buyer-Abschluss. Jede '
-      + 'Stufe bekommt eine Genehmigung in Teams und per Mail, die erste Antwort zählt. Bei Ablehnung '
+      + 'Stufe bekommt eine Genehmigung in Teams und per Mail, die erste Antwort zählt. Die Genehmigung '
+      + 'enthält die Positionen und die Angebote als Anhang (Dateien über etwa 4 MB nur über den Link in '
+      + 'die App). Vor Werkleitung und strategischem Einkauf holt der Flow die Angebote neu, damit auch '
+      + 'nachgereichte dabei sind. Bei Ablehnung '
       + 'setzt der Flow den Status Abgelehnt, sonst Freigegeben, und schreibt dem Antragsteller in beiden '
       + 'Fällen eine Mail.',
   pools: [
@@ -398,8 +401,12 @@ const FREIGABE = {
       annotations: [
         { id: 'An_ctrl', of: 'A_gw1', lane: 'LA', c: 2, r: 1, w: 130, h: 76,
           text: 'Ja bei indirektem Material und den Warengruppen 2000, 4333 bis 4338 und 4340.' },
-        { id: 'An_appr', of: 'A_ctrl', lane: 'LA', c: 3, r: 1, w: 150, h: 76,
-          text: 'Setzt den Status In Prüfung und schickt die Genehmigung in Teams und per Mail. Die erste Antwort zählt.' },
+        { id: 'An_appr', of: 'A_ctrl', lane: 'LA', c: 3, r: 1, w: 150, h: 100,
+          text: 'Setzt den Status In Prüfung und schickt die Genehmigung mit Positionen und Angeboten in Teams und per Mail. Die erste Antwort zählt.' },
+        { id: 'An_wl', of: 'A_wl', lane: 'LA', c: 7, r: 2, w: 150, h: 60,
+          text: 'Holt vorher die Angebote neu, auch nachgereichte.' },
+        { id: 'An_se', of: 'A_se', lane: 'LA', c: 11, r: 2, w: 150, h: 60,
+          text: 'Holt vorher die Angebote neu, auch nachgereichte.' },
       ],
     },
   ],
