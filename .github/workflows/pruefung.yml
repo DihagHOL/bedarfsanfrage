@@ -51,6 +51,9 @@ jobs:
       - name: Einkauf (Zuteilung, ohne Bestellung, Tabelle, Abteilungen)
         run: node tests/test-einkauf.mjs
 
+      - name: Werke (SHB, ZAI)
+        run: node tests/test-werke.mjs
+
       - name: Verdrahtung der Seite (Schrift, Veröffentlichung)
         run: node tests/seite.test.mjs
 

@@ -4,10 +4,38 @@
 const CLIENT_ID = '37e2a0cc-37b9-4eb5-b2a1-2ca0d9a62db0';
 const TENANT_ID = 'fdb70646-023a-403b-a4b9-1f474a935123';
 const SCOPES    = ['User.Read', 'Sites.ReadWrite.All'];
-const SP_SITE   = 'dihag.sharepoint.com:/sites/gruppe_shb';
 const SP_LIST   = 'Bedarfsanfrage';
 const API       = 'https://graph.microsoft.com/v1.0';
-const SP_BASE   = 'https://' + SP_SITE.split(':/')[0] + '/' + SP_SITE.split(':/')[1]; // split(':/')[1] = 'sites/...' (no leading slash)
+
+// ── WERKE ────────────────────────────────────────────────────────────────────
+// Jedes Werk hat eine eigene SharePoint-Site mit eigener Liste „Bedarfsanfrage“, eigener
+// BANF_Konfiguration (Rechte, Abteilungen) und eigenen Wiedervorlagen. Das Werk folgt aus der
+// Anmeldedomäne. Der Admin sieht alle Werke und schaltet um. Konten anderer Domänen arbeiten
+// in SHB wie bisher; Holding-Konten zusätzlich in jedem Werk, dessen Konfiguration sie nennt.
+const WERKE = {
+  shb: { key: 'shb', name: 'SHB', site: 'dihag.sharepoint.com:/sites/gruppe_shb', domains: ['shb-guss.de'],
+         stammdaten: true, prozess: true, produktivAb: '2026-11-16T00:00:00+01:00', produktivAbText: '16.11.2026' },
+  zai: { key: 'zai', name: 'ZAI', site: 'dihag.sharepoint.com:/sites/gruppe_zaigler', domains: ['dihag-zaigler.com'],
+         stammdaten: false, prozess: false, produktivAb: null, produktivAbText: '' },
+};
+const WERK_STANDARD   = 'shb';           // für alle Domänen ohne eigenes Werk
+const HOLDING_DOMAINS = ['dihag.com'];   // diese Konten können zusätzlich in anderen Werken arbeiten
+let WERK = WERKE[WERK_STANDARD];
+let werkeVerfuegbar = [WERK_STANDARD];
+let SP_SITE = WERK.site;
+let SP_BASE = spBaseVon(SP_SITE);
+function spBaseVon(site) { return 'https://' + site.split(':/')[0] + '/' + site.split(':/')[1]; }
+function werkVonDomain(upn) {
+  const dom = String(upn || '').split('@')[1]?.toLowerCase() || '';
+  return Object.values(WERKE).find(w => w.domains.includes(dom))?.key || WERK_STANDARD;
+}
+function lsWerk(k) { return WERK.key === WERK_STANDARD ? k : k + '_' + WERK.key; }
+function werkSetzen(key) {
+  WERK = WERKE[key] || WERKE[WERK_STANDARD];
+  SP_SITE = WERK.site;
+  SP_BASE = spBaseVon(SP_SITE);
+  try { document.title = 'DIHAG · Bedarfsanfragen ' + WERK.name; } catch { /* ohne DOM (Tests) */ }
+}
 
 // ── BPMN-KONFORME FORMFELD-DEFINITION ───────────────────────────────────────
 // key        = interner SP-Spaltenname (wird beim POST verwendet)
@@ -437,12 +465,65 @@ async function doLogin() {
   }
 }
 
+// Welche Werke darf das Konto öffnen, und welches ist gewählt? Läuft vor discoverSP.
+async function werkFestlegen(identLauf) {
+  const upn = myUPN();
+  const eigen = werkVonDomain(upn);
+  let verf = [eigen];
+  if (isAdmin()) verf = Object.keys(WERKE);
+  else if (eigen === WERK_STANDARD && HOLDING_DOMAINS.includes(upn.split('@')[1] || '')) {
+    await Promise.resolve(identLauf).catch(() => {});
+    const ids = _myIdentities();
+    for (const w of Object.values(WERKE)) {
+      if (w.key !== WERK_STANDARD && await werkNenntMich(w, ids)) verf.push(w.key);
+    }
+  }
+  werkeVerfuegbar = verf;
+  let wunsch = '';
+  try {
+    wunsch = sessionStorage.getItem('banf_startwerk') || localStorage.getItem('banf_werk') || '';
+    sessionStorage.removeItem('banf_startwerk');
+  } catch { /* ohne Speicher */ }
+  werkSetzen(verf.includes(wunsch) ? wunsch : eigen);
+  try { localStorage.setItem('banf_werk', WERK.key); } catch { /* nur Komfort */ }
+  if (!WERK.stammdaten) { TID_MAP_ACTIVE = {}; TID_ENTRIES = []; KOSTENST_DATA = []; }
+}
+// Nennt die Zugriffskonfiguration des Werks dieses Konto? Ohne Zugriff auf die Site: nein.
+async function werkNenntMich(w, ids) {
+  try {
+    const site = await gGet(`/sites/${w.site}`);
+    const listen = (await gGet(`/sites/${site.id}/lists?$select=id,displayName&$top=500`)).value || [];
+    const cfg = listen.find(l => (l.displayName || '').trim().toLowerCase() === ACCESS_LIST_NAME.toLowerCase());
+    if (!cfg) return false;
+    const items = (await gGet(`/sites/${site.id}/lists/${cfg.id}/items?$expand=fields($select=Title,ConfigValue)&$top=50`)).value || [];
+    const acc = items.find(i => i.fields?.Title === 'access');
+    const users = JSON.parse(acc?.fields?.ConfigValue || '{}').users || {};
+    return Object.keys(users).some(k => ids.has(k.toLowerCase()));
+  } catch { return false; }
+}
+// Werk in der Seitenleiste: Name, bei mehreren Werken eine Auswahl
+function werkAnzeigen() {
+  const el = $id('werk-zeile');
+  if (!el) return;
+  if (werkeVerfuegbar.length < 2) { el.innerHTML = `<span class="werk-name">Werk ${esc(WERK.name)}</span>`; return; }
+  el.innerHTML = `<label class="werk-name" for="werk-wahl">Werk</label>`
+    + `<select id="werk-wahl" class="werk-wahl" onchange="werkWechseln(this.value)">`
+    + werkeVerfuegbar.map(k => `<option value="${k}"${k === WERK.key ? ' selected' : ''}>${esc(WERKE[k].name)}</option>`).join('')
+    + '</select>';
+}
+function werkWechseln(key) {
+  if (!werkeVerfuegbar.includes(key) || key === WERK.key) return;
+  try { localStorage.setItem('banf_werk', key); } catch { /* nur Komfort */ }
+  location.reload();
+}
+
 async function bootDone() {
   $id('boot-sub').textContent = 'Daten werden geladen…';
   try {
     // Echte Identitäten (UPN/Mail/Aliase) laden – Basis für die Zugriffsprüfung.
     // /me braucht nichts von SharePoint und läuft deshalb neben allem anderen.
     const identLauf = loadMyIdentities();
+    await werkFestlegen(identLauf);
     await discoverSP();
     // Anfragen, Zugriffssteuerung (bestimmt Sichtbarkeit von Dashboard/Reports/Importer),
     // Identitäten und Nutzerliste hängen nicht voneinander ab: gleichzeitig statt nacheinander.
@@ -452,7 +533,7 @@ async function bootDone() {
     initFavorites().catch(() => {});
     // Artikel-/Kostenstellen-Stammdaten aus SharePoint nachladen (nicht blockierend;
     // der Cache steht bereits, der Abruf aktualisiert ihn und legt fehlende Listen an)
-    loadLookupDataSP().catch(() => {});
+    if (WERK.stammdaten) loadLookupDataSP().catch(() => {});
     // Hinweis: Automatische Entwürfe werden jetzt vom geplanten GitHub-Actions-Cron
     // (scripts/auto-drafts.mjs) angelegt – die App-seitige Erstellung ist deaktiviert,
     // um Doppelanlagen zu vermeiden.
@@ -460,6 +541,7 @@ async function bootDone() {
     $id('boot').style.display = 'none';
     $id('app').style.display  = 'flex';
     applyNavVisibility(); // Nav-Sichtbarkeit nach geladener Zugriffskonfiguration setzen
+    werkAnzeigen();
     startAutoRefresh();
     // Set user info in sidebar
     const name = account?.name || account?.username || '?';
@@ -488,6 +570,8 @@ let _startAnfrage = null;   // ?anfrage=ID: nach dem Start diese Anfrage öffnen
 function merkeStartansicht() {
   try {
     const q = new URLSearchParams(location.search);
+    const werk = (q.get('werk') || '').trim().toLowerCase();
+    if (WERKE[werk]) sessionStorage.setItem('banf_startwerk', werk);
     const anfrage = (q.get('anfrage') || '').replace(/[^0-9]/g, '').slice(0, 8);
     if (anfrage) {
       sessionStorage.setItem('banf_startansicht', JSON.stringify({ ansicht: 'anfrage', id: anfrage }));
@@ -967,6 +1051,7 @@ function _myIdentities() {
 }
 
 function canAccess(feature) {
+  if (feature === 'importer' && !WERK.stammdaten) return false;   // Werk ohne Artikel- und Kostenstellenlisten
   if (isAdmin()) return true;
   for (const id of _myIdentities()) {
     const u = accessUsers[id];
@@ -1266,12 +1351,14 @@ function applyNavVisibility() {
     if (el) el.style.display = vis ? '' : 'none';
   };
   GATED_FEATURES.forEach(f => setVis(f, canAccess(f)));
+  setVis('prozess', !!WERK.prozess);   // Prozessmodelle gibt es bisher nur für SHB
   // new, multi, mine, schulung sind für alle sichtbar
 }
 
 function navigate(view, id) {
   // Gated-Bereiche nur mit Zugriff betreten; sonst auf „Meine Anfragen" umleiten
   if (GATED_FEATURES.includes(view) && !canAccess(view)) view = 'mine';
+  if (view === 'prozess' && !WERK.prozess) view = 'mine';
   // Always close panels of all split views when navigating
   ['mine','all','dashboard'].forEach(v => {
     $id('panel-' + v)?.classList.add('hidden');
@@ -2971,11 +3058,11 @@ async function loadFavoritesSP() {
 // Liefert Favoriten synchron (SP-Cache oder localStorage)
 function getFavorites() {
   if (favUseSP) return favCache.slice();
-  try { return JSON.parse(localStorage.getItem(LS_FAVORITES) || '[]'); }
+  try { return JSON.parse(localStorage.getItem(lsWerk(LS_FAVORITES)) || '[]'); }
   catch { return []; }
 }
 function saveFavorites(arr) {
-  localStorage.setItem(LS_FAVORITES, JSON.stringify(arr));
+  localStorage.setItem(lsWerk(LS_FAVORITES), JSON.stringify(arr));
 }
 
 function _refreshFavBars() {
@@ -4201,7 +4288,7 @@ function applyReportFilters() {
     terminFrom:  $id('rep-termin-from')?.value || '',
     terminTo:    $id('rep-termin-to')?.value || '',
   };
-  try { localStorage.setItem(LS_REPORT_FILTERS, JSON.stringify(reportFilters)); } catch {}
+  try { localStorage.setItem(lsWerk(LS_REPORT_FILTERS), JSON.stringify(reportFilters)); } catch {}
   renderReportsTable();
 }
 
@@ -4230,7 +4317,7 @@ const REP_LABELS = {
 
 function _restoreReportFilters() {
   let saved;
-  try { saved = JSON.parse(localStorage.getItem(LS_REPORT_FILTERS) || '{}'); } catch { return; }
+  try { saved = JSON.parse(localStorage.getItem(lsWerk(LS_REPORT_FILTERS)) || '{}'); } catch { return; }
   if (!saved || typeof saved !== 'object') return;
   // Textfelder/Zahlen/Daten
   for (const [key, id] of Object.entries(REP_TEXT_INPUTS)) {
@@ -4502,7 +4589,7 @@ function initSchulung() {
         <p>Diese Schulung erklärt Schritt für Schritt, wie Sie Bedarfsanfragen erstellen,
            verfolgen und genehmigen. Die Anwendung ist mit SharePoint verbunden, alle
            Eingaben werden zentral gespeichert. Nach dem Einkauf holt Power Automate die weiteren Freigaben ein.
-           Seit dem ${PRODUKTIV_AB_TEXT} läuft das Tool im Produktivbetrieb.</p>
+           ${WERK.produktivAb ? `Seit dem ${PRODUKTIV_AB_TEXT} läuft das Tool im Produktivbetrieb.` : ''}</p>
       </div>
 
       <div class="schulung-toc">
@@ -4535,10 +4622,10 @@ function initSchulung() {
         </ul>
         <div class="schulung-tip">💡 Die Liste aktualisiert sich automatisch alle 20 Sekunden.
           Während Sie eine Anfrage ausfüllen, pausiert die Aktualisierung, damit nichts verloren geht.</div>
-        <div class="schulung-tip">🗄 Anfragen, die vor dem Produktivstart am ${PRODUKTIV_AB_TEXT} angelegt wurden,
+        ${WERK.produktivAb ? `<div class="schulung-tip">🗄 Anfragen, die vor dem Produktivstart am ${PRODUKTIV_AB_TEXT} angelegt wurden,
           sind grau hinterlegt und tragen die Marke <b>Archiv</b>. Sie zählen in Listen und Reports weiter mit
           und lassen sich wie gewohnt bearbeiten, freigeben und bestellen. Als überfällig gelten sie nicht mehr.
-          In der Liste trennt die Zeile „Produktivstart" die neuen Anfragen vom Archiv.</div>
+          In der Liste trennt die Zeile „Produktivstart" die neuen Anfragen vom Archiv.</div>` : ''}
       </section>
 
       <section class="schulung-sec" id="sch-2">
@@ -4682,8 +4769,8 @@ function initSchulung() {
           <li>Spaltenüberschrift anklicken = sortieren.</li>
           <li>Zeile anklicken = Anfrage öffnen.</li>
           <li><b>„Als Excel exportieren"</b> lädt die aktuell gefilterte Liste als .xlsx herunter.</li>
-          <li>Die Spalte <b>Archiv</b> zeigt, ob eine Anfrage vor dem Produktivstart angelegt wurde. Wer nur
-              den Produktivbetrieb auswerten will, setzt „Erstellt von" auf den ${PRODUKTIV_AB_TEXT}.</li>
+          ${WERK.produktivAb ? `<li>Die Spalte <b>Archiv</b> zeigt, ob eine Anfrage vor dem Produktivstart angelegt wurde. Wer nur
+              den Produktivbetrieb auswerten will, setzt „Erstellt von" auf den ${PRODUKTIV_AB_TEXT}.</li>` : ''}
         </ul>
       </section>
 
@@ -4723,7 +4810,7 @@ function initSchulung() {
           <li><b>Überfällig (48 h):</b> Anfragen, die seit über 48 Stunden offen sind, werden rot
               markiert und als vorrangig gekennzeichnet. Mit dem Schalter „⚠ Überfällig" oben zeigen
               Sie nur diese an. Denselben Filter gibt es im Dashboard und in „Meine Anfragen".
-              Archiv-Anfragen aus der Zeit vor dem ${PRODUKTIV_AB_TEXT} sind davon ausgenommen.</li>
+              ${WERK.produktivAb ? `Archiv-Anfragen aus der Zeit vor dem ${PRODUKTIV_AB_TEXT} sind davon ausgenommen.` : ''}</li>
           <li><b>Reservieren:</b> Mit „🔑 Für mich reservieren" belegen Sie eine Anfrage zur
               Bearbeitung für sich. Andere Einkäufer sehen dann, dass Sie daran arbeiten. Die Reservierung
               gilt bis zum Abschluss der Anfrage. Mit „Reservierung aufheben" geben Sie sie früher frei.</li>
@@ -4747,9 +4834,9 @@ function initSchulung() {
            Antragsteller können eine Anfrage nur im Status „In Prüfung (Einkauf)" bearbeiten.
            Der zuständige Einkauf kann sie jederzeit bearbeiten, auch Archiv-Anfragen. Ist die Anfrage
            einem anderen Einkäufer zugeteilt oder von ihm reserviert, ist sie für Sie gesperrt.</p>
-        <p><b>Was bedeutet die Marke „Archiv"?</b><br>
+        ${WERK.produktivAb ? `<p><b>Was bedeutet die Marke „Archiv"?</b><br>
            Die Anfrage wurde vor dem Produktivstart am ${PRODUKTIV_AB_TEXT} angelegt. Sie ist grau
-           hinterlegt, zählt weiter mit und bleibt bearbeitbar. Als überfällig gilt sie nicht mehr.</p>
+           hinterlegt, zählt weiter mit und bleibt bearbeitbar. Als überfällig gilt sie nicht mehr.</p>` : ''}
         <p><b>Wo werden Favoriten gespeichert?</b><br>
            In SharePoint, je Benutzer. Sie bleiben auch nach einem Browserwechsel erhalten.</p>
         <div class="schulung-tip">📨 Problem oder Frage an die IT? Schreiben Sie eine
@@ -5290,12 +5377,13 @@ function getApprovalSummary(item) {
 // wurden, sind Archiv: Sie bleiben in allen Listen, zählen mit und lassen sich weiter
 // bearbeiten, freigeben und bestellen. Sie sind aber grau markiert und gelten nicht
 // mehr als überfällig. Maßgeblich ist das Anlagedatum, an den Daten ändert sich nichts.
-const PRODUKTIV_AB      = '2026-11-16T00:00:00+01:00';
-const PRODUKTIV_AB_TEXT = '16.11.2026';
+const PRODUKTIV_AB      = WERKE.shb.produktivAb;       // Produktivstart SHB, die Werte stehen in WERKE
+const PRODUKTIV_AB_TEXT = WERKE.shb.produktivAbText;
 const ARCHIV_HINT = `Vor dem Produktivstart am ${PRODUKTIV_AB_TEXT} angelegt. Die Anfrage bleibt bearbeitbar.`;
 function istArchiv(item) {
+  if (!WERK.produktivAb) return false;   // Werke ohne Altbestand (ZAI) haben kein Archiv
   const t = item && item.createdDateTime ? Date.parse(item.createdDateTime) : NaN;
-  return !isNaN(t) && t < Date.parse(PRODUKTIV_AB);
+  return !isNaN(t) && t < Date.parse(WERK.produktivAb);
 }
 // Marke „Archiv" für Karten (ic-tag, cr2-tag) und Kopfzeilen (status-badge)
 function archivMarke(klasse) {

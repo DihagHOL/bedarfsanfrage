@@ -60,6 +60,10 @@ Content-Type: application/json
 (Benötigt beim ausführenden Admin die Berechtigung `Sites.FullControl.All` – im Graph
 Explorer ggf. unter „Modify permissions" zustimmen.)
 
+**c) Jedes weitere Werk genauso freigeben.** Seit dem 25.11.2026 bearbeitet der Lauf alle
+Werke aus `WERKE` im Skript, derzeit auch ZAI (`sites/gruppe_zaigler`). Schritte a) und b) mit
+dieser Site wiederholen. Solange das Recht fehlt, meldet der Lauf für ZAI nur eine Warnung.
+
 ## 5. GitHub-Secrets hinterlegen
 Repo **dfedorov12/bedarfsanfrage** → *Settings* → *Secrets and variables* → *Actions*
 → **New repository secret**, jeweils anlegen:

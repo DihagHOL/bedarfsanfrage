@@ -58,6 +58,12 @@ body {
 }
 .boot-logo { display: block; margin-bottom: 4px; }
 .sidebar-logo img { display: block; flex-shrink: 0; }
+/* Werk unter dem Logo, bei mehreren Werken eine Auswahl */
+.werk-zeile { display: flex; align-items: center; gap: 8px; padding: 8px 18px; border-bottom: 1px solid #e5e9ef; font-size: .78rem; }
+.werk-zeile:empty { display: none; }
+.werk-name { color: #6b7280; font-weight: 600; }
+.werk-wahl { flex: 1; min-width: 0; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 6px; font: inherit; font-weight: 700; color: var(--c-primary); background: #fff; cursor: pointer; }
+.werk-wahl:focus { outline: none; border-color: var(--c-primary); }
 .boot-title { font-size: 1.3rem; font-weight: 700; color: var(--c-text); }
 .boot-sub   { font-size: .9rem; color: #6b7280; }
 .boot-spinner {

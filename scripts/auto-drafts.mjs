@@ -7,7 +7,8 @@
 // (verhindert erneutes Auslösen).
 //
 // Auth: app-only (Client Credentials). Benötigt Microsoft-Graph-Application-
-// Permission „Sites.Selected" + per-Site-Schreibrecht auf gruppe_shb.
+// Permission „Sites.Selected" + per-Site-Schreibrecht auf jede Site in WERKE (gruppe_shb,
+// gruppe_zaigler). Fehlt das Recht für ein anderes Werk als SHB, warnt der Lauf nur.
 // Secrets (GitHub Actions): TENANT_ID, CLIENT_ID, CLIENT_SECRET.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -16,7 +17,11 @@ const CLIENT_ID     = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
 
 const GRAPH                = 'https://graph.microsoft.com/v1.0';
-const SITE_PATH            = 'dihag.sharepoint.com:/sites/gruppe_shb';
+// Ein Eintrag je Werk, wie WERKE in app.js. pflicht: Fehler lassen den Lauf scheitern.
+const WERKE = [
+  { name: 'SHB', site: 'dihag.sharepoint.com:/sites/gruppe_shb',      pflicht: true },
+  { name: 'ZAI', site: 'dihag.sharepoint.com:/sites/gruppe_zaigler',  pflicht: false },
+];
 const LIST_NAME            = 'Bedarfsanfrage';
 const DRAFT_STATUS         = 'Automatisch erstellter Entwurf';
 const DATE_FIELD_DISPLAY   = 'Datum zur Automatische Bedarfsanfrage';
@@ -64,9 +69,7 @@ async function gAll(path) {
   return out;
 }
 
-(async () => {
-  TOKEN = await getToken();
-
+async function werkLauf(SITE_PATH) {
   const site = await g('GET', `/sites/${SITE_PATH}`);
   const list = await g('GET', `/sites/${site.id}/lists/${encodeURIComponent(LIST_NAME)}`);
   const cols = (await g('GET', `/sites/${site.id}/lists/${list.id}/columns`)).value || [];
@@ -76,8 +79,8 @@ async function gAll(path) {
               || cols.find(c => { const d = norm(c.displayName); return d.includes('automatisch') && d.includes('datum'); });
   const statusCol = cols.find(c => ['stauts', 'status'].includes((c.name || '').toLowerCase()))
                  || cols.find(c => (c.displayName || '').toLowerCase() === 'status');
-  if (!dateCol)   { console.error(`❌ Datumsspalte "${DATE_FIELD_DISPLAY}" nicht gefunden.`); process.exit(1); }
-  if (!statusCol) { console.error('❌ Status-Spalte nicht gefunden.'); process.exit(1); }
+  if (!dateCol)   throw new Error(`Datumsspalte "${DATE_FIELD_DISPLAY}" nicht gefunden.`);
+  if (!statusCol) throw new Error('Status-Spalte nicht gefunden.');
 
   // Zu kopierende (schreibbare) Spalten – ohne Status/Datum/ausgeschlossene
   const copyCols = cols.filter(c => {
@@ -125,4 +128,18 @@ async function gAll(path) {
     }
   }
   console.log(`✅ Fertig: ${created} Entwurf/Entwürfe erstellt.`);
+}
+
+(async () => {
+  TOKEN = await getToken();
+  let fehler = 0;
+  for (const w of WERKE) {
+    console.log(`── Werk ${w.name}`);
+    try { await werkLauf(w.site); }
+    catch (e) {
+      if (w.pflicht) { console.error(`❌ ${w.name}: ${e.message}`); fehler++; }
+      else console.log(`::warning::Auto-Entwürfe ${w.name} übersprungen: ${e.message}`);
+    }
+  }
+  if (fehler) process.exit(1);
 })().catch(e => { console.error(e); process.exit(1); });

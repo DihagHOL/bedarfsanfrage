@@ -52,7 +52,9 @@ scheitern = false;
 ok(await m._findListByName('Artikel') === 'b2' && abrufe === 5, 'Der Fehler wird nicht gemerkt: Der nächste Versuch fragt neu');
 
 /* 2. Verdrahtung in app.js */
-ok(app.split('lists?$select=id,displayName').length === 2, 'Das Verzeichnis wird an genau einer Stelle abgerufen');
+// Ausnahme seit 25.11.2026: werkNenntMich liest das Verzeichnis eines anderen Werks (dessen Konfiguration)
+const ohneWerk = app.replace(app.slice(app.indexOf('async function werkNenntMich('), app.indexOf('function werkAnzeigen(')), '');
+ok(ohneWerk.split('lists?$select=id,displayName').length === 2, 'Das Verzeichnis der eigenen Site wird an genau einer Stelle abgerufen');
 for (const name of ['_findConfigList', '_findFavList', '_findListByName']) {
   const stelle = app.indexOf('async function ' + name + '(');
   ok(stelle > 0 && app.slice(stelle, stelle + 400).includes('await _alleListen()'), name + ' nutzt das gemeinsame Verzeichnis');
@@ -63,7 +65,7 @@ for (const name of ['_createList', '_createFavList']) {
   ok(stelle > 0 && app.slice(stelle, ende).includes('finally { _listenVergessen(); }'), name + ' verwirft das Verzeichnis, auch wenn das Anlegen scheitert');
 }
 const boot = app.slice(app.indexOf('async function bootDone()'), app.indexOf('function startansichtHolen()'));
-ok(/const identLauf = loadMyIdentities\(\);\s*await discoverSP\(\);/.test(boot), 'Die Identitäten starten vor dem Erkunden der Site, nicht danach');
+ok(/const identLauf = loadMyIdentities\(\);\s*await werkFestlegen\(identLauf\);\s*await discoverSP\(\);/.test(boot), 'Die Identitäten starten vor dem Erkunden der Site, nicht danach (dazwischen nur die Wahl des Werks)');
 ok(boot.includes('await Promise.all([loadItems(false), identLauf, loadAccessConfig(), _spUserLauf]);'),
   'Anfragen, Zugriffssteuerung, Identitäten und Nutzerliste laufen gleichzeitig');
 ok(!/await loadItems\(false\);\s*(\/\/[^\n]*\s*)*await loadMyIdentities\(\)/.test(boot), 'Die alte Kette ist weg');

@@ -24,6 +24,8 @@ const kontext = vm.createContext({
   esc: s => String(s),
   getStatusVal: item => item.status || '',
 });
+// Die Stichtage stehen je Werk in WERKE: diesen Abschnitt zuerst, Werk SHB ist voreingestellt
+vm.runInContext(app.slice(app.indexOf('// ── WERKE'), app.indexOf('// ── BPMN-KONFORME')), kontext, { filename: 'app.js (Werke)' });
 vm.runInContext(app.slice(von, bis), kontext, { filename: 'app.js (Ausschnitt)' });
 const A = vm.runInContext('({ PRODUKTIV_AB, PRODUKTIV_AB_TEXT, ARCHIV_TRENNER, istArchiv, isOverdue, archivTrennerVor, archivMarke })', kontext);
 const anfrage = (iso, status = 'Freigegeben') => ({ createdDateTime: iso, status });
@@ -37,6 +39,9 @@ pruefe(A.istArchiv(anfrage('2026-11-15T23:00:00Z')) === false, 'Anfrage vom 16.1
 pruefe(A.istArchiv(anfrage('2026-11-16T06:00:10Z')) === false, 'Anfrage vom 16.11., 7 Uhr zählt zum Produktivbetrieb');
 pruefe(A.istArchiv(anfrage('2026-06-03T08:00:00Z')) === true, 'Anfrage aus dem Juni ist Archiv');
 pruefe(A.istArchiv({}) === false && A.istArchiv(null) === false, 'ohne Anlagedatum kein Archiv');
+vm.runInContext("werkSetzen('zai')", kontext);
+pruefe(A.istArchiv(anfrage('2026-06-03T08:00:00Z')) === false, 'ZAI hat keinen Altbestand und damit kein Archiv');
+vm.runInContext("werkSetzen('shb')", kontext);
 
 console.log('Überfällig');
 pruefe(A.isOverdue(anfrage('2026-11-10T08:00:00Z')) === false, 'offene Archiv-Anfrage gilt nicht als überfällig');
