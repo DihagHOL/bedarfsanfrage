@@ -316,7 +316,8 @@ const PZ_PANEL = {
         <div>
           <h4 class="pz-box-title">⊞ Freigabelauf (Power Automate)</h4>
           <ol class="pz-steps">
-            <li>${pzChip('a-auto', 'Power Automate')}startet, sobald eine Anfrage auf Genehmigt (Einkauf) steht.</li>
+            <li>${pzChip('a-auto', 'Power Automate')}startet nur, wenn eine Anfrage auf Genehmigt (Einkauf) steht. Andere Änderungen an der Anfrage lösen den Flow nicht aus.</li>
+            <li>${pzChip('a-auto', 'Power Automate')}gibt eine Anfrage ohne geschätzten Preis zurück an den Einkauf (In Prüfung (Einkauf)) und schreibt dem, der genehmigt hat, eine Mail. Eine Freigabe startet dann nicht.</li>
             <li>${pzChip('a-auto', 'Power Automate')}setzt bei indirektem Material und bei den Warengruppen 2000, 4333 bis 4338 und 4340 den Status In Prüfung (Controlling) und schickt dem Controlling die Genehmigung.</li>
             <li>${pzChip('a-auto', 'Power Automate')}setzt ab 1.500 € In Prüfung (Werkleitung), ab 10.000 € ohne Lead-Buyer-Abschluss danach In Prüfung (strategischer Einkauf), und schickt jeweils die Genehmigung.</li>
             <li>${pzChip('a-mensch', 'Genehmiger')}antworten in Teams oder per Mail. Lehnt eine Stufe ab, setzt der Flow Abgelehnt und die folgenden Stufen entfallen.</li>

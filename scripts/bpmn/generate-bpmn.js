@@ -329,8 +329,10 @@ const FREIGABE = {
   name: 'Freigabelauf (Power Automate)',
   kennung: 'Process_Bedarfsanfrage_Freigabelauf',
   policies: ['120', '119'],
-  doku: 'Power-Automate-Flow „Bedarfsanfragen SHB". Er startet, sobald eine Anfrage auf Genehmigt '
-      + '(Einkauf) steht. Das Controlling prüft indirektes Material und die Warengruppen 2000, 4333 bis '
+  doku: 'Power-Automate-Flow „Bedarfsanfragen SHB". Er startet nur, wenn eine Anfrage auf Genehmigt '
+      + '(Einkauf) steht, andere Änderungen lösen ihn nicht aus. Fehlt der geschätzte Preis, gibt er die '
+      + 'Anfrage zurück an den Einkauf (Status In Prüfung (Einkauf)) und schreibt dem, der genehmigt hat, '
+      + 'eine Mail. Eine Freigabe startet dann nicht. Das Controlling prüft indirektes Material und die Warengruppen 2000, 4333 bis '
       + '4338 und 4340, die Werkleitung ab 1.500 € '
       + 'Bestellvolumen, der strategische Einkauf ab 10.000 € und nur ohne Lead-Buyer-Abschluss. Jede '
       + 'Stufe bekommt eine Genehmigung in Teams und per Mail, die erste Antwort zählt. Bei Ablehnung '
@@ -347,25 +349,31 @@ const FREIGABE = {
       ],
       nodes: [
         { id: 'A_start', k: 'start', n: 'Status steht auf Genehmigt (Einkauf)', lane: 'LA', c: 0, r: 0 },
-        { id: 'A_gw1', k: 'gw', n: 'Prüft das Controlling?', lane: 'LA', c: 1, r: 0 },
-        { id: 'A_ctrl', k: 'service', n: 'Controlling um Freigabe bitten', lane: 'LA', c: 2, r: 0 },
-        { id: 'B_pruef', k: 'user', n: 'Anfrage prüfen', lane: 'LB', c: 3, r: 0 },
-        { id: 'B_gw', k: 'gw', n: 'Vom Controlling freigegeben?', lane: 'LB', c: 4, r: 0 },
-        { id: 'A_gw2', k: 'gw', n: 'Ab 1.500 € Bestellvolumen?', lane: 'LA', c: 5, r: 0 },
-        { id: 'A_wl', k: 'service', n: 'Werkleitung um Freigabe bitten', lane: 'LA', c: 6, r: 0 },
-        { id: 'C_pruef', k: 'user', n: 'Bestellvolumen prüfen', lane: 'LC', c: 7, r: 0 },
-        { id: 'C_gw', k: 'gw', n: 'Von der Werkleitung freigegeben?', lane: 'LC', c: 8, r: 0 },
-        { id: 'A_gw3', k: 'gw', n: 'Ab 10.000 € und ohne Lead-Buyer-Abschluss?', lane: 'LA', c: 9, r: 0 },
-        { id: 'A_se', k: 'service', n: 'Strategischen Einkauf um Freigabe bitten', lane: 'LA', c: 10, r: 0 },
-        { id: 'D_pruef', k: 'user', n: 'Konzernrahmen prüfen', lane: 'LD', c: 11, r: 0 },
-        { id: 'D_gw', k: 'gw', n: 'Vom strategischen Einkauf freigegeben?', lane: 'LD', c: 12, r: 0 },
-        { id: 'A_frei', k: 'service', n: 'Freigeben und Antragsteller benachrichtigen', lane: 'LA', c: 13, r: 0 },
-        { id: 'A_endOk', k: 'end', n: 'Freigegeben', lane: 'LA', c: 14, r: 0 },
-        { id: 'A_ab', k: 'service', n: 'Ablehnen und Antragsteller benachrichtigen', lane: 'LA', c: 13, r: 1 },
-        { id: 'A_endAb', k: 'end', n: 'Abgelehnt', lane: 'LA', c: 14, r: 1, tone: 'err' },
+        { id: 'A_gw0', k: 'gw', n: 'Geschätzter Preis eingetragen?', lane: 'LA', c: 1, r: 0 },
+        { id: 'A_zur', k: 'service', n: 'An den Einkauf zurückgeben, Mail schicken', lane: 'LA', c: 1, r: 1 },
+        { id: 'A_endZur', k: 'end', n: 'Zurück an Einkauf, Preis fehlt', lane: 'LA', c: 1, r: 2, tone: 'err' },
+        { id: 'A_gw1', k: 'gw', n: 'Prüft das Controlling?', lane: 'LA', c: 2, r: 0 },
+        { id: 'A_ctrl', k: 'service', n: 'Controlling um Freigabe bitten', lane: 'LA', c: 3, r: 0 },
+        { id: 'B_pruef', k: 'user', n: 'Anfrage prüfen', lane: 'LB', c: 4, r: 0 },
+        { id: 'B_gw', k: 'gw', n: 'Vom Controlling freigegeben?', lane: 'LB', c: 5, r: 0 },
+        { id: 'A_gw2', k: 'gw', n: 'Ab 1.500 € Bestellvolumen?', lane: 'LA', c: 6, r: 0 },
+        { id: 'A_wl', k: 'service', n: 'Werkleitung um Freigabe bitten', lane: 'LA', c: 7, r: 0 },
+        { id: 'C_pruef', k: 'user', n: 'Bestellvolumen prüfen', lane: 'LC', c: 8, r: 0 },
+        { id: 'C_gw', k: 'gw', n: 'Von der Werkleitung freigegeben?', lane: 'LC', c: 9, r: 0 },
+        { id: 'A_gw3', k: 'gw', n: 'Ab 10.000 € und ohne Lead-Buyer-Abschluss?', lane: 'LA', c: 10, r: 0 },
+        { id: 'A_se', k: 'service', n: 'Strategischen Einkauf um Freigabe bitten', lane: 'LA', c: 11, r: 0 },
+        { id: 'D_pruef', k: 'user', n: 'Konzernrahmen prüfen', lane: 'LD', c: 12, r: 0 },
+        { id: 'D_gw', k: 'gw', n: 'Vom strategischen Einkauf freigegeben?', lane: 'LD', c: 13, r: 0 },
+        { id: 'A_frei', k: 'service', n: 'Freigeben und Antragsteller benachrichtigen', lane: 'LA', c: 14, r: 0 },
+        { id: 'A_endOk', k: 'end', n: 'Freigegeben', lane: 'LA', c: 15, r: 0 },
+        { id: 'A_ab', k: 'service', n: 'Ablehnen und Antragsteller benachrichtigen', lane: 'LA', c: 14, r: 1 },
+        { id: 'A_endAb', k: 'end', n: 'Abgelehnt', lane: 'LA', c: 15, r: 1, tone: 'err' },
       ],
       flows: [
-        F('A_start', 'A_gw1'),
+        F('A_start', 'A_gw0'),
+        F('A_gw0', 'A_gw1', 'ja'),
+        F('A_gw0', 'A_zur', 'nein'),
+        F('A_zur', 'A_endZur'),
         F('A_gw1', 'A_ctrl', 'ja'),
         F('A_gw1', 'A_gw2', 'nein', { via: 'above' }),
         F('A_ctrl', 'B_pruef'),
@@ -388,9 +396,9 @@ const FREIGABE = {
         F('A_ab', 'A_endAb'),
       ],
       annotations: [
-        { id: 'An_ctrl', of: 'A_gw1', lane: 'LA', c: 1, r: 1, w: 130, h: 76,
+        { id: 'An_ctrl', of: 'A_gw1', lane: 'LA', c: 2, r: 1, w: 130, h: 76,
           text: 'Ja bei indirektem Material und den Warengruppen 2000, 4333 bis 4338 und 4340.' },
-        { id: 'An_appr', of: 'A_ctrl', lane: 'LA', c: 2, r: 1, w: 150, h: 76,
+        { id: 'An_appr', of: 'A_ctrl', lane: 'LA', c: 3, r: 1, w: 150, h: 76,
           text: 'Setzt den Status In Prüfung und schickt die Genehmigung in Teams und per Mail. Die erste Antwort zählt.' },
       ],
     },
