@@ -1978,19 +1978,9 @@ function renderDetail(id) {
   const item = allItems.find(i => String(i.id) === String(id));
   if (!item) { $id('detail-content').innerHTML = '<p>Eintrag nicht gefunden.</p>'; return; }
   _detailId = String(id);
-  const f = item.fields || {};
 
-  // Group known fields
-  const bedarfKeys   = FORM_FIELDS.filter(fd => fd.step === 1).map(fd => resolvedFields[fd.key] || fd.key);
-  const mengeKeys    = FORM_FIELDS.filter(fd => fd.step === 2).map(fd => resolvedFields[fd.key] || fd.key);
-  const beschKeys    = FORM_FIELDS.filter(fd => fd.step === 3).map(fd => resolvedFields[fd.key] || fd.key);
-  const einkaufKeys  = EINKAUF_FIELDS.map(fd => resolvedFields[fd.key] || fd.key);
-  const knownKeys    = new Set([...bedarfKeys,...mengeKeys,...beschKeys,...einkaufKeys,'Status','Title']);
-
-  // Remaining SP fields not in our definition
-  const extraFields  = Object.entries(f)
-    .filter(([k]) => !SYSTEM_FIELDS.has(k) && !knownKeys.has(k))
-    .filter(([,v]) => v !== null && v !== undefined && v !== '');
+  // Felder, die die App nicht kennt (etwa die, die der Flow setzt), zeigt die Detailseite nicht mehr:
+  // Die Genehmigungen stehen im Verlauf rechts, der Rest ist für Antragsteller und Einkauf ohne Nutzen.
 
   const createdBy    = item.createdBy?.user?.displayName || item.createdBy?.user?.email || getField(item,'Author') || '–';
   const createdAt    = item.createdDateTime ? fmtDateTime(item.createdDateTime) : '–';
@@ -2017,15 +2007,15 @@ function renderDetail(id) {
     <div class="detail-grid">
       <div class="detail-left">
         ${detailSection('Bedarf', [
-          ...FORM_FIELDS.filter(fd=>fd.step===1).map(fd => detailRow(fd.label, getField(item, resolvedFields[fd.key] || fd.key)))
+          ...FORM_FIELDS.filter(fd=>fd.step===1 && fd.key !== 'Positionen').map(fd => detailRow(fd.label, getField(item, resolvedFields[fd.key] || fd.key)))
         ])}
+        ${positionenTabelle(getField(item, resolvedFields['Positionen'] || 'Positionen'))}
         ${detailSection('Mengengaben', [
           ...FORM_FIELDS.filter(fd=>fd.step===2).map(fd => detailRow(fd.label, formatFieldValue(fd, getField(item, resolvedFields[fd.key] || fd.key))))
         ])}
         ${detailSection('Beschaffungsdetails', [
           ...FORM_FIELDS.filter(fd=>fd.step===3).map(fd => detailRow(fd.label, formatFieldValue(fd, getField(item, resolvedFields[fd.key] || fd.key))))
         ])}
-        ${extraFields.length ? detailSection('Weitere Felder aus SharePoint', extraFields.map(([k,v]) => detailRow(k, v))) : ''}
       </div>
 
       <div class="detail-right">
@@ -2050,6 +2040,34 @@ function renderDetail(id) {
       if (found && currentView === 'detail' && String(_detailId) === String(id)) renderDetail(id);
     });
   }
+}
+
+// Positionen einer Sammelanfrage als Tabelle zum Lesen (Detailseite), Spalten wie im Seitenbereich.
+// Leer, wenn die Anfrage keine Positionen hat oder das Feld kein gültiges JSON ist.
+function positionenTabelle(roh) {
+  let positions;
+  try { positions = JSON.parse(roh || '[]'); } catch { return ''; }
+  if (!Array.isArray(positions) || positions.length === 0) return '';
+  const zeilen = positions.map((p, idx) => {
+    const zusatz = positionZusatz(p) ? `<div class="pos-extra">${esc(positionZusatz(p))}</div>` : '';
+    return `<tr>
+      <td class="pos-td pos-nr">${esc(String(p.Nr ?? idx + 1))}</td>
+      <td class="pos-td">${esc(String(p.Artikelnummer || '–'))}</td>
+      <td class="pos-td">${extArtNrZelle(p.ExterneArtikelnummer, p)}</td>
+      <td class="pos-td pos-bez">${esc(String(p.Bezeichnung || '–'))}${zusatz}</td>
+      <td class="pos-td pos-right">${esc(String(p.Menge || '–'))}</td>
+      <td class="pos-td">${esc(String(p.ME || p.me || '–'))}</td>
+      <td class="pos-td pos-right">${p.Preis ? fmtEuro(p.Preis) : '–'}</td>
+      <td class="pos-td">${p.Termin ? fmtDate(p.Termin) : '–'}</td>
+      <td class="pos-td">${esc(String(p.Kostenstelle || '–'))}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="detail-card"><div class="detail-card-header">Positionen (${positions.length})</div><div class="detail-card-body">
+    <div class="pos-table-wrap"><table class="pos-table"><thead><tr>
+      <th class="pos-th pos-nr">#</th><th class="pos-th">Artikel-Nr.</th><th class="pos-th pos-ext">Hersteller · Ext. Artikel-Nr. · Typ</th>
+      <th class="pos-th pos-bez">Bezeichnung</th><th class="pos-th pos-right">Menge</th><th class="pos-th">ME</th>
+      <th class="pos-th pos-right">Einzelpreis (€)</th><th class="pos-th">Liefertermin</th><th class="pos-th">Kostenstelle</th>
+    </tr></thead><tbody>${zeilen}</tbody></table></div></div></div>`;
 }
 
 function detailSection(title, rows) {

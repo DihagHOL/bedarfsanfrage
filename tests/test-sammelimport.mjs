@@ -196,6 +196,22 @@ pruefe(['mpos-extartnr', 'mpos-hersteller', 'mpos-typnr'].every(k => assistent.i
 pruefe(/p\.hersteller = herstEl\.value\.trim\(\)/.test(app) && /p\.typNr = typEl\.value\.trim\(\)/.test(app), 'Assistent übernimmt die Eingaben beim Weiter');
 pruefe(/Hersteller:'', TypNr:''/.test(app), 'neue Position im Einkauf hat die Felder Hersteller und Typ-Nr.');
 
+console.log('Detailseite');
+const tab = stueck('function positionenTabelle(roh)', 'function detailSection(');
+const dt = vm.createContext({ esc: hk.esc || (v => String(v)), fmtEuro: v => Number(v).toFixed(2) + ' €', fmtDate: v => String(v).split('-').reverse().join('.') });
+vm.runInContext(hilfen + tab + '; this.positionenTabelle = positionenTabelle;', dt);
+const tabelle = dt.positionenTabelle(JSON.stringify([
+  { Nr: 1, ExterneArtikelnummer: 'MA-4711-25A', Hersteller: 'Muster Antriebstechnik', TypNr: 'T-0815', Bezeichnung: 'Bremsrelais', Menge: '2', ME: 'Stück', Preis: 4800, Termin: '2027-01-15', Kostenstelle: 'Test', Begruendung: 'Testposition' },
+  { Nr: 2, Artikelnummer: '4001-00010', Bezeichnung: 'Schrauben', Menge: '100', ME: 'Stück' }]));
+pruefe(tabelle.includes('Positionen (2)') && (tabelle.match(/<tr>/g) || []).length === 3, 'Positionen als Tabelle mit Kopfzeile und je Position einer Zeile');
+pruefe(tabelle.indexOf('Muster Antriebstechnik') < tabelle.indexOf('MA-4711-25A') && tabelle.includes('Typ T-0815') && tabelle.includes('Testposition'),
+  'Tabelle zeigt Hersteller, ext. ArtNr., Typ und Begründung');
+pruefe(!tabelle.includes('"ExterneArtikelnummer"') && dt.positionenTabelle('') === '' && dt.positionenTabelle('kein json') === '' && dt.positionenTabelle('[]') === '',
+  'kein rohes JSON, ohne Positionen kein Abschnitt');
+const detail = stueck('function renderDetail(id)', '// Bind update button');
+pruefe(detail.includes("fd.key !== 'Positionen'") && detail.includes('positionenTabelle(') && !detail.includes('Weitere Felder aus SharePoint'),
+  'Detailseite: Positionen als Tabelle, kein Kasten „Weitere Felder aus SharePoint“');
+
 console.log('Abteilung vorbelegen');
 const abtFn = stueck('function eigeneAbteilung()', '// Rich-Text-Spalten');
 const ab = vm.createContext({ abteilungen: ['Instandhaltung', 'Putzerei', 'QS', 'Einkauf/Wareneingang'], accessUsers: {}, ich: ['person.a@example.test'],
