@@ -178,20 +178,45 @@ pruefe(hk.positionHerkunft(pAssist) === 'Dold & Söhne · Typ 0058866' && hk.pos
 pruefe(hk.positionZusatz(pAssist) === 'Ersatzteil Motorbremse' && hk.positionZusatz({}) === '',
   'unter der Bezeichnung steht nur noch die Begründung');
 const zelle = hk.extArtNrZelle(pSpalte.ExterneArtikelnummer, pSpalte);
-pruefe(zelle.startsWith('3SU1950-0FL10-0AA0') && zelle.includes('Siemens · Typ W1'), 'Lesen: Hersteller und Typ stehen bei der externen ArtNr.');
+pruefe(zelle.indexOf('Siemens') < zelle.indexOf('3SU1950-0FL10-0AA0') && zelle.indexOf('3SU1950-0FL10-0AA0') < zelle.indexOf('Typ W1'),
+  'Lesen: Hersteller über der externen ArtNr., Typ darunter');
 pruefe(hk.extArtNrZelle('', {}) === '–', 'Lesen: ohne Angaben ein Strich');
 const eingabe = hk.extArtNrEingabe(pSpalte, 3);
 pruefe(['ExterneArtikelnummer', 'Hersteller', 'TypNr'].every(f => eingabe.includes(`data-idx="3" data-field="${f}"`)) && eingabe.includes('value="Siemens"'),
   'Einkauf: ext. ArtNr., Hersteller und Typ-Nr. sind bearbeitbar');
+pruefe(eingabe.indexOf('data-field="Hersteller"') < eingabe.indexOf('data-field="ExterneArtikelnummer"')
+  && eingabe.indexOf('data-field="ExterneArtikelnummer"') < eingabe.indexOf('data-field="TypNr"'), 'Einkauf: Reihenfolge Hersteller, ext. ArtNr., Typ-Nr.');
 const zeilen = (app.match(/\$\{extArtNrEingabe\(p, idx\)\}/g) || []).length;
 pruefe(zeilen === 2 && /\$\{extArtNrZelle\(p\.ExterneArtikelnummer, p\)\}/.test(app) && /\$\{extArtNrZelle\(p\.extArtNr, p\)\}/.test(app),
   'Einkaufstabelle (bearbeiten und lesen) und Übersicht im Assistenten nutzen die Zellen');
 const assistent = stueck('function renderMultiPositions', 'container.innerHTML = rows;');
 pruefe(['mpos-extartnr', 'mpos-hersteller', 'mpos-typnr'].every(k => assistent.includes(`class="${k}"`)) &&
-  assistent.indexOf('mpos-extartnr') < assistent.indexOf('mpos-hersteller') && assistent.indexOf('mpos-hersteller') < assistent.indexOf('mpos-typnr'),
-  'Assistent: Hersteller und Typ-Nr. stehen in einer Zeile direkt nach der externen ArtNr.');
+  assistent.indexOf('mpos-hersteller') < assistent.indexOf('mpos-extartnr') && assistent.indexOf('mpos-extartnr') < assistent.indexOf('mpos-typnr'),
+  'Assistent: eine Zeile Hersteller, Externe ArtNr., Typ-Nr.');
 pruefe(/p\.hersteller = herstEl\.value\.trim\(\)/.test(app) && /p\.typNr = typEl\.value\.trim\(\)/.test(app), 'Assistent übernimmt die Eingaben beim Weiter');
 pruefe(/Hersteller:'', TypNr:''/.test(app), 'neue Position im Einkauf hat die Felder Hersteller und Typ-Nr.');
+
+console.log('Abteilung vorbelegen');
+const abtFn = stueck('function eigeneAbteilung()', '// Rich-Text-Spalten');
+const ab = vm.createContext({ abteilungen: ['Instandhaltung', 'Putzerei', 'QS', 'Einkauf/Wareneingang'], accessUsers: {}, ich: ['person.a@example.test'],
+  abteilungKanon: a => (a === 'Wareneingang' ? 'Einkauf/Wareneingang' : null) });
+vm.runInContext('function _myIdentities() { return new Set(ich); } ' + abtFn + '; this.eigeneAbteilung = eigeneAbteilung;', ab);
+ab.accessUsers = { 'person.a@example.test': { abteilungen: ['Putzerei'] } };
+pruefe(ab.eigeneAbteilung() === 'Putzerei', 'eine zugeordnete Abteilung wird vorbelegt');
+ab.accessUsers = { 'person.a@example.test': { abteilungen: ['Wareneingang'] } };
+pruefe(ab.eigeneAbteilung() === 'Einkauf/Wareneingang', 'zusammengeführte Abteilung: die neue Gruppe');
+ab.accessUsers = { 'person.a@example.test': { abteilungen: ['Putzerei', 'QS'] } };
+pruefe(ab.eigeneAbteilung() === '', 'mehrere Abteilungen: keine Vorbelegung');
+ab.accessUsers = { 'person.a@example.test': { abteilungen: ['Gibt es nicht'] } };
+pruefe(ab.eigeneAbteilung() === '', 'nicht angelegte Abteilung: keine Vorbelegung');
+ab.accessUsers = {};
+pruefe(ab.eigeneAbteilung() === '', 'ohne Zuordnung: keine Vorbelegung');
+pruefe(app.split('abtEl.value = eigeneAbteilung();').length === 2 && app.split('mAbtEl.value = eigeneAbteilung();').length === 2,
+  'Einzel- und Sammelanfrage starten mit der eigenen Abteilung');
+kontext.eigeneAbteilung = () => 'Putzerei';
+pruefe(S.siAbteilung('').wert === 'Putzerei' && S.siAbteilung('QS').wert !== 'Putzerei', 'Excel-Import: leere Abteilung wird die eigene, eine angegebene bleibt');
+delete kontext.eigeneAbteilung;
+pruefe(S.siAbteilung('').wert === '', 'Excel-Import ohne eigene Abteilung: leer wie bisher');
 
 console.log(fehler ? `\n${fehler} Prüfung(en) fehlgeschlagen.` : '\nAlle Prüfungen bestanden.');
 process.exit(fehler ? 1 : 0);

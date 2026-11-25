@@ -1157,6 +1157,20 @@ function myAbteilungen() {
   return abteilungen.filter(a => set.has(a));
 }
 
+// Abteilung, mit der eine neue Anfrage vorbelegt wird: die Abteilung, die dem Nutzer in der
+// Zugriffsverwaltung zugeordnet ist. Dann erscheint die Anfrage gleich in „Gemeinsame Anfragen“
+// dieser Abteilung. Bei keiner oder mehreren zugeordneten Abteilungen bleibt die Auswahl leer.
+// Anders als myAbteilungen() zählt beim Admin nur die eigene Zuordnung, nicht alle Abteilungen.
+function eigeneAbteilung() {
+  const set = new Set();
+  for (const id of _myIdentities()) {
+    const u = accessUsers[id];
+    if (u && Array.isArray(u.abteilungen)) u.abteilungen.forEach(a => set.add(abteilungKanon(a) || a));
+  }
+  const meine = abteilungen.filter(a => set.has(a));
+  return meine.length === 1 ? meine[0] : '';
+}
+
 // Rich-Text-Spalten liefern HTML zurück → Tags entfernen + Entities dekodieren,
 // damit das JSON unabhängig vom Spaltentyp (einfacher Text / Rich-Text) parsebar ist.
 function _decodeSpText(s) {
@@ -3249,12 +3263,12 @@ function initWizard() {
    'Lieferant','Lieferant2','Lieferant3','Lieferant4',
    'GeschaetzterPreis','Kostenstelle']
     .forEach(k => { const el = $id('f-'+k); if(el) el.value = ''; });
-  // Abteilung-Dropdown aus der zentral gepflegten Liste füllen und zurücksetzen.
+  // Abteilung-Dropdown aus der zentral gepflegten Liste füllen, mit der eigenen Abteilung vorbelegt.
   const abtEl = $id('f-Abteilung');
   if (abtEl) {
     abtEl.innerHTML = '<option value="">– bitte wählen –</option>'
       + abteilungen.map(a => `<option value="${esc(a)}">${esc(a)}</option>`).join('');
-    abtEl.value = '';
+    abtEl.value = eigeneAbteilung();
   }
   // Mengen×Einzelpreis-Zeilen zurücksetzen (Bestellvolumen bleibt schreibgeschützt)
   einzelLines = [{ stueck: '', preis: '' }];
@@ -4864,12 +4878,12 @@ function initMultiWizard() {
     prioEl.value = normalOpt ? normalOpt.value : (prioOpts.find(o => o.value !== '')?.value || '');
   }
   const beschEl = $id('mf-Beschreibung'); if (beschEl) beschEl.value = '';
-  // Abteilung-Dropdown aus der zentral gepflegten Liste füllen und zurücksetzen.
+  // Abteilung-Dropdown aus der zentral gepflegten Liste füllen, mit der eigenen Abteilung vorbelegt.
   const mAbtEl = $id('mf-Abteilung');
   if (mAbtEl) {
     mAbtEl.innerHTML = '<option value="">– bitte wählen –</option>'
       + abteilungen.map(a => `<option value="${esc(a)}">${esc(a)}</option>`).join('');
-    mAbtEl.value = '';
+    mAbtEl.value = eigeneAbteilung();
   }
   const terminEl = $id('mf-Termin'); if (terminEl) terminEl.value = '';
   // Reset Beschaffung fields
@@ -4985,19 +4999,19 @@ function renderMultiPositions() {
         </div>
         <div class="mpos-umbruch"></div>
         <div class="multi-pos-field">
+          <label>Hersteller</label>
+          <input type="text" class="mpos-hersteller" data-idx="${i}"
+            value="${esc(pos.hersteller || '')}"
+            placeholder="z. B. Siemens"
+            oninput="multiPosChange(${i},'hersteller',this.value)"
+            autocomplete="off"/>
+        </div>
+        <div class="multi-pos-field">
           <label>Externe ArtNr. <span class="field-sub">Katalog</span></label>
           <input type="text" class="mpos-extartnr" data-idx="${i}"
             value="${esc(pos.extArtNr || '')}"
             placeholder="Lieferanten-Nr."
             oninput="multiPosChange(${i},'extArtNr',this.value)"
-            autocomplete="off"/>
-        </div>
-        <div class="multi-pos-field">
-          <label>Hersteller <span class="field-sub">zur ext. ArtNr.</span></label>
-          <input type="text" class="mpos-hersteller" data-idx="${i}"
-            value="${esc(pos.hersteller || '')}"
-            placeholder="z. B. Siemens"
-            oninput="multiPosChange(${i},'hersteller',this.value)"
             autocomplete="off"/>
         </div>
         <div class="multi-pos-field">
@@ -5227,7 +5241,7 @@ function buildMultiReview() {
           <thead><tr style="background:#f3f4f6;font-weight:600">
             <th style="padding:6px 8px;text-align:left">#</th>
             <th style="padding:6px 8px;text-align:left">ArtNr.</th>
-            <th style="padding:6px 8px;text-align:left">Ext. ArtNr. (Hersteller · Typ)</th>
+            <th style="padding:6px 8px;text-align:left">Hersteller · Ext. ArtNr. · Typ</th>
             <th style="padding:6px 8px;text-align:left">Bezeichnung</th>
             <th style="padding:6px 8px;text-align:right">Menge</th>
             <th style="padding:6px 8px;text-align:left">ME</th>
@@ -5293,18 +5307,20 @@ function positionZusatz(p) {
   return p.begruendung || p.Begruendung || '';
 }
 
-// Zelle „Ext. Artikel-Nr.“ zum Lesen: Nummer, darunter Hersteller und Typ.
+// Zelle „Hersteller · Ext. ArtNr. · Typ“ zum Lesen: Hersteller über der Nummer, Typ darunter.
 function extArtNrZelle(ext, p) {
-  const h = positionHerkunft(p);
-  return `${esc(String(ext || '')) || '–'}${h ? `<div class="pos-extra">${esc(h)}</div>` : ''}`;
+  const herst = p.hersteller || p.Hersteller, typ = p.typNr || p.TypNr;
+  return (herst ? `<div class="pos-extra">${esc(herst)}</div>` : '')
+    + (esc(String(ext || '')) || '–')
+    + (typ ? `<div class="pos-extra">Typ ${esc(typ)}</div>` : '');
 }
 
-// Zelle „Ext. Artikel-Nr.“ zum Bearbeiten im Einkauf: Nummer, darunter Hersteller und Typ-Nr.
+// Zelle zum Bearbeiten im Einkauf: Hersteller oben, darunter ext. ArtNr. und Typ-Nr.
 function extArtNrEingabe(p, idx) {
-  return `<input class="pos-edit-input" data-idx="${idx}" data-field="ExterneArtikelnummer" value="${esc(String(p.ExterneArtikelnummer||''))}" placeholder="Ext.ArtNr."/>`
+  return `<input class="pos-edit-input" data-idx="${idx}" data-field="Hersteller" value="${esc(String(p.Hersteller||''))}" placeholder="Hersteller" title="Hersteller zur externen ArtNr."/>`
     + `<div class="pos-herkunft">`
-    + `<input class="pos-edit-input" data-idx="${idx}" data-field="Hersteller" value="${esc(String(p.Hersteller||''))}" placeholder="Hersteller" title="Hersteller zur externen ArtNr."/>`
-    + `<input class="pos-edit-input" data-idx="${idx}" data-field="TypNr" value="${esc(String(p.TypNr||''))}" placeholder="Typ-Nr." title="Typ-Nr. zur externen ArtNr."/>`
+    + `<input class="pos-edit-input pos-ext-nr" data-idx="${idx}" data-field="ExterneArtikelnummer" value="${esc(String(p.ExterneArtikelnummer||''))}" placeholder="Ext.ArtNr."/>`
+    + `<input class="pos-edit-input pos-ext-typ" data-idx="${idx}" data-field="TypNr" value="${esc(String(p.TypNr||''))}" placeholder="Typ-Nr." title="Typ-Nr. zur externen ArtNr."/>`
     + `</div>`;
 }
 
@@ -6557,7 +6573,7 @@ function renderPanel(item, editMode = false) {
               <thead><tr>
                 <th class="pos-th pos-nr">#</th>
                 <th class="pos-th">Artikel-Nr.</th>
-                <th class="pos-th pos-ext">Ext. Artikel-Nr. (Hersteller · Typ)</th>
+                <th class="pos-th pos-ext">Hersteller · Ext. Artikel-Nr. · Typ</th>
                 <th class="pos-th pos-bez">Bezeichnung</th>
                 <th class="pos-th pos-right">Menge</th>
                 <th class="pos-th">ME</th>

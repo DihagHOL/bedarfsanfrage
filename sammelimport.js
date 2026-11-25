@@ -128,9 +128,10 @@ function siWarengruppe(v) {
   return { fehler: `Warengruppe „${s}“ gibt es nicht` };
 }
 // Abteilung aus der zentralen Liste; erkennt auch Kurzformen wie „Instandh.“
+// Leer gelassen gilt die Abteilung, die dem Nutzer zugeordnet ist (wie im Assistenten).
 function siAbteilung(v) {
   const s = siText(v);
-  if (!s) return { wert: '' };
+  if (!s) return { wert: (typeof eigeneAbteilung === 'function' && eigeneAbteilung()) || '' };
   const liste = (typeof abteilungen !== 'undefined' && Array.isArray(abteilungen)) ? abteilungen : [];
   if (!liste.length) return { wert: s };
   // Zusammengeführte Abteilungen: „Wareneingang" aus einer alten Datei wird zur neuen Gruppe
