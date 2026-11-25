@@ -996,6 +996,12 @@ details#attach-extra-wrap[open] .attach-more-toggle { color:#374151; }
 /* Zusatzangaben einer Position (Hersteller, Typ, Begründung) unter der Bezeichnung */
 .pos-extra { font-size: .74rem; color: #6b7280; margin-top: 2px; line-height: 1.35; }
 .mpos-extra { flex: 1 1 100%; font-size: .76rem; color: #6b7280; }
+/* Zeilenwechsel in den Positionsfeldern: Bezeichnung | Katalog (ext. ArtNr., Hersteller, Typ) | Menge ... */
+.mpos-umbruch { flex: 0 0 100%; height: 0; }
+/* Hersteller und Typ-Nr. unter der externen ArtNr. in der Einkaufstabelle */
+.pos-ext { min-width: 180px; }
+.pos-herkunft { display: flex; gap: 4px; margin-top: 3px; }
+.pos-herkunft .pos-edit-input { min-width: 0; }
 
 /* ── Toast ── */
 #toast-c { position: fixed; bottom: 22px; right: 22px; z-index: 300; display: flex; flex-direction: column; gap: 7px; }

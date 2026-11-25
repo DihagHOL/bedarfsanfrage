@@ -4976,6 +4976,14 @@ function renderMultiPositions() {
               autocomplete="off"/>
           </div>
         </div>
+        <div class="multi-pos-field" style="flex:2">
+          <label>Bezeichnung <span class="req">*</span></label>
+          <input type="text" class="mpos-bez" data-idx="${i}"
+            value="${esc(pos.bezeichnung)}"
+            placeholder="Artikelbezeichnung"
+            oninput="multiPosChange(${i},'bezeichnung',this.value)"/>
+        </div>
+        <div class="mpos-umbruch"></div>
         <div class="multi-pos-field">
           <label>Externe ArtNr. <span class="field-sub">Katalog</span></label>
           <input type="text" class="mpos-extartnr" data-idx="${i}"
@@ -4984,13 +4992,23 @@ function renderMultiPositions() {
             oninput="multiPosChange(${i},'extArtNr',this.value)"
             autocomplete="off"/>
         </div>
-        <div class="multi-pos-field" style="flex:2">
-          <label>Bezeichnung <span class="req">*</span></label>
-          <input type="text" class="mpos-bez" data-idx="${i}"
-            value="${esc(pos.bezeichnung)}"
-            placeholder="Artikelbezeichnung"
-            oninput="multiPosChange(${i},'bezeichnung',this.value)"/>
+        <div class="multi-pos-field">
+          <label>Hersteller <span class="field-sub">zur ext. ArtNr.</span></label>
+          <input type="text" class="mpos-hersteller" data-idx="${i}"
+            value="${esc(pos.hersteller || '')}"
+            placeholder="z. B. Siemens"
+            oninput="multiPosChange(${i},'hersteller',this.value)"
+            autocomplete="off"/>
         </div>
+        <div class="multi-pos-field">
+          <label>Typ-Nr.</label>
+          <input type="text" class="mpos-typnr" data-idx="${i}"
+            value="${esc(pos.typNr || '')}"
+            placeholder="Typ"
+            oninput="multiPosChange(${i},'typNr',this.value)"
+            autocomplete="off"/>
+        </div>
+        <div class="mpos-umbruch"></div>
         <div class="multi-pos-field" style="flex:0 0 90px">
           <label>Menge <span class="req">*</span></label>
           <input type="number" class="mpos-menge" data-idx="${i}"
@@ -5134,6 +5152,10 @@ function wMultiNext(step) {
       if (meEl)     p.me = meEl.value;
       if (artEl)    p.artNr = artEl.value.trim();
       if (extArtEl) p.extArtNr = extArtEl.value.trim();
+      const herstEl = document.querySelector(`.mpos-hersteller[data-idx="${i}"]`);
+      const typEl   = document.querySelector(`.mpos-typnr[data-idx="${i}"]`);
+      if (herstEl) p.hersteller = herstEl.value.trim();
+      if (typEl)   p.typNr = typEl.value.trim();
       const terminEl = document.querySelector(`.mpos-termin[data-idx="${i}"]`);
       const kstEl    = document.querySelector(`.mpos-kostenstelle[data-idx="${i}"]`);
       const preisEl  = document.querySelector(`.mpos-preis[data-idx="${i}"]`);
@@ -5186,7 +5208,7 @@ function buildMultiReview() {
     <tr>
       <td style="padding:4px 8px;color:#6b7280">${i + 1}</td>
       <td style="padding:4px 8px">${esc(p.artNr) || '–'}</td>
-      <td style="padding:4px 8px;color:#9ca3af">${esc(p.extArtNr) || '–'}</td>
+      <td style="padding:4px 8px">${extArtNrZelle(p.extArtNr, p)}</td>
       <td style="padding:4px 8px">${esc(p.bezeichnung)}${positionZusatz(p) ? `<div class="pos-extra">${esc(positionZusatz(p))}</div>` : ''}</td>
       <td style="padding:4px 8px;text-align:right">${esc(p.menge)}</td>
       <td style="padding:4px 8px">${esc(p.me)}</td>
@@ -5205,7 +5227,7 @@ function buildMultiReview() {
           <thead><tr style="background:#f3f4f6;font-weight:600">
             <th style="padding:6px 8px;text-align:left">#</th>
             <th style="padding:6px 8px;text-align:left">ArtNr.</th>
-            <th style="padding:6px 8px;text-align:left">Ext. ArtNr.</th>
+            <th style="padding:6px 8px;text-align:left">Ext. ArtNr. (Hersteller · Typ)</th>
             <th style="padding:6px 8px;text-align:left">Bezeichnung</th>
             <th style="padding:6px 8px;text-align:right">Menge</th>
             <th style="padding:6px 8px;text-align:left">ME</th>
@@ -5238,7 +5260,8 @@ function buildMultiReview() {
 }
 
 // Position im Format der SharePoint-Spalte „Positionen" (JSON). Hersteller, Typ-Nr und
-// Begründung kommen aus dem Excel-Import und stehen nur drin, wenn sie gefüllt sind.
+// Begründung kommen aus dem Excel-Import oder den Feldern im Assistenten und stehen nur drin,
+// wenn sie gefüllt sind.
 function positionFuerSp(p, i) {
   const o = {
     Nr: i + 1,
@@ -5257,12 +5280,32 @@ function positionFuerSp(p, i) {
   return o;
 }
 
-// Zusatzangaben einer Position (Hersteller, Typ-Nr, Begründung) als eine Zeile unter der
-// Bezeichnung. Nimmt das Format des Assistenten (hersteller) und das der Spalte (Hersteller).
-function positionZusatz(p) {
+// Herkunft der externen Artikelnummer: Hersteller und Typ-Nr. Steht bei der externen ArtNr.,
+// damit der Einkauf sieht, zu welchem Hersteller sie gehört (gleiche Nummern gibt es bei
+// mehreren Herstellern). Nimmt das Format des Assistenten (hersteller) und der Spalte (Hersteller).
+function positionHerkunft(p) {
   const typ = p.typNr || p.TypNr;
-  return [p.hersteller || p.Hersteller, typ ? `Typ ${typ}` : '', p.begruendung || p.Begruendung]
-    .filter(Boolean).join(' · ');
+  return [p.hersteller || p.Hersteller, typ ? `Typ ${typ}` : ''].filter(Boolean).join(' · ');
+}
+
+// Begründung einer Position als Zeile unter der Bezeichnung.
+function positionZusatz(p) {
+  return p.begruendung || p.Begruendung || '';
+}
+
+// Zelle „Ext. Artikel-Nr.“ zum Lesen: Nummer, darunter Hersteller und Typ.
+function extArtNrZelle(ext, p) {
+  const h = positionHerkunft(p);
+  return `${esc(String(ext || '')) || '–'}${h ? `<div class="pos-extra">${esc(h)}</div>` : ''}`;
+}
+
+// Zelle „Ext. Artikel-Nr.“ zum Bearbeiten im Einkauf: Nummer, darunter Hersteller und Typ-Nr.
+function extArtNrEingabe(p, idx) {
+  return `<input class="pos-edit-input" data-idx="${idx}" data-field="ExterneArtikelnummer" value="${esc(String(p.ExterneArtikelnummer||''))}" placeholder="Ext.ArtNr."/>`
+    + `<div class="pos-herkunft">`
+    + `<input class="pos-edit-input" data-idx="${idx}" data-field="Hersteller" value="${esc(String(p.Hersteller||''))}" placeholder="Hersteller" title="Hersteller zur externen ArtNr."/>`
+    + `<input class="pos-edit-input" data-idx="${idx}" data-field="TypNr" value="${esc(String(p.TypNr||''))}" placeholder="Typ-Nr." title="Typ-Nr. zur externen ArtNr."/>`
+    + `</div>`;
 }
 
 // Legt eine Sammelanfrage an: erst das Element mit Titel, dann die übrigen Felder samt
@@ -6135,7 +6178,7 @@ function _syncPanelPosFromDOM() {
 }
 function panelPosAdd() {
   _syncPanelPosFromDOM();
-  _panelPosData.push({ Nr: _panelPosData.length + 1, Artikelnummer:'', ExterneArtikelnummer:'', Bezeichnung:'', Menge:'', ME:'', Preis:'', Termin:'', Kostenstelle:'' });
+  _panelPosData.push({ Nr: _panelPosData.length + 1, Artikelnummer:'', ExterneArtikelnummer:'', Hersteller:'', TypNr:'', Bezeichnung:'', Menge:'', ME:'', Preis:'', Termin:'', Kostenstelle:'' });
   _rebuildPosEditTable();
 }
 function panelPosDelete(idx) {
@@ -6153,7 +6196,7 @@ function _rebuildPosEditTable() {
     return `<tr class="pos-edit-row" data-pos-idx="${idx}">
       <td class="pos-td pos-nr">${p.Nr}</td>
       <td class="pos-td"><input class="pos-edit-input" data-idx="${idx}" data-field="Artikelnummer" value="${esc(String(p.Artikelnummer||''))}" placeholder="ArtNr."/></td>
-      <td class="pos-td"><input class="pos-edit-input" data-idx="${idx}" data-field="ExterneArtikelnummer" value="${esc(String(p.ExterneArtikelnummer||''))}" placeholder="Ext.ArtNr."/></td>
+      <td class="pos-td pos-ext">${extArtNrEingabe(p, idx)}</td>
       <td class="pos-td pos-bez"><input class="pos-edit-input" data-idx="${idx}" data-field="Bezeichnung" value="${esc(String(p.Bezeichnung||''))}" placeholder="Bezeichnung"/>${zusatz}</td>
       <td class="pos-td pos-right"><input class="pos-edit-input pos-edit-num" type="number" data-idx="${idx}" data-field="Menge" value="${esc(String(p.Menge||''))}" placeholder="1" min="0.001" step="any"/></td>
       <td class="pos-td"><select class="pos-edit-input pos-edit-me" data-idx="${idx}" data-field="ME"><option value="">–</option>${meSelOpts}</select></td>
@@ -6479,7 +6522,7 @@ function renderPanel(item, editMode = false) {
             return `<tr class="pos-edit-row" data-pos-idx="${idx}">
               <td class="pos-td pos-nr">${p.Nr ?? idx+1}</td>
               <td class="pos-td"><input class="pos-edit-input" data-idx="${idx}" data-field="Artikelnummer" value="${esc(String(p.Artikelnummer||''))}" placeholder="ArtNr."/></td>
-              <td class="pos-td"><input class="pos-edit-input" data-idx="${idx}" data-field="ExterneArtikelnummer" value="${esc(String(p.ExterneArtikelnummer||''))}" placeholder="Ext.ArtNr."/></td>
+              <td class="pos-td pos-ext">${extArtNrEingabe(p, idx)}</td>
               <td class="pos-td pos-bez"><input class="pos-edit-input" data-idx="${idx}" data-field="Bezeichnung" value="${esc(String(p.Bezeichnung||''))}" placeholder="Bezeichnung"/>${zusatz}</td>
               <td class="pos-td pos-right"><input class="pos-edit-input pos-edit-num" type="number" data-idx="${idx}" data-field="Menge" value="${esc(String(p.Menge||''))}" placeholder="1" min="0.001" step="any"/></td>
               <td class="pos-td"><select class="pos-edit-input pos-edit-me" data-idx="${idx}" data-field="ME"><option value="">–</option>${meSelOpts}</select></td>
@@ -6492,7 +6535,7 @@ function renderPanel(item, editMode = false) {
             return `<tr>
               <td class="pos-td pos-nr">${p.Nr ?? ''}</td>
               <td class="pos-td">${esc(String(p.Artikelnummer||'–'))}</td>
-              <td class="pos-td">${esc(String(p.ExterneArtikelnummer||'–'))}</td>
+              <td class="pos-td">${extArtNrZelle(p.ExterneArtikelnummer, p)}</td>
               <td class="pos-td pos-bez">${esc(String(p.Bezeichnung||'–'))}${zusatz}</td>
               <td class="pos-td pos-right">${esc(String(p.Menge||'–'))}</td>
               <td class="pos-td">${esc(String(p.ME||p.me||'–'))}</td>
@@ -6514,7 +6557,7 @@ function renderPanel(item, editMode = false) {
               <thead><tr>
                 <th class="pos-th pos-nr">#</th>
                 <th class="pos-th">Artikel-Nr.</th>
-                <th class="pos-th">Ext. Artikel-Nr.</th>
+                <th class="pos-th pos-ext">Ext. Artikel-Nr. (Hersteller · Typ)</th>
                 <th class="pos-th pos-bez">Bezeichnung</th>
                 <th class="pos-th pos-right">Menge</th>
                 <th class="pos-th">ME</th>

@@ -164,5 +164,34 @@ pruefe(/renderFavBar[(]'multi'[)];[^}]*siVorlagenLaden[(][)]/.test(app), 'Reiter
 pruefe(/function sammelanfrageSpeichern/.test(app) && /sammelanfrageSpeichern\(multiPositions/.test(app), 'Assistent und Import legen über dieselbe Funktion an');
 pruefe(/o\.Hersteller\s*=/.test(app) && /o\.TypNr\s*=/.test(app) && /o\.Begruendung\s*=/.test(app), 'Positionen speichern Hersteller, Typ-Nr und Begründung');
 
+console.log('Hersteller und Typ-Nr. zur externen ArtNr.');
+// Die Hilfsfunktionen aus app.js herauslösen und ohne Browser ausführen
+const stueck = (start, ende) => app.slice(app.indexOf(start), app.indexOf(ende, app.indexOf(start)));
+const hilfen = stueck('function positionHerkunft(p)', '// Legt eine Sammelanfrage an');
+const hk = vm.createContext({ esc: v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;') });
+vm.runInContext(hilfen + '; this.positionHerkunft = positionHerkunft; this.positionZusatz = positionZusatz;'
+  + ' this.extArtNrZelle = extArtNrZelle; this.extArtNrEingabe = extArtNrEingabe;', hk);
+const pAssist = { extArtNr: 'BN9034/1100', hersteller: 'Dold & Söhne', typNr: '0058866', begruendung: 'Ersatzteil Motorbremse' };
+const pSpalte = { ExterneArtikelnummer: '3SU1950-0FL10-0AA0', Hersteller: 'Siemens', TypNr: 'W1', Begruendung: 'Wäscher' };
+pruefe(hk.positionHerkunft(pAssist) === 'Dold & Söhne · Typ 0058866' && hk.positionHerkunft(pSpalte) === 'Siemens · Typ W1',
+  'Herkunft aus Hersteller und Typ, in beiden Formaten');
+pruefe(hk.positionZusatz(pAssist) === 'Ersatzteil Motorbremse' && hk.positionZusatz({}) === '',
+  'unter der Bezeichnung steht nur noch die Begründung');
+const zelle = hk.extArtNrZelle(pSpalte.ExterneArtikelnummer, pSpalte);
+pruefe(zelle.startsWith('3SU1950-0FL10-0AA0') && zelle.includes('Siemens · Typ W1'), 'Lesen: Hersteller und Typ stehen bei der externen ArtNr.');
+pruefe(hk.extArtNrZelle('', {}) === '–', 'Lesen: ohne Angaben ein Strich');
+const eingabe = hk.extArtNrEingabe(pSpalte, 3);
+pruefe(['ExterneArtikelnummer', 'Hersteller', 'TypNr'].every(f => eingabe.includes(`data-idx="3" data-field="${f}"`)) && eingabe.includes('value="Siemens"'),
+  'Einkauf: ext. ArtNr., Hersteller und Typ-Nr. sind bearbeitbar');
+const zeilen = (app.match(/\$\{extArtNrEingabe\(p, idx\)\}/g) || []).length;
+pruefe(zeilen === 2 && /\$\{extArtNrZelle\(p\.ExterneArtikelnummer, p\)\}/.test(app) && /\$\{extArtNrZelle\(p\.extArtNr, p\)\}/.test(app),
+  'Einkaufstabelle (bearbeiten und lesen) und Übersicht im Assistenten nutzen die Zellen');
+const assistent = stueck('function renderMultiPositions', 'container.innerHTML = rows;');
+pruefe(['mpos-extartnr', 'mpos-hersteller', 'mpos-typnr'].every(k => assistent.includes(`class="${k}"`)) &&
+  assistent.indexOf('mpos-extartnr') < assistent.indexOf('mpos-hersteller') && assistent.indexOf('mpos-hersteller') < assistent.indexOf('mpos-typnr'),
+  'Assistent: Hersteller und Typ-Nr. stehen in einer Zeile direkt nach der externen ArtNr.');
+pruefe(/p\.hersteller = herstEl\.value\.trim\(\)/.test(app) && /p\.typNr = typEl\.value\.trim\(\)/.test(app), 'Assistent übernimmt die Eingaben beim Weiter');
+pruefe(/Hersteller:'', TypNr:''/.test(app), 'neue Position im Einkauf hat die Felder Hersteller und Typ-Nr.');
+
 console.log(fehler ? `\n${fehler} Prüfung(en) fehlgeschlagen.` : '\nAlle Prüfungen bestanden.');
 process.exit(fehler ? 1 : 0);
