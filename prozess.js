@@ -66,11 +66,11 @@ function initProzess() {
     <div class="pz-wrap">
       <div class="schulung-hero">
         <div class="schulung-badge">Prozess</div>
-        <h1>So läuft eine Bedarfsanfrage bei SHB</h1>
+        <h1>So läuft eine Bedarfsanfrage bei ${esc(WERK.name)}</h1>
         <p>Von der Erfassung im Fachbereich über die Prüfung im Einkauf und die Freigabe in Power Automate
            bis zur Bestellung. Jede Farbe steht für einen Beteiligten, jede Raute für eine Entscheidung.
            Unterprozesse (⊞) öffnen Sie per Klick. Gepflegt werden die Modelle im RMS, diese Seite zeigt
-           ihren aktuellen Stand. Seit dem 16.11.2026 läuft der Prozess im Produktivbetrieb.</p>
+           ihren aktuellen Stand.${WERK.produktivAb ? ' Seit dem 16.11.2026 läuft der Prozess im Produktivbetrieb.' : ''}${WERK.key !== 'shb' ? ' Der Ablauf ist derselbe wie bei SHB, ' + esc(WERK.name) + ' hat eine eigene Liste, eigene Rechte und einen eigenen Flow.' : ''}</p>
         <a class="hero-link" id="pz-rms-link" href="https://rms.dihag.de/" target="_blank" rel="noopener">Prozess im RMS öffnen ↗</a>
       </div>
 
@@ -94,7 +94,7 @@ function initProzess() {
             <span class="pz-map-arrow">➜</span>
             <span class="pz-map-ext"><b>📝</b>Prüfung im Einkauf</span>
           </button>
-          <div class="pz-map-base">🗄️ <strong>Überall dabei:</strong> die SharePoint-Liste Bedarfsanfrage auf gruppe_shb.
+          <div class="pz-map-base">🗄️ <strong>Überall dabei:</strong> die SharePoint-Liste Bedarfsanfrage auf ${esc(String(WERK.site).split('/').pop())}.
             Was jemand sieht und tun darf, regelt die Zugriffssteuerung: die Abteilung für Gemeinsame Anfragen,
             die Warengruppe für den Einkauf.</div>
         </div>
@@ -234,7 +234,8 @@ async function pzModelleLaden() {
 
 function pzPanelHtml(m) {
   const t = esc(m.tab);
-  const texte = PZ_PANEL[m.tab] || { titel: esc(m.name), lead: '', danach: '' };
+  const roh = PZ_PANEL[m.tab] || { titel: esc(m.name), lead: '', danach: '' };
+  const texte = { titel: pzWerkText(roh.titel), lead: pzWerkText(roh.lead), danach: pzWerkText(roh.danach) };
   return `
     <section class="pz-panel" id="pz-panel-${t}" hidden>
       <div class="pz-head">
@@ -256,6 +257,12 @@ function pzPanelHtml(m) {
 /* Feste Texte je Reiter. Bewusst hier und nicht im Modell: Sie erklären die
    Bedienung der App, das Modell beschreibt den Ablauf. */
 const pzChip = (cls, text) => `<span class="pz-chip ${cls}">${text}</span>`;
+/* PZ_PANEL entsteht beim Laden, das Werk steht erst nach der Anmeldung fest. Deshalb Platzhalter:
+   {{WERK}} wird zum Werksnamen, {{ARCHIV}} zum Satz über Anfragen vor dem Produktivstart (nur wo es ihn gibt). */
+const PZ_ARCHIV_SATZ = ' Anfragen aus der Zeit vor dem Produktivstart am 16.11.2026 sind grau als Archiv markiert und davon ausgenommen, bearbeiten lassen sie sich weiter.';
+function pzWerkText(s) {
+  return String(s || '').split('{{WERK}}').join(esc(WERK.name)).split('{{ARCHIV}}').join(WERK.produktivAb ? PZ_ARCHIV_SATZ : '');
+}
 const PZ_PANEL = {
   haupt: {
     titel: '📝 Bedarfsanfrage',
@@ -270,7 +277,7 @@ const PZ_PANEL = {
             <li>${pzChip('a-mensch', 'Antragsteller')}erfasst die Anfrage im Assistenten, als Einzelanfrage oder als Sammelanfrage mit Positionen. Favoriten und Wiedervorlagen füllen ihn vor. Die App rechnet das Bestellvolumen aus und zeigt den Genehmigungsweg mit der Zahl der Angebote.</li>
             <li>${pzChip('a-app', 'App')}speichert die Anfrage mit dem Status Eingereicht in der SharePoint-Liste. Eine Mail an den Einkauf geht nicht raus.</li>
             <li>${pzChip('a-mensch', 'Antragsteller')}kann die Anfrage in „Meine Anfragen" zurückziehen, solange der Einkauf nicht entschieden hat. Sie steht dann auf Zurückgezogen und ist aus der Bearbeitung.</li>
-            <li>${pzChip('a-mensch', 'Einkauf')}sieht neue Anfragen im Dashboard und unter Gemeinsame Anfragen. Was seit über 48 Stunden offen ist, markiert die App rot. Anfragen aus der Zeit vor dem Produktivstart am 16.11.2026 sind grau als Archiv markiert und davon ausgenommen, bearbeiten lassen sie sich weiter. Öffnet der zuständige Einkäufer die Anfrage, setzt die App den Status auf In Prüfung (Einkauf).</li>
+            <li>${pzChip('a-mensch', 'Einkauf')}sieht neue Anfragen im Dashboard und unter Gemeinsame Anfragen. Was seit über 48 Stunden offen ist, markiert die App rot.{{ARCHIV}} Öffnet der zuständige Einkäufer die Anfrage, setzt die App den Status auf In Prüfung (Einkauf).</li>
             <li>${pzChip('a-mensch', 'Einkauf')}reserviert die Anfrage für sich oder teilt sie einem Kollegen zu, beides gilt bis zum Abschluss. Er holt fehlende Angebote ein, hängt sie an und setzt bei einem Lead-Buyer-Abschluss das Kennzeichen. Dann genehmigt er, lehnt mit Grund ab oder schließt die Anfrage mit Grund ohne Bestellung ab. Bei einer Ablehnung geht keine Mail raus, der Antragsteller sieht sie in „Meine Anfragen".</li>
             <li>${pzChip('a-auto', 'Power Automate')}startet mit dem Status Genehmigt (Einkauf) den Freigabelauf und holt je nach Art und Betrag die Freigaben ein. Ob freigegeben oder abgelehnt, der Antragsteller bekommt vom Flow eine Mail.</li>
             <li>${pzChip('a-mensch', 'Einkauf')}bestellt die freigegebene Anfrage im ERP und trägt Bestellnummer, Liefertermin und tatsächlichen Preis ein. Steht die Bestellnummer schon an einer anderen Anfrage, warnt die App. Danach steht die Anfrage auf Bestellt. Braucht es keine Bestellung, etwa bei einer kostenlosen Entsorgung, schließt er sie mit Grund ab: Erledigt (ohne Bestellung).</li>
@@ -284,7 +291,7 @@ const PZ_PANEL = {
             <tr><td>${pzChip('a-mensch', 'Werkleitung')}</td><td>Ab 1.500 € Bestellvolumen.</td></tr>
             <tr><td>${pzChip('a-mensch', 'Strategischer Einkauf')}</td><td>Ab 10.000 €. Entfällt beim Lead-Buyer-Abschluss.</td></tr>
           </table>
-          <p class="pz-note">Controlling, Werkleitung und strategischer Einkauf genehmigen in Teams oder per Mail, die erste Antwort zählt. Die Wertgrenzen stehen im Flow „Bedarfsanfragen SHB".</p>
+          <p class="pz-note">Controlling, Werkleitung und strategischer Einkauf genehmigen in Teams oder per Mail, die erste Antwort zählt. Die Wertgrenzen stehen im Flow „Bedarfsanfragen {{WERK}}".</p>
         </div>
       </div>
 
@@ -588,7 +595,7 @@ document.addEventListener('fullscreenchange', () => {
 });
 
 /* ── Probelauf: den Freigabeweg mit eigenen Werten durchspielen ──────────────
-   Dieselben Regeln wie im Flow „Bedarfsanfragen SHB" und in der Status-Timeline:
+   Dieselben Regeln wie in den Flows „Bedarfsanfragen SHB" und „Bedarfsanfragen ZAI" und in der Status-Timeline:
    Controlling bei indirektem Material und den Warengruppen 2000, 4333 bis 4338, 4340,
    Werkleitung ab 1.500 €, strategischer Einkauf ab 10.000 € und ohne Lead-Buyer-Abschluss. */
 let plState = null;
@@ -612,7 +619,7 @@ function plBuildStages(preis, art, lead) {
     { role: 'Einkauf', name: 'In Prüfung (Einkauf)', kind: 'decision', applies: true,
       desc: 'Der zuständige Einkauf öffnet die Anfrage, holt fehlende Angebote ein und entscheidet in der App.' },
     { role: 'Power Automate', name: 'Genehmigt (Einkauf): Freigabelauf startet', kind: 'auto', applies: true,
-      desc: 'Mit der Genehmigung des Einkaufs startet der Flow „Bedarfsanfragen SHB".' },
+      desc: `Mit der Genehmigung des Einkaufs startet der Flow „Bedarfsanfragen ${WERK.name}".` },
     { role: 'Controlling', name: 'Freigabe Controlling', kind: 'decision', applies: controlling,
       cond: 'bei indirektem Material und Warengruppen 2000, 4333 bis 4338, 4340', desc: 'Das Controlling gibt die Anfrage frei.' },
     { role: 'Werkleitung', name: 'Freigabe Werkleitung', kind: 'decision', applies: preis >= 1500,

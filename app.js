@@ -16,7 +16,7 @@ const WERKE = {
   shb: { key: 'shb', name: 'SHB', site: 'dihag.sharepoint.com:/sites/gruppe_shb', domains: ['shb-guss.de'],
          stammdaten: true, prozess: true, produktivAb: '2026-11-16T00:00:00+01:00', produktivAbText: '16.11.2026' },
   zai: { key: 'zai', name: 'ZAI', site: 'dihag.sharepoint.com:/sites/gruppe_zaigler', domains: ['dihag-zaigler.com'],
-         stammdaten: false, prozess: false, produktivAb: null, produktivAbText: '' },
+         stammdaten: false, prozess: true, produktivAb: null, produktivAbText: '' },
 };
 const WERK_STANDARD   = 'shb';           // für alle Domänen ohne eigenes Werk
 const HOLDING_DOMAINS = ['dihag.com'];   // diese Konten können zusätzlich in anderen Werken arbeiten
@@ -1365,7 +1365,7 @@ function applyNavVisibility() {
     if (el) el.style.display = vis ? '' : 'none';
   };
   GATED_FEATURES.forEach(f => setVis(f, canAccess(f)));
-  setVis('prozess', !!WERK.prozess);   // Prozessmodelle gibt es bisher nur für SHB
+  setVis('prozess', !!WERK.prozess);   // SHB und ZAI teilen sich die Modelle aus dem RMS (Prozesse/SHB)
   // new, multi, mine, schulung sind für alle sichtbar
 }
 

@@ -105,6 +105,10 @@ console.log('Einbindung');
 pruefe(/await werkFestlegen\(identLauf\);\s*await discoverSP\(\);/.test(app), 'Start legt das Werk fest, bevor die Site gelesen wird');
 pruefe(/if \(WERK\.stammdaten\) loadLookupDataSP\(\)/.test(app), 'Stammdaten nur in Werken, die sie haben');
 pruefe(/if \(view === 'prozess' && !WERK\.prozess\) view = 'mine';/.test(app) && /setVis\('prozess', !!WERK\.prozess\)/.test(app), 'Prozess-Seite nur, wo es Modelle gibt');
+pruefe(wert(k, 'WERKE.zai.prozess') === true && wert(k, 'WERKE.shb.prozess') === true, 'Reiter Prozess in SHB und ZAI');
+{ const pz = fs.readFileSync(new URL('../prozess.js', import.meta.url), 'utf8');
+  pruefe(pz.includes('bei ${esc(WERK.name)}') && pz.includes('Bedarfsanfragen {{WERK}}') && pz.includes('{{ARCHIV}}') && !pz.includes('auf gruppe_shb'),
+    'Prozess-Seite setzt Werk, Flow-Namen und Archiv-Satz je Werk ein'); }
 pruefe(/q\.get\('werk'\)/.test(app) && /banf_startwerk/.test(app), 'Direktlink ?anfrage=…&werk=zai wird gemerkt');
 pruefe(html.includes('id="werk-zeile"'), 'Seitenleiste zeigt das Werk');
 pruefe(!/const SP_SITE\s*=/.test(app), 'keine feste Site mehr im Code');
