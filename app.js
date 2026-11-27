@@ -2259,9 +2259,14 @@ function statusTimeline(statusVal, item) {
   const needsStrategisch = preis >= FREIGABE_STRATEGISCH_AB && !leadBuyer;
 
   // Anwendbare Stufen in Workflow-Reihenfolge (nur tatsächlich getriggerte)
+  // Vorrang vor der Vorhersage hat, was wirklich passiert ist: Steht die Anfrage auf einer Stufe
+  // oder trägt eine Stufe schon ihren Genehmiger, gehört sie in die Leiste. Sonst verschwindet sie,
+  // wenn jemand nach dem Flow-Start Beschaffungsart, Warengruppe oder Preis ändert (#378, 25.11.2026).
+  const erreicht = st => (sv && st.test(sv)) || (st.approverField && !/entscheider/i.test(st.approverField) && !!resolvePersonField(fields, st.approverField));
   const applies = st => {
     if (/in bestellung/i.test(st.label)) return false;
     if (/^abgelehnt$/i.test(st.label))   return false;
+    if (erreicht(st))                    return true;
     if (/controlling/i.test(st.label))   return isDienstleistung;
     if (/werkleitung/i.test(st.label))   return needsWerkleitung;
     if (/strategisch/i.test(st.label))   return needsStrategisch;

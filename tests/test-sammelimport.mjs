@@ -212,6 +212,23 @@ const detail = stueck('function renderDetail(id)', '// Bind update button');
 pruefe(detail.includes("fd.key !== 'Positionen'") && detail.includes('positionenTabelle(') && !detail.includes('Weitere Felder aus SharePoint'),
   'Detailseite: Positionen als Tabelle, kein Kasten „Weitere Felder aus SharePoint“');
 
+console.log('Verlauf (Status-Zeitleiste)');
+// #378: Der Flow setzte Controlling bei indirektem Material, danach stellte der Einkauf auf Bestandsmaterial um.
+// Die Leiste muss die erreichte Stufe trotzdem zeigen, statt nur „Eingereicht“ abzuhaken.
+const stufenQuelle = stueck('const TIMELINE_STAGES = [', '// Workflow-Reihenfolge');
+const tlStart = app.indexOf('function statusTimeline(');
+const tlQuelle = app.slice(tlStart, app.indexOf('function ', tlStart + 30));
+const tl = vm.createContext({ esc: hk.esc, resolvedFields: {}, statusChoices: [], spUserMap: {},
+  getField: (item, k) => (item.fields || {})[k] });
+vm.runInContext(stufenQuelle + tlQuelle + '; this.statusTimeline = statusTimeline;', tl);
+const verlauf = felder => { const h = tl.statusTimeline(felder.Stauts, { fields: felder });
+  return [...h.matchAll(/ap-dot ([a-z-]+)">[^<]*<[^]*?ap-stage-label[^>]*>([^<]+)</g)].map(m => (m[1] === 'ap-ok' ? '✓ ' : m[1] === 'ap-pending' ? '● ' : '○ ') + m[2]); };
+const v378 = verlauf({ Stauts: 'In Prüfung (Controlling)', Beschaffungslogik: 'Bestandsmaterial (bestandsgeführt)', Warengruppe: '4320 – Ersatzteile', GeschaetzterPreis: '93.06' });
+pruefe(JSON.stringify(v378) === JSON.stringify(['✓ Eingereicht', '✓ Genehmigt (Einkauf)', '● In Prüfung (Controlling)', '○ Freigegeben', '○ Bestellt']),
+  'Status Controlling bleibt in der Leiste, auch wenn die Felder es nicht mehr verlangen: ' + v378.join(', '));
+const vNormal = verlauf({ Stauts: 'In Prüfung (Werkleitung)', Beschaffungslogik: 'Bestandsmaterial (bestandsgeführt)', Warengruppe: '4320 – Ersatzteile', GeschaetzterPreis: '2000' });
+pruefe(!vNormal.some(z => z.includes('Controlling')) && vNormal.includes('● In Prüfung (Werkleitung)'), 'ohne Controlling-Bedarf erscheint die Stufe weiter nicht');
+
 console.log('Abteilung vorbelegen');
 const abtFn = stueck('function eigeneAbteilung()', '// Rich-Text-Spalten');
 const ab = vm.createContext({ abteilungen: ['Instandhaltung', 'Putzerei', 'QS', 'Einkauf/Wareneingang'], accessUsers: {}, ich: ['person.a@example.test'],
